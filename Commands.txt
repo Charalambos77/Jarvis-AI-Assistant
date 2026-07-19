@@ -1,0 +1,3 @@
+Jarvis exit completely
+Jarvis end the conversation without exiting the app
+Jarvis end the conversation

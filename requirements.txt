@@ -1,0 +1,9 @@
+openwakeword
+pyaudio
+SpeechRecognition
+pyttsx3
+google-genai
+python-dotenv
+numpy
+pywebview
+flask

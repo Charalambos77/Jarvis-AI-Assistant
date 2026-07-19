@@ -1,0 +1,25 @@
+# API Keys & Local Configuration
+.env
+
+# SQLite Databases & Local Storage
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Python Environment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environments
+venv/
+ven/
+.venv/
+env/
+ENV/
+
+# OS specific files
+.DS_Store
+Thumbs.db
