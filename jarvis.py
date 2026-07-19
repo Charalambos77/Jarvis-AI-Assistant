@@ -122,18 +122,63 @@ def set_orb(state):
 def speak(text: str):
     print(f"[Jarvis] {text}")
     set_orb("speaking")
-    # Fresh engine each call - reusing one instance can silently stop working
-    # after the first use on Windows.
-    engine = pyttsx3.init()
     
-    # Configure speed/rate from settings
-    with SETTINGS_LOCK:
-        speed = SETTINGS.get("voice_speed", 175)
-    engine.setProperty('rate', int(speed))
+    eleven_key = os.getenv("ELEVENLABS_API_KEY")
+    eleven_voice = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
     
-    engine.say(text)
-    engine.runAndWait()
-    engine.stop()
+    played_via_eleven = False
+    if eleven_key:
+        try:
+            import requests
+            import tempfile
+            import ctypes
+            
+            url = f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice}"
+            headers = {
+                "xi-api-key": eleven_key,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "text": text,
+                "model_id": "eleven_turbo_v2",
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.75
+                }
+            }
+            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                    f.write(res.content)
+                    temp_path = f.name
+                
+                path_str = os.path.abspath(temp_path)
+                ctypes.windll.winmm.mciSendStringW(f'open "{path_str}" type mpegvideo alias jarvis_voice', None, 0, 0)
+                ctypes.windll.winmm.mciSendStringW('play jarvis_voice wait', None, 0, 0)
+                ctypes.windll.winmm.mciSendStringW('close jarvis_voice', None, 0, 0)
+                
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+                played_via_eleven = True
+            else:
+                print(f"[ElevenLabs Error] {res.status_code}: {res.text}")
+        except Exception as e:
+            print(f"[ElevenLabs Exception] {e}")
+
+    if not played_via_eleven:
+        try:
+            engine = pyttsx3.init()
+            with SETTINGS_LOCK:
+                speed = SETTINGS.get("voice_speed", 175)
+            engine.setProperty('rate', int(speed))
+            engine.say(text)
+            engine.runAndWait()
+            engine.stop()
+        except Exception as e:
+            print(f"[Local TTS Error] {e}")
+            
     set_orb("idle")
 
 
