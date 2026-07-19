@@ -598,9 +598,18 @@ def mic_loop(window):
 
     print("Jarvis is running. Say 'Hey Jarvis' to activate. Ctrl+C to quit.")
 
+    # Sliding buffer of the last 2.0 seconds of audio (16000 samples/sec * 2 bytes/sample * 2.0 sec = 64000 bytes)
+    buffer = bytearray()
+    buffer_limit = 64000
+
     try:
         while True:
-            audio_chunk = np.frombuffer(stream.read(CHUNK_SIZE, exception_on_overflow=False), dtype=np.int16)
+            raw_data = stream.read(CHUNK_SIZE, exception_on_overflow=False)
+            buffer.extend(raw_data)
+            if len(buffer) > buffer_limit:
+                buffer = buffer[-buffer_limit:]
+                
+            audio_chunk = np.frombuffer(raw_data, dtype=np.int16)
             prediction = oww_model.predict(audio_chunk)
 
             threshold = get_wake_word_threshold()
@@ -609,10 +618,26 @@ def mic_loop(window):
                 print("\nWake word detected!")
                 oww_model.reset()
 
+                # Determine whether they said "Hey Jarvis" or just "Jarvis"
+                greeting = "Hello Sir, how can I help you?"
+                try:
+                    wake_audio = bytes(buffer)
+                    recognizer = sr.Recognizer()
+                    sr_audio = sr.AudioData(wake_audio, 16000, 2)
+                    text = recognizer.recognize_google(sr_audio).lower()
+                    print(f"[wake analysis] {text}")
+                    if "hey" in text:
+                        greeting = "Hello Sir, how can I help you?"
+                    elif "jarvis" in text:
+                        greeting = "Yes Sir?"
+                except Exception as e:
+                    # Default fallback
+                    pass
+
                 window.show()
 
-                push_message("ai", "Hello Harry, how can I help you?")
-                speak("Hello Harry, how can I help you?")
+                push_message("ai", greeting)
+                speak(greeting)
 
                 in_conversation = True
                 while in_conversation:
