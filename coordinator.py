@@ -270,6 +270,12 @@ def parse_tool_request(text: str) -> tuple[str, dict] | None:
     return None
 
 
+tool_listeners = []
+
+def register_tool_listener(listener):
+    tool_listeners.append(listener)
+
+
 def fallback_message() -> str:
     available = ", ".join(sorted(TOOL_IMPL.keys()))
     return (
@@ -286,6 +292,11 @@ def handle_request(transcript: str) -> str:
         if tool_call is not None:
             name, args = tool_call
             result = perform_tool_action(conn, name, **args)
+            for listener in tool_listeners:
+                try:
+                    listener(name, args, result)
+                except Exception as e:
+                    print(f"Error in tool listener: {e}")
             return format_tool_response(result)
 
         if not has_gemini():
@@ -305,6 +316,11 @@ def handle_request(transcript: str) -> str:
                 print(f"[tool call] {fname}({fargs})")
                 try:
                     result = perform_tool_action(conn, fname, **fargs)
+                    for listener in tool_listeners:
+                        try:
+                            listener(fname, fargs, result)
+                        except Exception as e:
+                            print(f"Error in tool listener: {e}")
                 except Exception as e:
                     result = {"error": str(e)}
                 response_parts.append(

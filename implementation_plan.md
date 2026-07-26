@@ -86,7 +86,7 @@ This plan splits Jarvis into logical agent roles without requiring remote server
 
 ---
 
-## Optional future extensions
+## Optional future extension
 
 After the local multiagent design works, you can later add these without major rewrites:
 
