@@ -209,10 +209,11 @@ if has_gemini():
             "If the user speaks about a specific task, or asks to show/open/focus on it, "
             "you MUST invoke 'focus_tasks' with its ID. If multiple tasks seem to match "
             "or if there is ambiguity, invoke 'focus_tasks' with all potential matching task IDs "
-            "so the UI can highlight them and let the user narrow it down. Keep replies short "
-            "and conversational since they'll be read aloud. When the user asks to interact "
-            "with an external service or connect to a system outside the local database, "
-            "you may use call_external_api or call_mcp, but only if the user explicitly requires it."
+            "so the UI can highlight them and let the user narrow it down. "
+            "CRITICAL: Keep replies extremely brief, concise, and conversational (ideally under 1-2 sentences) "
+            "since they'll be read aloud. Avoid long explanations."
+            "When the user asks to interact with an external service or connect to a system "
+            "outside the local database, you may use call_external_api or call_mcp, but only if the user explicitly requires it."
         ),
         tools=[
             {"function_declarations": TOOLS},
@@ -285,6 +286,38 @@ def fallback_message() -> str:
     )
 
 
+def proofread_text(text: str) -> str:
+    """
+    Checks the given text for spelling and grammatical errors, correcting them
+    to ensure smooth delivery without changing the meaning or style.
+    """
+    if not text or not has_gemini() or client is None:
+        return text
+
+    prompt = (
+        "You are an assistant's output proofreader. Review the following text for spelling, "
+        "grammatical errors, and typos. Correct them so it reads naturally and is ready to be spoken. "
+        "Do NOT change the style, tone, or information content. Keep it short. "
+        "Return ONLY the corrected text, with no preamble, comments, or quotes.\n\n"
+        f"Text: {text}"
+    )
+    try:
+        res = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=prompt,
+        )
+        if res.text:
+            cleaned = res.text.strip()
+            if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+                cleaned = cleaned[1:-1].strip()
+            if cleaned != text:
+                print(f"[Proofreader] Corrected: '{text}' -> '{cleaned}'")
+            return cleaned
+    except Exception as e:
+        print(f"Error proofreading text: {e}")
+    return text
+
+
 def handle_request(transcript: str) -> str:
     conn = db.get_connection(DB_PATH)
     try:
@@ -332,6 +365,7 @@ def handle_request(transcript: str) -> str:
 
             response = chat.send_message(response_parts)
 
-        return response.text
+        return proofread_text(response.text)
     finally:
         conn.close()
+
