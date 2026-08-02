@@ -408,29 +408,29 @@
         const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
         camera.position.z = 2.5;
 
-        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: "high-performance" });
         renderer.setSize(600, 600);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(renderer.domElement);
 
-        // Generate a soft radial gradient texture for the smoke particles
+        // Generate a high-resolution radial gradient texture for sharp, crisp particles
         const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
+        canvas.width = 256;
+        canvas.height = 256;
         const ctx = canvas.getContext('2d');
-        const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+        const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
         gradient.addColorStop(0, 'rgba(255,255,255,1)');
         gradient.addColorStop(0.12, 'rgba(255,255,255,1)');
         gradient.addColorStop(0.25, 'rgba(180,210,255,0.85)');
         gradient.addColorStop(0.55, 'rgba(150,180,255,0.25)');
         gradient.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 64, 64);
+        ctx.fillRect(0, 0, 256, 256);
         const texture = new THREE.CanvasTexture(canvas);
 
-        // Particle system with outward motion
+        // Particle system with outward motion - Higher count, smaller size for high definition
         const smokeGeo = new THREE.BufferGeometry();
-        const smokeCount = 3500;
+        const smokeCount = 7000;
         const posArray = new Float32Array(smokeCount * 3);
         const colorArray = new Float32Array(smokeCount * 3);
 
@@ -474,10 +474,10 @@
         smokeGeo.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
 
         const smokeMat = new THREE.PointsMaterial({
-            size: 0.14,
+            size: 0.045, // Sharp stardust nodes
             map: texture,
             transparent: true,
-            opacity: 0.7,
+            opacity: 0.8,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
             vertexColors: true
@@ -486,12 +486,12 @@
         const nebula = new THREE.Points(smokeGeo, smokeMat);
         scene.add(nebula);
 
-        // Add a secondary inner dense rotating core (keeps center solid and bright)
+        // Add a secondary inner dense rotating core (keeps center solid, bright, and powerful)
         const coreGeo = new THREE.BufferGeometry();
-        const coreCount = 1000;
+        const coreCount = 3500;
         const corePosArray = new Float32Array(coreCount * 3);
         for (let i = 0; i < coreCount * 3; i += 3) {
-            let r = Math.pow(Math.random(), 1.5) * 0.4;
+            let r = Math.pow(Math.random(), 1.2) * 0.58; // Expanded core volume
             let theta = Math.random() * 2 * Math.PI;
             let phi = Math.acos(2 * Math.random() - 1);
             corePosArray[i] = r * Math.sin(phi) * Math.cos(theta);
@@ -501,10 +501,10 @@
         coreGeo.setAttribute('position', new THREE.BufferAttribute(corePosArray, 3));
 
         const coreMat = new THREE.PointsMaterial({
-            size: 0.09,
+            size: 0.038, // Bold, high-energy core particles
             map: texture,
             transparent: true,
-            opacity: 0.45,
+            opacity: 0.7,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
             color: 0xffffff
@@ -916,10 +916,11 @@
 
             const dx = e.clientX - cx;
             const dy = e.clientY - cy;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            // Convert screen coordinates distance to map-wrapper coordinate space (accounting for the 0.8 scale)
+            const distance = Math.sqrt(dx * dx + dy * dy) / 0.8;
 
-            // If mouse is inside the center core, don't trigger department hover
-            if (distance < 75) {
+            // Hover starts inside the outer branches (520px) and stops inside the department circle (200px)
+            if (distance < 200 || distance > 520) {
                 clearHoverHighlight();
                 return;
             }
@@ -986,7 +987,7 @@
             });
         }, 30);
 
-        // Click Event -> Drill Down OR Open Panel
+        // Click Event -> Drill Down OR Open Panel and Zoom in
         cy.on('tap', 'node', function (evt) {
             let node = evt.target;
             let d = node.data();
@@ -998,7 +999,7 @@
                 return;
             }
 
-            // We are in drill down view. Open the panel!
+            // We are in drill down view. Open the panel and zoom onto the node!
             document.getElementById('panel-title').innerText = d.label || 'Sub-Agent';
             document.getElementById('panel-type').innerText = d.type.toUpperCase().replace('_', ' ');
 
@@ -1009,21 +1010,58 @@
             }
 
             document.getElementById('side-panel').classList.add('open');
+
+            // Zoom on node, shifting it to the right to prevent overlap with side panel
+            const targetZoom = 2.0;
+            const targetX = (window.innerWidth / 2) + 150;
+            const targetY = window.innerHeight / 2;
+            cy.animate({
+                zoom: targetZoom,
+                pan: {
+                    x: targetX - (node.position().x * targetZoom),
+                    y: targetY - (node.position().y * targetZoom)
+                }
+            }, {
+                duration: 650,
+                easing: 'ease-out-cubic'
+            });
         });
 
         cy.on('tap', function (evt) {
-            if (evt.target === cy) closePanel();
+            if (evt.target === cy) {
+                if (!isDrillDownMode && activeDeptId) {
+                    enterDrillDown(activeDeptId);
+                } else {
+                    closePanel();
+                }
+            }
         });
+
+        function resetBranchZoom() {
+            cy.animate({
+                zoom: 1.0,
+                pan: { x: 0, y: 0 }
+            }, {
+                duration: 600,
+                easing: 'ease-out-cubic'
+            });
+        }
 
         function closePanel() {
             document.getElementById('side-panel').classList.remove('open');
+            if (isDrillDownMode && !isTransitioning) {
+                resetBranchZoom();
+            }
         }
 
-        // Drill Down Logic
         function enterDrillDown(deptId) {
             isDrillDownMode = true;
             currentDrillDept = deptId;
             isTransitioning = true;
+
+            // Reset pan/zoom coordinates to default before arranging nodes
+            cy.zoom(1.0);
+            cy.pan({ x: 0, y: 0 });
 
             // Clean hover states
             cy.elements().removeClass('dimmed highlighted');
@@ -1107,12 +1145,19 @@
             setTimeout(() => { isTransitioning = false; }, 800);
         }
 
-        // Exit Drill Down via Mouse Bottom Edge
+        // Exit Drill Down via Mouse going below the root department node
         window.addEventListener('mousemove', (e) => {
             if (isDrillDownMode && !isTransitioning) {
-                // If mouse goes all the way down to bottom 20px
-                if (e.clientY >= window.innerHeight - 20) {
-                    exitDrillDown();
+                const deptNode = cy.getElementById(currentDrillDept);
+                if (deptNode && deptNode.length > 0) {
+                    const cyCenterY = (window.innerHeight / 2) + 40;
+                    // Project the node's position into screen coordinates (accounting for 0.8 scale from center)
+                    const nodeScreenY = (window.innerHeight / 2) + (deptNode.position().y - cyCenterY) * 0.8;
+                    
+                    // Exit if mouse goes 25px below the center of the root node
+                    if (e.clientY >= nodeScreenY + 25) {
+                        exitDrillDown();
+                    }
                 }
             }
         });
