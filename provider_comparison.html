@@ -1,0 +1,3483 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis // Provider Comparison Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    /* --- Cyberpunk / Glassmorphic Custom Theme System --- */
+    :root {
+      --void: #060814;
+      --panel: rgba(10, 15, 30, 0.7);
+      --panel-border: rgba(0, 242, 254, 0.15);
+      --cyan: #00f2fe;
+      --cyan-glow: rgba(0, 242, 254, 0.4);
+      --neon-pink: #ff007f;
+      --neon-pink-glow: rgba(255, 0, 127, 0.4);
+      --violet: #7c6cf0;
+      --violet-glow: rgba(124, 108, 240, 0.4);
+      --amber: #ffd000;
+      --amber-glow: rgba(255, 208, 0, 0.4);
+      --emerald: #10b981;
+      --emerald-glow: rgba(16, 185, 129, 0.4);
+      --fog: #ffffff;
+      --ink: #f8fafc;
+      --text-main: #ffffff;
+      --text-muted: #f8fafc;
+    }
+
+
+    body.light-mode {
+      --void: #f1f5f9;
+      --panel: rgba(255, 255, 255, 0.85);
+      --panel-border: rgba(148, 163, 184, 0.25);
+      --cyan: #0284c7;
+      --cyan-glow: rgba(2, 132, 199, 0.25);
+      --neon-pink: #db2777;
+      --neon-pink-glow: rgba(219, 39, 119, 0.25);
+      --violet: #4f46e5;
+      --violet-glow: rgba(79, 70, 229, 0.25);
+      --amber: #d97706;
+      --amber-glow: rgba(217, 119, 6, 0.25);
+      --emerald: #059669;
+      --emerald-glow: rgba(5, 150, 105, 0.25);
+      --fog: #475569;
+      --ink: #0f172a;
+      --text-main: #0f172a;
+      --text-muted: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      background: var(--void);
+      color: var(--ink);
+      font-family: 'Inter', sans-serif;
+      transition: background 0.5s ease;
+    }
+
+    .mono {
+      font-family: 'Space Mono', monospace;
+    }
+
+    /* Ambient Grid Overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--panel-border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--panel-border) 1px, transparent 1px);
+      background-size: 48px 48px;
+      opacity: 0.25;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 40px 24px;
+      position: relative;
+      z-index: 2;
+    }
+
+    /* --- Header --- */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 24px;
+      margin-bottom: 40px;
+    }
+
+    .title-group h1 {
+      font-family: 'Space Mono', monospace;
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      margin: 0;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, var(--cyan), var(--neon-pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .title-group p {
+
+      font-size: 13px;
+      color: var(--text-muted);
+      margin: 6px 0 0 0;
+    }
+
+    .theme-selector {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--panel-border);
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+
+    .theme-btn {
+
+      background: transparent;
+      border: none;
+      color: var(--text-main);
+      font-size: 11px;
+      text-transform: uppercase;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 2px;
+      transition: all 0.2s;
+    }
+
+    .theme-btn.active {
+      background: var(--cyan);
+      color: var(--void);
+      font-weight: bold;
+      box-shadow: 0 0 8px var(--cyan-glow);
+    }
+
+    /* --- Dashboard Grid --- */
+    .grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 32px;
+    }
+
+    @media (max-width: 1100px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* --- Glass Panels --- */
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      margin-bottom: 24px;
+    }
+
+    .panel-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: var(--cyan);
+      margin-top: 0;
+      margin-bottom: 20px;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* --- Categories & Cards --- */
+    .category-container {
+      margin-bottom: 30px;
+    }
+
+    .category-header {
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+      color: var(--violet);
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .category-header::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--panel-border);
+    }
+
+    .options-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .option-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 6px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      border-left: 3px solid transparent;
+    }
+
+    .option-card:hover {
+      background: rgba(0, 242, 254, 0.03);
+      border-color: rgba(0, 242, 254, 0.2);
+      transform: translateY(-2px);
+    }
+
+    .option-card.selected {
+      background: rgba(124, 108, 240, 0.08);
+      border-color: var(--violet);
+      border-left-color: var(--cyan);
+      box-shadow: 0 0 15px rgba(124, 108, 240, 0.15);
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+
+    .card-name {
+
+      font-size: 19px;
+
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .card-badge {
+
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      font-weight: bold;
+      border: 1px solid transparent;
+    }
+
+    .card-badge.api {
+      background: rgba(0, 242, 254, 0.1);
+      color: var(--cyan);
+      border-color: var(--cyan);
+    }
+
+    .card-badge.mcp {
+      background: rgba(255, 0, 127, 0.1);
+      color: var(--neon-pink);
+      border-color: var(--neon-pink);
+    }
+
+    .card-badge.custom {
+      background: rgba(124, 108, 240, 0.1);
+      color: var(--violet);
+      border-color: var(--violet);
+    }
+
+    .card-description {
+
+      font-size: 14.5px;
+
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin-bottom: 12px;
+    }
+
+    .card-details-row {
+
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      font-size: 13.5px;
+      border-top: 1px solid rgba(255, 255, 255, 0.03);
+      padding-top: 10px;
+      margin-bottom: 12px;
+    }
+
+    .card-detail {
+
+      color: var(--text-muted);
+    }
+
+    .card-detail strong {
+
+      color: var(--text-main);
+    }
+
+    /* --- Score Bar Grid --- */
+    .scores-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+
+    .score-bar-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .score-label {
+
+      font-size: 10px;
+
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .score-bar-container {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .score-bar {
+      height: 100%;
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Color mapping for scores */
+    .score-bar.perf {
+      background: var(--cyan);
+    }
+
+    .score-bar.price {
+      background: var(--emerald);
+    }
+
+    .score-bar.trial {
+      background: var(--amber);
+    }
+
+    .score-bar.dx {
+      background: var(--violet);
+    }
+
+    .score-bar.rel {
+      background: var(--neon-pink);
+    }
+
+    /* --- Interactive Calculator & Planner --- */
+    .calculator-section {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .calc-slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .calc-label-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-main);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .calc-val {
+      font-family: 'Space Mono', monospace;
+      color: var(--cyan);
+      font-weight: bold;
+    }
+
+    .calc-slider {
+      width: 100%;
+      accent-color: var(--cyan);
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 4px;
+      height: 6px;
+      outline: none;
+    }
+
+    .price-indicator {
+      background: rgba(16, 185, 129, 0.06);
+      border: 1px dashed var(--emerald);
+      border-radius: 6px;
+      padding: 16px;
+      text-align: center;
+      margin-top: 10px;
+    }
+
+    .price-total {
+      font-family: 'Space Mono', monospace;
+      font-size: 36px;
+      font-weight: 700;
+      color: var(--emerald);
+      margin: 8px 0;
+    }
+
+    .price-label {
+      font-size: 11px;
+      color: var(--text-main);
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+    }
+
+    /* --- Selected Architecture Panel --- */
+    .stack-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .stack-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+
+    .stack-layer {
+      color: var(--text-main);
+      font-weight: bold;
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.05em;
+    }
+
+    .stack-selection {
+      color: var(--cyan);
+      font-weight: 600;
+    }
+
+    .export-btn {
+      width: 100%;
+      background: linear-gradient(90deg, var(--violet), var(--cyan));
+      color: var(--void);
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      border: none;
+      border-radius: 4px;
+      padding: 12px;
+      cursor: pointer;
+      margin-top: 16px;
+      transition: all 0.2s;
+      box-shadow: 0 0 10px rgba(124, 108, 240, 0.3);
+    }
+
+    .export-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 0 20px rgba(0, 242, 254, 0.5);
+    }
+
+    .export-area {
+      margin-top: 16px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--panel-border);
+      border-radius: 4px;
+      padding: 12px;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--text-main);
+      white-space: pre-wrap;
+      max-height: 150px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    /* --- Details Modal/Drawer --- */
+    .drawer-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(6, 8, 20, 0.85);
+      backdrop-filter: blur(8px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+      z-index: 100;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .drawer-overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .drawer {
+      width: min(560px, 100vw);
+      background: var(--void);
+      border-left: 1px solid var(--panel-border);
+      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+      padding: 40px 32px;
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow-y: auto;
+      height: 100%;
+    }
+
+    .drawer-overlay.show .drawer {
+      transform: translateX(0);
+    }
+
+    .drawer-close {
+      background: transparent;
+      border: 1px solid var(--panel-border);
+      color: var(--text-main);
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      padding: 6px 12px;
+      margin-bottom: 24px;
+      transition: all 0.2s;
+    }
+
+    .drawer-close:hover {
+      color: var(--cyan);
+      border-color: var(--cyan);
+      background: rgba(0, 242, 254, 0.08);
+    }
+
+    .drawer-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 20px;
+      color: var(--text-main);
+      margin: 0 0 6px 0;
+    }
+
+    .drawer-subtitle {
+      font-size: 12px;
+      color: var(--text-main);
+      margin-bottom: 24px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .drawer-section {
+      border-top: 1px solid var(--panel-border);
+      padding-top: 20px;
+      margin-top: 24px;
+    }
+
+    .drawer-section-title {
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      color: var(--violet);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+
+    .drawer-metric {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .drawer-metric-label {
+      color: var(--text-main);
+    }
+
+    .drawer-metric-val {
+      color: var(--text-main);
+      font-weight: 600;
+    }
+
+    .score-detail-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .score-detail-row {
+      display: grid;
+      grid-template-columns: 100px 30px 1fr;
+      align-items: center;
+      font-size: 12px;
+      gap: 12px;
+    }
+
+    .score-name {
+      font-weight: 500;
+      color: var(--text-main);
+    }
+
+    .score-num {
+      font-family: 'Space Mono', monospace;
+      color: var(--text-main);
+      text-align: right;
+    }
+
+    .score-progress-container {
+      height: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 3px;
+    }
+
+    .score-progress-bar {
+      height: 100%;
+      border-radius: 3px;
+      width: 0%;
+      transition: width 0.5s ease;
+    }
+
+    .checklist {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .checklist-item {
+      font-size: 12.5px;
+      color: var(--text-main);
+      line-height: 1.5;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .checklist-item::before {
+      content: '✓';
+      color: var(--emerald);
+      font-weight: bold;
+    }
+
+    .checklist-item.warning::before {
+      content: '⚠';
+      color: var(--amber);
+    }
+  </style>
+</head>
+
+<body class="theme-cyberpunk">
+
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="title-group">
+        <h1>Jarvis // Provider Directory & Comparison</h1>
+        <p>Compare, price-calculate, and select alternative APIs and MCPs for the Automated Video Machine stack.</p>
+      </div>
+      <div class="theme-selector">
+        <button class="theme-btn" onclick="toggleLightMode(this)"
+          style="border: 1px solid var(--panel-border); margin-right: 12px; font-weight: bold;">Toggle
+          Light/Dark</button>
+        <button class="theme-btn active" onclick="setTheme('cyberpunk', this)">Cyberpunk</button>
+        <button class="theme-btn" onclick="setTheme('synthwave', this)">Synthwave</button>
+        <button class="theme-btn" onclick="setTheme('minimal', this)">Minimal</button>
+      </div>
+    </header>
+
+    <!-- Filters Bar -->
+    <div class="panel filters-bar"
+      style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; padding: 16px 24px;">
+      <span class="mono"
+        style="font-size: 11px; text-transform: uppercase; color: var(--cyan); letter-spacing: 0.1em; font-weight: bold;">Filter
+        Stack:</span>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label class="mono" style="font-size: 10px; text-transform: uppercase; color: var(--text-main);">List
+          by:</label>
+        <select id="sort-by" onchange="filterProviders()"
+          style="background: var(--void); border: 1px solid var(--panel-border); color: var(--text-main); font-size: 11px; padding: 4px 8px; border-radius: 4px; outline: none;">
+          <option value="rank">Category Rank</option>
+          <option value="performance">Performance Power</option>
+          <option value="price">Price/Cost Score</option>
+          <option value="trial">Free Trial Size</option>
+          <option value="dx">Dev Experience (DX)</option>
+          <option value="reliability">Safety/Reliability</option>
+        </select>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label class="mono"
+          style="font-size: 10px; text-transform: uppercase; color: var(--text-main);">Goal/Category:</label>
+        <select id="filter-category" onchange="filterProviders()"
+          style="background: var(--void); border: 1px solid var(--panel-border); color: var(--text-main); font-size: 11px; padding: 4px 8px; border-radius: 4px; outline: none;">
+          <option value="all">All Categories</option>
+          <option value="llm">1. Scripting & Logic</option>
+          <option value="video">2. Video Production</option>
+          <option value="search">3. Web Search & Intel</option>
+          <option value="posting">4. Browser Automation & Posting</option>
+          <option value="yt">5. YouTube Research</option>
+        </select>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label class="mono" style="font-size: 10px; text-transform: uppercase; color: var(--text-main);">Integration
+          Type:</label>
+        <select id="filter-type" onchange="filterProviders()"
+          style="background: var(--void); border: 1px solid var(--panel-border); color: var(--text-main); font-size: 11px; padding: 4px 8px; border-radius: 4px; outline: none;">
+          <option value="all">All Types</option>
+          <option value="api">Official APIs</option>
+          <option value="mcp">MCP Servers</option>
+          <option value="custom">Custom/Open Source</option>
+        </select>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label class="mono" style="font-size: 10px; text-transform: uppercase; color: var(--text-main);">Free
+          Trial:</label>
+        <select id="filter-trial" onchange="filterProviders()"
+          style="background: var(--void); border: 1px solid var(--panel-border); color: var(--text-main); font-size: 11px; padding: 4px 8px; border-radius: 4px; outline: none;">
+          <option value="all">Any Trial</option>
+          <option value="generous">Generous Free Tiers (Score 70+)</option>
+          <option value="paid-only">Paid / Limited Trials</option>
+        </select>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label class="mono" style="font-size: 10px; text-transform: uppercase; color: var(--text-main);">Dev Experience
+          (DX):</label>
+        <select id="filter-dx" onchange="filterProviders()"
+          style="background: var(--void); border: 1px solid var(--panel-border); color: var(--text-main); font-size: 11px; padding: 4px 8px; border-radius: 4px; outline: none;">
+          <option value="all">Any DX</option>
+          <option value="easy">Easy to Integrate (Score 80+)</option>
+        </select>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label class="mono" style="font-size: 10px; text-transform: uppercase; color: var(--text-main);">Safety /
+          Reliability:</label>
+        <select id="filter-safety" onchange="filterProviders()"
+          style="background: var(--void); border: 1px solid var(--panel-border); color: var(--text-main); font-size: 11px; padding: 4px 8px; border-radius: 4px; outline: none;">
+          <option value="all">Any Safety</option>
+          <option value="high">High Safety/Official (Score 80+)</option>
+        </select>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label class="mono" style="font-size: 10px; text-transform: uppercase; color: var(--text-main);">Performance
+          Power:</label>
+        <select id="filter-perf" onchange="filterProviders()"
+          style="background: var(--void); border: 1px solid var(--panel-border); color: var(--text-main); font-size: 11px; padding: 4px 8px; border-radius: 4px; outline: none;">
+          <option value="all">All Power Levels</option>
+          <option value="high">High Power (Score 85+)</option>
+          <option value="medium">Medium Power (Score 60-84)</option>
+          <option value="low">Low Power (Score < 60)</option>
+        </select>
+      </div>
+
+      <button class="mono" onclick="resetFilters()"
+        style="background: transparent; border: 1px solid var(--neon-pink); color: var(--neon-pink); font-size: 10px; padding: 4px 10px; border-radius: 4px; cursor: pointer; margin-left: auto; transition: all 0.2s;">
+        Reset
+      </button>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="grid">
+      <!-- Left: Directory -->
+      <div>
+        <!-- 1. LLM & Scripting -->
+        <div class="panel" id="panel-llm">
+          <div class="panel-title">1. Scripting & Logic (LLM APIs)</div>
+          <div class="options-list" id="llm-options"></div>
+        </div>
+
+        <!-- 2. Video Gen -->
+        <div class="panel" id="panel-video">
+          <div class="panel-title">2. Video Production (Avatar / Cloud Rendering)</div>
+          <div class="options-list" id="video-options"></div>
+        </div>
+
+        <!-- 3. Web Search -->
+        <div class="panel" id="panel-search">
+          <div class="panel-title">3. Web Search & Intelligence APIs / MCPs</div>
+          <div class="options-list" id="search-options"></div>
+        </div>
+
+        <!-- 4. Automation -->
+        <div class="panel" id="panel-posting">
+          <div class="panel-title">4. Browser Automation & Posting API / MCPs</div>
+          <div class="options-list" id="posting-options"></div>
+        </div>
+
+        <!-- 5. YouTube Research -->
+        <div class="panel" id="panel-yt">
+          <div class="panel-title">5. YouTube Research / Metadata APIs</div>
+          <div class="options-list" id="yt-options"></div>
+        </div>
+      </div>
+
+      <!-- Right: Sticky Planner / Calculator -->
+      <div style="position: sticky; top: 24px; height: fit-content;">
+        <!-- Selected Stack Panel -->
+        <div class="panel">
+          <div class="panel-title">Current Architecture Stack</div>
+          <div class="stack-list" id="current-stack-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Cost Planner -->
+        <div class="panel">
+          <div class="panel-title">Operating Budget Planner</div>
+          <div class="calculator-section">
+            <div class="calc-slider-group">
+              <div class="calc-label-row">
+                <span>Videos per Month</span>
+                <span class="calc-val" id="videos-count-val">10</span>
+              </div>
+              <input type="range" id="videos-count-slider" class="calc-slider" min="1" max="100" value="10">
+            </div>
+
+            <div class="calc-slider-group">
+              <div class="calc-label-row">
+                <span>Avg Video Duration</span>
+                <span class="calc-val" id="video-dur-val">1.0m (60s)</span>
+              </div>
+              <input type="range" id="video-dur-slider" class="calc-slider" min="10" max="300" step="10" value="60">
+            </div>
+
+            <div class="calc-slider-group">
+              <div class="calc-label-row">
+                <span>Est. Tokens / Video</span>
+                <span class="calc-val" id="tokens-val">50,000</span>
+              </div>
+              <input type="range" id="tokens-slider" class="calc-slider" min="5000" max="200000" step="5000"
+                value="50000">
+            </div>
+
+            <div class="price-indicator">
+              <div class="price-label">Projected Monthly Total</div>
+              <div class="price-total" id="monthly-total">$0.00</div>
+              <div class="price-label" style="font-size: 9px; opacity: 0.8;">Pre-paid credits & API usage</div>
+            </div>
+
+            <button class="export-btn" onclick="exportConfig()">Export Stack Config</button>
+            <textarea class="export-area" id="export-area" readonly></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Details Drawer -->
+  <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer(event)">
+    <div class="drawer" id="drawer">
+      <button class="drawer-close" onclick="closeDrawerDirect()">✕ CLOSE DETAILS</button>
+      <div id="drawer-content">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Setup thematic provider data
+    const providersData = {
+      llm: [
+        {
+          id: "gemini-15-flash",
+          rank: 4,
+          name: "Google Gemini 1.5 Flash",
+          type: "api",
+          description: "Standard multi-modal model. Fast, huge context window (2M), and exceptionally cost-effective.",
+          pricing: "$0.075 / 1M input, $0.30 / 1M output",
+          free_tier: "15 RPM, 1,500 requests/day, 1M TPM free tier",
+          pricing_multiplier: 0.0000001, // Input token approximation
+          scores: { performance: 80, price: 100, trial: 100, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "2 million token context window fits entire research datasets.", warning: false },
+            { text: "Cheapest model available on the market.", warning: false },
+            { text: "Rate limits on free tier are easily hit during intensive multi-agent loops.", warning: true }
+          ]
+        },
+        {
+          id: "gpt-4o-mini",
+          rank: 6,
+          name: "OpenAI GPT-4o-mini",
+          type: "api",
+          description: "OpenAI's high-speed lightweight model. Excellent intelligence for script formulation.",
+          pricing: "$0.150 / 1M input, $0.600 / 1M output",
+          free_tier: "Free trial credits ($5) on signup",
+          pricing_multiplier: 0.0000002,
+          scores: { performance: 80, price: 90, trial: 60, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Very consistent JSON output formatting.", warning: false },
+            { text: "Exceptional speed and low request latency.", warning: false },
+            { text: "Small trial credit that expires quickly; requires card on file afterwards.", warning: true }
+          ]
+        },
+        {
+          id: "claude-35-sonnet",
+          rank: 1,
+          name: "Anthropic Claude 3.5 Sonnet",
+          type: "api",
+          description: "State-of-the-art reasoning model. Best for premium hooks, viral narration styling, and logical flows.",
+          pricing: "$3.00 / 1M input, $15.00 / 1M output",
+          free_tier: "Limited free console credits",
+          pricing_multiplier: 0.000004,
+          scores: { performance: 100, price: 40, trial: 30, dx: 80, reliability: 80 },
+          pro_cons: [
+            { text: "Highest written script quality and logical structures.", warning: false },
+            { text: "Very expensive relative to GPT-4o-mini/Gemini.", warning: true },
+            { text: "Lower rate limits on lower API tiers.", warning: true }
+          ]
+        },
+        {
+          id: "deepseek-v3",
+          rank: 5,
+          name: "DeepSeek V3",
+          type: "api",
+          description: "Extremely cost-effective alternative to GPT-4o with equivalent reasoning scores.",
+          pricing: "$0.14 / 1M input (cache hit), $0.28 (miss), $0.28 output",
+          free_tier: "Generous initial testing tokens",
+          pricing_multiplier: 0.0000002,
+          scores: { performance: 90, price: 100, trial: 80, dx: 70, reliability: 70 },
+          pro_cons: [
+            { text: "Deep token savings via aggressive prefix caching.", warning: false },
+            { text: "High benchmark scores equivalent to larger models.", warning: false },
+            { text: "Latency can fluctuate during high load periods.", warning: true }
+          ]
+        },
+        {
+          id: "deepseek-r1",
+          rank: 3,
+          name: "DeepSeek R1",
+          type: "api",
+          description: "State-of-the-art reasoning model. Excels at complex script logic and hook planning.",
+          pricing: "$0.55 / 1M input, $2.19 / 1M output",
+          free_tier: "Limited testing tokens",
+          pricing_multiplier: 0.0000008,
+          scores: { performance: 95, price: 90, trial: 70, dx: 70, reliability: 70 },
+          pro_cons: [
+            { text: "Advanced multi-step reasoning creates highly engaging flow structures.", warning: false },
+            { text: "Significantly cheaper than Claude 3.5 Sonnet.", warning: false },
+            { text: "Inference response latency is higher due to thinking tokens.", warning: true }
+          ]
+        },
+        {
+          id: "groq-llama-33",
+          name: "Groq Llama 3.3 70B",
+          type: "api",
+          description: "Ultra-fast inference platform. Excellent for rapid iterative script improvements.",
+          pricing: "$0.59 / 1M input, $0.79 / 1M output",
+          free_tier: "Generous free rate-limited tier",
+          pricing_multiplier: 0.0000006,
+          scores: { performance: 85, price: 90, trial: 90, dx: 85, reliability: 85 },
+          pro_cons: [
+            { text: "Speed is unmatched (over 250+ tokens per second).", warning: false },
+            { text: "Great for real-time prompt feedback loops.", warning: false },
+            { text: "Daily token rate limits on free accounts can restrict bulk batch runs.", warning: true }
+          ]
+        },
+        {
+          id: "ollama-mcp",
+          name: "Ollama Local LLM MCP Server",
+          type: "mcp",
+          description: "Enables connection of local models (e.g. Qwen 2.5, Llama 3) directly to Jarvis.",
+          pricing: "Free ($0.00). Runs entirely on local machine GPU/CPU.",
+          free_tier: "100% Free / Unlimited local use",
+          pricing_multiplier: 0,
+          scores: { performance: 75, price: 100, trial: 100, dx: 70, reliability: 95 },
+          pro_cons: [
+            { text: "Zero API charges and total data privacy/offline execution.", warning: false },
+            { text: "Allows testing custom local fine-tuned models.", warning: false },
+            { text: "Quality of output depends entirely on local hardware constraints.", warning: true }
+          ]
+        },
+        {
+          id: "sequential-thinking-mcp",
+          name: "Sequential Thinking MCP Server",
+          type: "mcp",
+          description: "Enforces structured, step-by-step logical thought logging for AI script design.",
+          pricing: "Free ($0.00). Open-source Node/Python package.",
+          free_tier: "100% Free / Open Source",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 80, reliability: 90 },
+          pro_cons: [
+            { text: "Provides systematic thinking sequences, avoiding script hallucination.", warning: false },
+            { text: "Allows the model to dynamically correct and revise its scripting direction.", warning: false },
+            { text: "Adds small token overhead because thinking chains are sent in API roundtrips.", warning: true }
+          ]
+        },
+        {
+          id: "code-interpreter-mcp",
+          name: "Python Code Interpreter MCP Server",
+          type: "mcp",
+          description: "Sandboxed Python execution environment. Allows LLMs to test timing and write code scripts.",
+          pricing: "Free ($0.00) or low cloud tier starting at $5.00/mo.",
+          free_tier: "Free local Docker execution sandbox",
+          pricing_multiplier: 0,
+          scores: { performance: 90, price: 95, trial: 90, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Allows LLM to programmatically check exact speaking/word count timing ratios.", warning: false },
+            { text: "Safe sandboxed environment to write, run, and refine Python code.", warning: false },
+            { text: "Requires Docker or sandboxed execution runtime setup on host.", warning: true }
+          ]
+        },
+        {
+          id: "openrouter-api",
+          rank: 7,
+          name: "OpenRouter Unified LLM API",
+          type: "api",
+          description: "Unified API gateway connecting you to hundreds of models (Llama 3, Qwen, Claude, Command) with automatic failovers.",
+          pricing: "Pass-through model rates + 5.5% platform fee",
+          free_tier: "Over 20+ free models with rate limits",
+          pricing_multiplier: 0.0000003,
+          scores: { performance: 90, price: 90, trial: 85, dx: 95, reliability: 90 },
+          pro_cons: [
+            { text: "Swap any model without modifying backend scripting code.", warning: false },
+            { text: "Built-in model routing logic and automatic failover systems.", warning: false },
+            { text: "Requires pre-purchased credits to access top-tier commercial models.", warning: true }
+          ]
+        },
+        {
+          id: "together-ai-api",
+          rank: 15,
+          name: "Together AI Inference API",
+          type: "api",
+          description: "High-speed hosting engine for open weights models (Llama 3.3, Qwen, Mistral).",
+          pricing: "Varies per model (~$0.60 per 1M input / $0.80 output)",
+          free_tier: "Up to $5.00 in initial testing credits",
+          pricing_multiplier: 0.0000007,
+          scores: { performance: 85, price: 90, trial: 80, dx: 85, reliability: 88 },
+          pro_cons: [
+            { text: "Extremely cost-effective for large-scale scripting pipelines.", warning: false },
+            { text: "Supports fine-tuned custom weight endpoints.", warning: false },
+            { text: "Does not host closed models like Claude 3.5 Sonnet directly.", warning: true }
+          ]
+        },
+        {
+          id: "mistral-large-api",
+          rank: 16,
+          name: "Mistral Large / Codestral API",
+          type: "api",
+          description: "Mistral AI's flagship models, heavily optimized for reasoning and structured output scripting.",
+          pricing: "Codestral: $0.20/1M input, $0.60/1M output. Large: $2.00/1M input, $6.00/1M output",
+          free_tier: "Free rate-limited usage on Le Plateforme for developers",
+          pricing_multiplier: 0.000002,
+          scores: { performance: 88, price: 80, trial: 90, dx: 85, reliability: 90 },
+          pro_cons: [
+            { text: "Codestral has top-tier specialized coding and syntax planning scores.", warning: false },
+            { text: "Very generous developer trial usage limits.", warning: false },
+            { text: "High-tier Mistral Large is more expensive than Gemini/DeepSeek.", warning: true }
+          ]
+        },
+        {
+          id: "cohere-command-r-plus",
+          rank: 17,
+          name: "Cohere Command R+ API",
+          type: "api",
+          description: "Enterprise-grade RAG and tool-use model. Excellent for multi-step script logical planning.",
+          pricing: "$2.50 / 1M input, $10.00 / 1M output",
+          free_tier: "Free developer key with trial limits",
+          pricing_multiplier: 0.000004,
+          scores: { performance: 88, price: 60, trial: 80, dx: 85, reliability: 95 },
+          pro_cons: [
+            { text: "Best-in-class multi-step tool use and API call logic planning.", warning: false },
+            { text: "Robust multi-lingual translations and generation.", warning: false },
+            { text: "Higher pricing structure relative to new reasoning models.", warning: true }
+          ]
+        },
+        {
+          id: "litellm-mcp-server",
+          rank: 12,
+          name: "LiteLLM local Gateway MCP Server",
+          type: "mcp",
+          description: "Local gateway server bridging all commercial and open-source APIs under one unified local port.",
+          pricing: "Free ($0.00). Open-source self-hosted proxy.",
+          free_tier: "100% Free / Open Source",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Acts as a unified proxy, forwarding requests to OpenAI, Anthropic, Gemini, or local models.", warning: false },
+            { text: "Includes detailed billing logs and token monitoring dashboards.", warning: false },
+            { text: "Requires maintaining your own Docker/Python server instance.", warning: true }
+          ]
+        },
+        {
+          id: "sqlite-memory-mcp",
+          rank: 9,
+          name: "SQLite Semantic Memory MCP Server",
+          type: "mcp",
+          description: "Provides semantic SQLite memory storage so LLMs can retrieve and store past scripting details.",
+          pricing: "Free ($0.00). Direct local SQLite integration.",
+          free_tier: "100% Free / Open Source",
+          pricing_multiplier: 0,
+          scores: { performance: 90, price: 100, trial: 100, dx: 85, reliability: 95 },
+          pro_cons: [
+            { text: "Jarvis can save script outlines and recall hooks/user preferences between runs.", warning: false },
+            { text: "Extremely fast lookup times with zero latency.", warning: false },
+            { text: "Requires vector database initialization or local SQL package setup.", warning: true }
+          ]
+        },
+        {
+          id: "aws-bedrock-api",
+          rank: 13,
+          name: "AWS Bedrock API",
+          type: "api",
+          description: "Amazon's enterprise model gateway. Access Claude, Llama, and Mistral under secure AWS VPC credentials.",
+          pricing: "Claude 3.5 Sonnet: $3.00/1M input, $15.00/1M output",
+          free_tier: "Included in standard AWS Free Tier options",
+          pricing_multiplier: 0.000004,
+          scores: { performance: 95, price: 60, trial: 40, dx: 80, reliability: 100 },
+          pro_cons: [
+            { text: "Excellent for enterprise-grade compliance, security boundaries, and logging.", warning: false },
+            { text: "Direct integration with other AWS data pipelines.", warning: false },
+            { text: "Highly complex IAM credentials and setup permissions.", warning: true }
+          ]
+        },
+        {
+          id: "azure-openai-api",
+          rank: 14,
+          name: "Azure OpenAI Service API",
+          type: "api",
+          description: "Microsoft Azure managed access to OpenAI GPT-4o models with enterprise compliance policies.",
+          pricing: "GPT-4o: $2.50 / 1M input, $10.00 / 1M output",
+          free_tier: "Requires active Azure subscription credits",
+          pricing_multiplier: 0.000003,
+          scores: { performance: 92, price: 70, trial: 30, dx: 80, reliability: 100 },
+          pro_cons: [
+            { text: "Guaranteed data residency compliance and enterprise uptime SLAs.", warning: false },
+            { text: "Private networks and Azure Active Directory (Entra ID) integrations.", warning: false },
+            { text: "Application review approvals are slow and heavily gated.", warning: true }
+          ]
+        },
+        {
+          id: "replicate-llm-api",
+          rank: 18,
+          name: "Replicate Serverless LLM API",
+          type: "api",
+          description: "Run open-weights LLMs (Llama 3, Qwen) using serverless GPU time billing.",
+          pricing: "Billed per second of active execution GPU time (e.g. ~$0.0015/sec on A100)",
+          free_tier: "Free credits on initial sign-up",
+          pricing_multiplier: 0.0015,
+          scores: { performance: 85, price: 75, trial: 70, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Highly developer-centric; simple, robust Python and JS clients.", warning: false },
+            { text: "Deploy and call custom model fine-tunes without managing clusters.", warning: false },
+            { text: "GPU cold starts can introduce initial response latencies.", warning: true }
+          ]
+        },
+        {
+          id: "filesystem-mcp-server",
+          rank: 10,
+          name: "Local Filesystem MCP Server",
+          type: "mcp",
+          description: "Official MCP server exposing safe filesystem utilities for LLMs to read/edit local files.",
+          pricing: "Free ($0.00). Open-source Node/Python package.",
+          free_tier: "100% Free / Open Source",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Gives Jarvis direct ability to modify script code and configurations locally.", warning: false },
+            { text: "Zero network request overhead.", warning: false },
+            { text: "Must carefully restrict directory permissions to protect system files.", warning: true }
+          ]
+        },
+        {
+          id: "github-mcp-server",
+          rank: 11,
+          name: "GitHub / Git MCP Server",
+          type: "mcp",
+          description: "Enables programmatic repository actions: commit, pull, branch, and push.",
+          pricing: "Free ($0.00). Open-source Node/Python package.",
+          free_tier: "100% Free / Open Source",
+          pricing_multiplier: 0,
+          scores: { performance: 90, price: 100, trial: 100, dx: 85, reliability: 95 },
+          pro_cons: [
+            { text: "Automates checking out branching lines and committing working video scripts.", warning: false },
+            { text: "Safe version control tracking.", warning: false },
+            { text: "Requires setting up active Personal Access Tokens (PAT).", warning: true }
+          ]
+        }
+      ],
+      video: [
+        {
+          id: "heygen-v3",
+          rank: 1,
+          name: "HeyGen v3 API",
+          type: "api",
+          description: "Premier AI avatar generation engine. Ideal for studio-grade talking heads and realistic digital twins.",
+          pricing: "Avatar Level III: ~$1.00/min. Level IV/V: ~$3.50/min.",
+          free_tier: "1 free credit (1 minute of video)",
+          pricing_multiplier: 1.00 / 60, // per-second calculation
+          scores: { performance: 100, price: 50, trial: 40, dx: 70, reliability: 80 },
+          pro_cons: [
+            { text: "Industry-leading digital twin likeness and voice cloning.", warning: false },
+            { text: "API is pay-as-you-go using pre-paid balances.", warning: false },
+            { text: "API integration is complex; requires webhook listener or polling loops.", warning: true }
+          ]
+        },
+        {
+          id: "synthesia-api",
+          rank: 2,
+          name: "Synthesia Video API",
+          type: "api",
+          description: "Corporate/Enterprise standard. Extremely polished avatars, focused on professional realistic presenters.",
+          pricing: "Included in Creator ($22/mo) or custom Enterprise agreements",
+          free_tier: "No direct free API trial without contacting sales",
+          pricing_multiplier: 2.20 / 60,
+          scores: { performance: 95, price: 40, trial: 10, dx: 80, reliability: 90 },
+          pro_cons: [
+            { text: "Superb multi-lingual avatar support and pronunciation engines.", warning: false },
+            { text: "Highly stable enterprise infrastructure.", warning: false },
+            { text: "No open pay-as-you-go developer API; high monthly subscription/sales gates.", warning: true }
+          ]
+        },
+        {
+          id: "did-api",
+          rank: 7,
+          name: "D-ID Video API",
+          type: "api",
+          description: "Specialized in animating static portrait photos. Fast generation times, realistic animation.",
+          pricing: "API plans start at $18.00/mo (approx. $1.44 per minute)",
+          free_tier: "14-day trial with 15 API credits",
+          pricing_multiplier: 1.44 / 60,
+          scores: { performance: 75, price: 70, trial: 70, dx: 90, reliability: 85 },
+          pro_cons: [
+            { text: "Capable of animating any still portrait image (very flexible avatar styles).", warning: false },
+            { text: "Highly documented, easy-to-use API endpoints.", warning: false },
+            { text: "Avatars can look slightly robotic compared to HeyGen studio twins.", warning: true }
+          ]
+        },
+        {
+          id: "json2video",
+          rank: 11,
+          name: "JSON2Video API",
+          type: "api",
+          description: "Programmatic video editor. Excellent for combining overlays, stock media, and automated text slides.",
+          pricing: "$9.00/mo for 200 credits, $29.00/mo for 1000 credits (~$0.03/sec render)",
+          free_tier: "8 credits on registration",
+          pricing_multiplier: 0.029,
+          scores: { performance: 70, price: 95, trial: 60, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Perfect for faceless automation, overlays, and transition effects.", warning: false },
+            { text: "Extremely cost-effective for pure rendering without talking avatars.", warning: false },
+            { text: "Does not contain built-in photorealistic digital talking avatars.", warning: true }
+          ]
+        },
+        {
+          id: "runway-gen3",
+          rank: 3,
+          name: "Runway Gen-3 Alpha API",
+          type: "api",
+          description: "Hollywood-grade cinematic output. Highly detailed text-to-video and video-to-video.",
+          pricing: "Starts at $0.05/sec for Gen-3 Alpha Turbo (~$3.00/min)",
+          free_tier: "None for API (Only basic web trial)",
+          pricing_multiplier: 3.00 / 60,
+          scores: { performance: 98, price: 40, trial: 10, dx: 80, reliability: 90 },
+          pro_cons: [
+            { text: "Best-in-class motion aesthetics and visual clarity.", warning: false },
+            { text: "Consistent spatial quality and direct camera controls.", warning: false },
+            { text: "Relatively high generation costs and no direct free API trial.", warning: true }
+          ]
+        },
+        {
+          id: "luma-dream-machine",
+          name: "Luma Dream Machine API",
+          type: "api",
+          description: "Physics-based video generation. Predictable costs and superb rendering speeds.",
+          pricing: "Approx. $0.45 per 10-second generation (~$2.70/min)",
+          free_tier: "Free trial generations on web interface only",
+          pricing_multiplier: 2.70 / 60,
+          scores: { performance: 90, price: 55, trial: 20, dx: 85, reliability: 85 },
+          pro_cons: [
+            { text: "Outstanding rendering of physical motion and light calculations.", warning: false },
+            { text: "Easy-to-understand developer-first credit system.", warning: false },
+            { text: "Can generate weird visual anomalies on complex human movement.", warning: true }
+          ]
+        },
+        {
+          id: "invideo-ai-api",
+          rank: 9,
+          name: "InVideo AI API",
+          type: "api",
+          description: "Complete faceless video workflow automation. Generates stock clips, transitions, and narration in one call.",
+          pricing: "Plans start at $17.00/mo (approx. $0.34 per minute)",
+          free_tier: "10 mins/week free generation (watermarked)",
+          pricing_multiplier: 0.34 / 60,
+          scores: { performance: 80, price: 85, trial: 80, dx: 75, reliability: 90 },
+          pro_cons: [
+            { text: "One-stop-shop for automatic b-roll selection and automated video structuring.", warning: false },
+            { text: "Much cheaper than realistic digital presenters.", warning: false },
+            { text: "Relies on generic stock video clips; lacks personalized avatar presenter options.", warning: true }
+          ]
+        },
+        {
+          id: "steve-ai-api",
+          rank: 10,
+          name: "Steve AI Animation API",
+          type: "api",
+          description: "Specialized in 2D/3D cartoon animation, infographics, and whiteboard videos.",
+          pricing: "$15.00/mo for basic plans (approx. $0.50 per video minute)",
+          free_tier: "3 video downloads/month (watermarked)",
+          pricing_multiplier: 0.50 / 60,
+          scores: { performance: 75, price: 80, trial: 75, dx: 70, reliability: 85 },
+          pro_cons: [
+            { text: "Great for educational, cartoonish, and informational content styles.", warning: false },
+            { text: "Clean infographic libraries.", warning: false },
+            { text: "Not suitable for realistic, live-action talking head content.", warning: true }
+          ]
+        },
+        {
+          id: "shotstack-api",
+          rank: 8,
+          name: "Shotstack Video Infrastructure API",
+          type: "api",
+          description: "Scale-ready cloud video editing and automated template rendering engine.",
+          pricing: "Plans start at $39.00/mo (~$0.30 per minute of render)",
+          free_tier: "100 free render minutes/month",
+          pricing_multiplier: 0.30 / 60,
+          scores: { performance: 90, price: 75, trial: 80, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Handles parallel processing and cloud video stitching instantly.", warning: false },
+            { text: "Strong REST API support and mature JSON schema configuration.", warning: false },
+            { text: "30% premium charges apply on plan overages.", warning: true }
+          ]
+        },
+        {
+          id: "remotion-framework",
+          rank: 4,
+          name: "Remotion React Video Framework",
+          type: "custom",
+          description: "Code-driven video composition engine. Render complete custom video timelines using React components.",
+          pricing: "Free for personal use. Corporate/Scale licenses from $100.00/mo.",
+          free_tier: "Free-forever personal & small business license",
+          pricing_multiplier: 0,
+          scores: { performance: 98, price: 90, trial: 100, dx: 95, reliability: 95 },
+          pro_cons: [
+            { text: "Complete pixel-level programmatic control over HTML/CSS elements and motion.", warning: false },
+            { text: "Extremely modular and matches modern developer tooling.", warning: false },
+            { text: "Requires setting up and managing your own rendering clusters (e.g. AWS Lambda).", warning: true }
+          ]
+        },
+        {
+          id: "fal-ai-flux",
+          rank: 6,
+          name: "Fal.ai FLUX & Diffusion API",
+          type: "api",
+          description: "Ultra-fast image generation models for video slides, B-roll thumbnails, and illustration assets.",
+          pricing: "Schnell: $0.003/image. Pro (Premium): $0.04/image.",
+          free_tier: "Free trial credits on developer registration",
+          pricing_multiplier: 0.003,
+          scores: { performance: 98, price: 95, trial: 80, dx: 95, reliability: 95 },
+          pro_cons: [
+            { text: "Industry-best image generation speeds and photorealism qualities.", warning: false },
+            { text: "Symmetric output-based pricing for easy budgeting forecasts.", warning: false },
+            { text: "Requires separate stitching tool (like Remotion or FFmpeg) to assemble slides into video.", warning: true }
+          ]
+        },
+        {
+          id: "elevenlabs-voice",
+          rank: 5,
+          name: "ElevenLabs Speech Synthesis API",
+          type: "api",
+          description: "State-of-the-art voice cloning and natural narration voiceover engine.",
+          pricing: "Plans start at $5.00/mo (~$0.015 per 1,000 characters)",
+          free_tier: "10,000 free characters/month (3-4 audio minutes)",
+          pricing_multiplier: 0.015 / 1000,
+          scores: { performance: 100, price: 75, trial: 80, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Unmatched emotional pacing, natural pauses, and voice cloning realism.", warning: false },
+            { text: "Highly documented APIs with webhooks and SDK packages.", warning: false },
+            { text: "Costs can scale rapidly for long-form video narrations.", warning: true }
+          ]
+        },
+        {
+          id: "anam-api",
+          rank: 12,
+          name: "Anam Conversational AI API",
+          type: "api",
+          description: "Low-latency conversational AI avatar platform, ideal for interactive video sessions and real-time WebRTC digital twins.",
+          pricing: "Pay-as-you-go based on active session minutes (~$0.15/minute).",
+          free_tier: "Free trial minutes on developer sign-up.",
+          pricing_multiplier: 0.15 / 60,
+          scores: { performance: 90, price: 80, trial: 70, dx: 80, reliability: 85 },
+          pro_cons: [
+            { text: "Sub-second latency (approx. 180ms response time) designed for live chat.", warning: false },
+            { text: "Direct WebRTC audio/video streaming support.", warning: false },
+            { text: "Less suited for high-production asynchronous cinematic B-roll.", warning: true }
+          ]
+        },
+        {
+          id: "veed-fabric-api",
+          rank: 13,
+          name: "VEED Fabric API",
+          type: "api",
+          description: "Developer-first AI video API allowing developers to turn any image and audio file into a talking head video.",
+          pricing: "Competitive pay-per-second model (~$0.10/min).",
+          free_tier: "Free testing tokens on sign-up.",
+          pricing_multiplier: 0.10 / 60,
+          scores: { performance: 80, price: 90, trial: 75, dx: 85, reliability: 85 },
+          pro_cons: [
+            { text: "Highly cost-effective avatar video option.", warning: false },
+            { text: "Simple HTTP request mapping for fast integration.", warning: false },
+            { text: "Likeness fidelity is lower than high-end digital twins.", warning: true }
+          ]
+        },
+        {
+          id: "kling-ai-api",
+          rank: 14,
+          name: "Kling AI Video API",
+          type: "api",
+          description: "State-of-the-art generative video model. Excels at complex physics, realistic movement, and cinematic prompt-to-video generation.",
+          pricing: "Approx. $0.10 per 5-second generation (~$1.20/min).",
+          free_tier: "Free daily credits on web platform, paid API keys.",
+          pricing_multiplier: 1.20 / 60,
+          scores: { performance: 95, price: 70, trial: 50, dx: 80, reliability: 80 },
+          pro_cons: [
+            { text: "Exceptional simulation of real-world physics and motion consistency.", warning: false },
+            { text: "Supports up to 1080p high definition output renders.", warning: false },
+            { text: "Request queue times can vary under heavy API load.", warning: true }
+          ]
+        },
+        {
+          id: "pika-labs-api",
+          rank: 15,
+          name: "Pika Art API",
+          type: "api",
+          description: "Generative video platform specializing in animation, visual effects, and high-speed creative clip creation.",
+          pricing: "Paid plans start at $10.00/mo (API access billed per generation).",
+          free_tier: "Web trial options only.",
+          pricing_multiplier: 1.50 / 60,
+          scores: { performance: 88, price: 75, trial: 30, dx: 80, reliability: 85 },
+          pro_cons: [
+            { text: "Fantastic for high-contrast anime, cartoons, and stylized motion graphics.", warning: false },
+            { text: "Very good editing controls (extend video, modify canvas size).", warning: false },
+            { text: "Less realistic for photorealistic talking head presentations.", warning: true }
+          ]
+        },
+        {
+          id: "creatomate-api",
+          rank: 16,
+          name: "Creatomate Video Automation API",
+          type: "api",
+          description: "Programmatic video rendering engine. Design templates visually and swap dynamic text, image overlays, or audio programmatically.",
+          pricing: "Plans start at $29.00/mo (approx. $0.05 per video render minute).",
+          free_tier: "Free trial limit on signup.",
+          pricing_multiplier: 0.05 / 60,
+          scores: { performance: 85, price: 90, trial: 80, dx: 95, reliability: 95 },
+          pro_cons: [
+            { text: "100% deterministic layout, text alignment, and overlay timings.", warning: false },
+            { text: "Intuitive browser-based template editor for quick visual updates.", warning: false },
+            { text: "No native talking human avatars or photorealistic video synthesis built-in.", warning: true }
+          ]
+        },
+        {
+          id: "bannerbear-api",
+          rank: 17,
+          name: "Bannerbear Image & Video API",
+          type: "api",
+          description: "Automate image and short-form video generation using pre-designed templates via a simple REST API.",
+          pricing: "Plans start at $49.00/mo (~$0.15 per video render minute).",
+          free_tier: "Free trial credits on registration.",
+          pricing_multiplier: 0.15 / 60,
+          scores: { performance: 80, price: 80, trial: 70, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Highly reliable for automating image banners, text slides, and short video clips.", warning: false },
+            { text: "Clean and robust SDKs with webhook integrations.", warning: false },
+            { text: "Video generation limit is typically set to short durations.", warning: true }
+          ]
+        },
+        {
+          id: "ffmpeg-mcp-server",
+          rank: 18,
+          name: "Local FFmpeg Video Editor MCP Server",
+          type: "mcp",
+          description: "Enables AI agents to perform local video editing, cutting, scaling, and stitching by translating natural language into local FFmpeg commands.",
+          pricing: "Free ($0.00). Uses local system resource execution.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 80, reliability: 95 },
+          pro_cons: [
+            { text: "Zero latency or cost: cuts, merges, and scales files on local disk.", warning: false },
+            { text: "Complete programmatic control over audio/video streams.", warning: false },
+            { text: "Requires FFmpeg installed in the host system's PATH variable.", warning: true }
+          ]
+        },
+        {
+          id: "simli-api",
+          rank: 19,
+          name: "Simli Avatar Stream API",
+          type: "api",
+          description: "Ultra-low-latency real-time video avatar streaming and WebRTC interactive agent lip sync engine.",
+          pricing: "Pay-as-you-go based on usage minutes (~$0.05 - $0.35 per minute).",
+          free_tier: "Free signup credits ($10 credit).",
+          pricing_multiplier: 0.05 / 60,
+          scores: { performance: 92, price: 85, trial: 85, dx: 80, reliability: 90 },
+          pro_cons: [
+            { text: "Sub-second WebRTC interaction loop fits live AI agents perfectly.", warning: false },
+            { text: "Offers robust SDK setups for visual agent response rendering.", warning: false },
+            { text: "Avatar quality has slightly lower resolution/variety compared to high-end pre-renders.", warning: true }
+          ]
+        },
+        {
+          id: "leonardo-motion-api",
+          rank: 20,
+          name: "Leonardo.ai Motion API",
+          type: "api",
+          description: "Image-to-Video generation using Leonardo's powerful creative styles and motion sliders.",
+          pricing: "Token-based deduction per generation (approx. $0.05 per standard motion clip).",
+          free_tier: "Starter credit balance upon account initialization ($5 starter tokens).",
+          pricing_multiplier: 0.05 / 5,
+          scores: { performance: 95, price: 80, trial: 80, dx: 85, reliability: 90 },
+          pro_cons: [
+            { text: "Stunning creative aesthetics, animation filters, and motion weight sliders.", warning: false },
+            { text: "Unified API billing dashboard.", warning: false },
+            { text: "Generating continuous long cinematic clips requires external concatenation setups.", warning: true }
+          ]
+        },
+        {
+          id: "hour-one-api",
+          rank: 21,
+          name: "Hour One Video Presenter API",
+          type: "api",
+          description: "Enterprise avatar video engine focusing on news-style presenter layouts and realistic talking heads.",
+          pricing: "Subscription models (starting from ~$25/mo), custom rates for high-volume API.",
+          free_tier: "Limited console minutes trial.",
+          pricing_multiplier: 0.20 / 60,
+          scores: { performance: 92, price: 65, trial: 30, dx: 75, reliability: 95 },
+          pro_cons: [
+            { text: "Excellent for educational, news, and slides-style corporate presenting.", warning: false },
+            { text: "Includes a built-in virtual studio with template structures.", warning: false },
+            { text: "Developer API access is generally gated behind higher plans/sales contact.", warning: true }
+          ]
+        },
+        {
+          id: "colossyan-api",
+          rank: 22,
+          name: "Colossyan Creator API",
+          type: "api",
+          description: "Professional corporate training video presenter API with support for multiple actors and interactive scenes.",
+          pricing: "Subscription tiers starting at $19/mo. API access requires scale tier.",
+          free_tier: "No default free API credentials without sales review.",
+          pricing_multiplier: 0.32 / 60,
+          scores: { performance: 93, price: 60, trial: 20, dx: 75, reliability: 95 },
+          pro_cons: [
+            { text: "Outstanding localization and multi-actor dialogue capabilities.", warning: false },
+            { text: "Polished workplace-oriented avatars and custom templates.", warning: false },
+            { text: "No low-cost pay-as-you-go developer console setup.", warning: true }
+          ]
+        },
+        {
+          id: "hedra-ai-api",
+          rank: 23,
+          name: "Hedra AI Character API",
+          type: "api",
+          description: "Generates talking character videos from any audio source and prompt-driven character styles.",
+          pricing: "Starts at ~$15.00/mo for credit packages. Billed per generation.",
+          free_tier: "Free credits upon account creation.",
+          pricing_multiplier: 0.10 / 60,
+          scores: { performance: 90, price: 80, trial: 80, dx: 80, reliability: 90 },
+          pro_cons: [
+            { text: "Highly creative character generation with robust voice synchronization.", warning: false },
+            { text: "Relatively fast generation output times.", warning: false },
+            { text: "Aesthetics are creative/stylized rather than realistic studio human recordings.", warning: true }
+          ]
+        },
+        {
+          id: "viggle-ai-api",
+          rank: 24,
+          name: "Viggle AI Character Animation API",
+          type: "api",
+          description: "Controllable character animation model, allowing mapping of static images onto dynamic motion targets.",
+          pricing: "Approx. $0.01 per video output second.",
+          free_tier: "Basic credit tiers available.",
+          pricing_multiplier: 0.01,
+          scores: { performance: 88, price: 85, trial: 70, dx: 80, reliability: 85 },
+          pro_cons: [
+            { text: "Outstanding character physical motion translation and movement consistency.", warning: false },
+            { text: "Incredibly useful for meme formats and action sequences.", warning: false },
+            { text: "Higher-resolution output processing requires premium subscription tiers.", warning: true }
+          ]
+        }
+      ],
+      search: [
+        {
+          id: "brave-search-api",
+          rank: 4,
+          name: "Brave Search API",
+          type: "mcp",
+          description: "Global web search index. Excellent for pulling fresh, unbiased organic search results.",
+          pricing: "$5.00 per 1,000 queries for standard web search",
+          free_tier: "Free $5.00 credit automatically every month",
+          pricing_multiplier: 0.005, // per search
+          scores: { performance: 85, price: 85, trial: 90, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Completely independent index separate from Google and Bing.", warning: false },
+            { text: "Excellent out-of-the-box MCP server integration.", warning: false },
+            { text: "Does not extract page markdown content automatically (requires Fetch MCP).", warning: true }
+          ]
+        },
+        {
+          id: "tavily-api",
+          rank: 2,
+          name: "Tavily AI Search API",
+          type: "api",
+          description: "Search optimized explicitly for AI agents, retrieving clean, verified, and contextual results.",
+          pricing: "Free tier, paid plans start at $19.00/mo (approx. $0.09 per 1k searches)",
+          free_tier: "1,000 free searches per month (no credit card required)",
+          pricing_multiplier: 0.0001,
+          scores: { performance: 95, price: 90, trial: 95, dx: 95, reliability: 90 },
+          pro_cons: [
+            { text: "Results are curated, aggregated, and formatted as clean context snippets for LLMs.", warning: false },
+            { text: "Generous 1,000 search queries/mo free tier.", warning: false },
+            { text: "Pricing rises if large token chunks are returned per call.", warning: true }
+          ]
+        },
+        {
+          id: "firecrawl",
+          name: "Firecrawl Scraping API",
+          type: "mcp",
+          description: "Turns any URL or domain into LLM-ready markdown. Built-in proxy and anti-bot bypass.",
+          pricing: "$19.00/mo for 10k credits (~$0.0019 per page scrape)",
+          free_tier: "500 credits per month free tier",
+          pricing_multiplier: 0.0019,
+          scores: { performance: 90, price: 80, trial: 80, dx: 85, reliability: 80 },
+          pro_cons: [
+            { text: "Seamless crawl command scrapes full subfolders to markdown.", warning: false },
+            { text: "Handles JS rendering and CAPTCHA shields.", warning: false },
+            { text: "Credits reset monthly and do not roll over.", warning: true }
+          ]
+        },
+        {
+          id: "exa-api",
+          name: "Exa (Metaphor) Semantic Search",
+          type: "api",
+          description: "Embeddings-based web search. Finds matches based on semantic context rather than keyword mapping.",
+          pricing: "$10.00 per 1k search requests with contents",
+          free_tier: "$10.00 free credits on sign-up",
+          pricing_multiplier: 0.01,
+          scores: { performance: 90, price: 65, trial: 75, dx: 80, reliability: 85 },
+          pro_cons: [
+            { text: "Finds high-quality resource links standard search engines miss.", warning: false },
+            { text: "Allows fetching clean page content directly in the search query.", warning: false },
+            { text: "Higher price tag compared to standard search engines.", warning: true }
+          ]
+        },
+        {
+          id: "perplexity-sonar",
+          rank: 1,
+          name: "Perplexity Sonar API",
+          type: "api",
+          description: "Deep research answers with online citations. Acts as a pre-summarized web intelligence tool.",
+          pricing: "$5.00 per 1M tokens ($0.005 per query equivalent)",
+          free_tier: "$5.00 recurring monthly credit for active subscribers",
+          pricing_multiplier: 0.005,
+          scores: { performance: 95, price: 80, trial: 70, dx: 85, reliability: 90 },
+          pro_cons: [
+            { text: "Returns fully structured answers with citations in a single API call.", warning: false },
+            { text: "Uses active real-time indexing models.", warning: false },
+            { text: "Can occasionally hallucinate connections if target query is too niche.", warning: true }
+          ]
+        },
+        {
+          id: "apify-reddit-scraper",
+          rank: 6,
+          name: "Apify Reddit Content Scraper",
+          type: "api",
+          description: "Scrapes subreddits, posts, comments, and users. Perfect for trend monitoring and niche discussions.",
+          pricing: "Approx. $0.50 per 1,000 posts extracted",
+          free_tier: "Free $5.00 monthly trial credits",
+          pricing_multiplier: 0.0005,
+          scores: { performance: 88, price: 80, trial: 80, dx: 80, reliability: 75 },
+          pro_cons: [
+            { text: "Provides authentic audience feedback and viral hook ideas from forums.", warning: false },
+            { text: "Retrieves complete threads without official API access restrictions.", warning: false },
+            { text: "Bypassing Reddit's anti-scraping walls can lead to occasional speed throttles.", warning: true }
+          ]
+        },
+        {
+          id: "apify-tiktok-scraper",
+          rank: 8,
+          name: "Apify TikTok Research Scraper",
+          type: "api",
+          description: "Fetches TikTok videos, comments, and profile analytics. Best for platform viral research.",
+          pricing: "Approx. $1.00 per 1,000 video records extracted",
+          free_tier: "Free $5.00 monthly trial credits",
+          pricing_multiplier: 0.001,
+          scores: { performance: 90, price: 75, trial: 80, dx: 75, reliability: 70 },
+          pro_cons: [
+            { text: "Extracts video performance stats, descriptions, tags, and comment replies.", warning: false },
+            { text: "Bypasses TikTok's official research API geo-restrictions.", warning: false },
+            { text: "Fragile: TikTok frequently updates code structures, requiring frequent actor updates.", warning: true }
+          ]
+        },
+        {
+          id: "apify-instagram-scraper",
+          rank: 9,
+          name: "Apify Instagram Content Scraper",
+          type: "api",
+          description: "Crawls Instagram profiles, posts, reels, hashtags, and likes. Essential for Instagram trend research.",
+          pricing: "Approx. $1.50 per 1,000 post records extracted",
+          free_tier: "Free $5.00 monthly trial credits",
+          pricing_multiplier: 0.0015,
+          scores: { performance: 85, price: 70, trial: 80, dx: 75, reliability: 65 },
+          pro_cons: [
+            { text: "Fetches comments, reels metrics, and user analytics.", warning: false },
+            { text: "Avoids complex Meta Developer portal reviews.", warning: false },
+            { text: "Meta's bot detection triggers blocking and login verification challenges.", warning: true }
+          ]
+        },
+        {
+          id: "apify-x-scraper",
+          rank: 7,
+          name: "Apify Twitter/X Crawler",
+          type: "api",
+          description: "Real-time tweet extraction, trends monitor, and account tracking tool.",
+          pricing: "$2.00 per 1,000 tweets retrieved",
+          free_tier: "Free $5.00 monthly trial credits",
+          pricing_multiplier: 0.002,
+          scores: { performance: 80, price: 65, trial: 80, dx: 80, reliability: 70 },
+          pro_cons: [
+            { text: "Extracts real-time viral threads and trending hashtags.", warning: false },
+            { text: "Much cheaper than X's standard paid API tiers.", warning: false },
+            { text: "High risk of IP blocks if scraping volume is too fast.", warning: true }
+          ]
+        },
+        {
+          id: "you-search-api",
+          rank: 3,
+          name: "You.com Search API",
+          type: "api",
+          description: "AI-native web search engine, optimized to return summarized, structured context and markdown results directly to LLMs.",
+          pricing: "$15.00 per 1,000 searches",
+          free_tier: "Free trial keys with rate limits",
+          pricing_multiplier: 0.015,
+          scores: { performance: 95, price: 60, trial: 70, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Optimized specifically to bypass extraction scraping loops and return raw clean LLM inputs.", warning: false },
+            { text: "Includes detailed citations and meta references.", warning: false },
+            { text: "Cost per query is higher than traditional keyword search indexes.", warning: true }
+          ]
+        },
+        {
+          id: "google-custom-search",
+          rank: 5,
+          name: "Google Custom Search JSON API",
+          type: "api",
+          description: "Official Google search engine access. High reliability, zero risk of IP blocks.",
+          pricing: "$5.00 per 1,000 queries",
+          free_tier: "100 free search queries per day",
+          pricing_multiplier: 0.005,
+          scores: { performance: 90, price: 85, trial: 90, dx: 85, reliability: 100 },
+          pro_cons: [
+            { text: "Global-scale keyword mapping index with highest up-time stability.", warning: false },
+            { text: "Official integration with secure billing limits.", warning: false },
+            { text: "Requires custom configuration of search engine context (CSE) keys.", warning: true }
+          ]
+        },
+        {
+          id: "jina-reader-api",
+          rank: 12,
+          name: "Jina Reader API",
+          type: "api",
+          description: "Converts search queries or entire web pages directly into clean, LLM-ready markdown text.",
+          pricing: "Token-based billing (~$0.02 per 1M tokens).",
+          free_tier: "Free tier limit (e.g. 20 requests per day) for developers.",
+          pricing_multiplier: 0.00000002,
+          scores: { performance: 92, price: 90, trial: 80, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Superb for transforming rich web page layouts into concise markdown.", warning: false },
+            { text: "Integrates easily as a single URL prefix (r.jina.ai/).", warning: false },
+            { text: "Highly variable token sizes can make monthly costs variable.", warning: true }
+          ]
+        },
+        {
+          id: "spider-cloud-crawler",
+          rank: 13,
+          name: "Spider.cloud Crawler API",
+          type: "api",
+          description: "Rust-based crawling and web scraping infrastructure optimized for speed, RAG pipelines, and agent ingestion.",
+          pricing: "Pay-as-you-go based on bandwidth ($1.00/GB) and compute time (~$0.0001 per page).",
+          free_tier: "Free usage credits upon initial sign-up.",
+          pricing_multiplier: 0.0001,
+          scores: { performance: 94, price: 95, trial: 80, dx: 85, reliability: 90 },
+          pro_cons: [
+            { text: "Highly performant Rust scraper crawls thousands of pages concurrently.", warning: false },
+            { text: "Designed explicitly for AI context scraping.", warning: false },
+            { text: "Configuration dashboard can be complex for basic simple scrapes.", warning: true }
+          ]
+        },
+        {
+          id: "serper-dev",
+          rank: 14,
+          name: "Serper.dev Google Search API",
+          type: "api",
+          description: "High-speed, low-cost structured Google Search results API including organic results, answer boxes, and knowledge graphs.",
+          pricing: "Extremely affordable pay-as-you-go (~$0.30 per 1,000 search queries).",
+          free_tier: "2,500 free search queries on registration.",
+          pricing_multiplier: 0.0003,
+          scores: { performance: 90, price: 95, trial: 90, dx: 95, reliability: 95 },
+          pro_cons: [
+            { text: "Very cheap and quick compared to official Google APIs.", warning: false },
+            { text: "Returns clean JSON structures containing knowledge graphs.", warning: false },
+            { text: "Requires custom scraper/fetcher to extract page text after searching.", warning: true }
+          ]
+        },
+        {
+          id: "serpapi",
+          rank: 15,
+          name: "SerpAPI Multi-Engine Scraper",
+          type: "api",
+          description: "Deep search scraping API mapping results for Google, Bing, Yahoo, Yandex, Google Maps, and Google Shopping.",
+          pricing: "Plans start at $25.00/mo (approx. $0.025 per query).",
+          free_tier: "100 free searches per month.",
+          pricing_multiplier: 0.025,
+          scores: { performance: 95, price: 70, trial: 60, dx: 90, reliability: 98 },
+          pro_cons: [
+            { text: "Extremely reliable parsing for complex elements (maps, hotels, reviews).", warning: false },
+            { text: "Guarantees proxy rotation and captcha bypass.", warning: false },
+            { text: "Pricing can scale up quickly for heavy agent loops.", warning: true }
+          ]
+        },
+        {
+          id: "newsapi",
+          rank: 16,
+          name: "NewsAPI.org Data API",
+          type: "api",
+          description: "Aggregates articles, blogs, and real-time news globally under a unified JSON feed.",
+          pricing: "Paid plans start at $25.00/mo (commercial use).",
+          free_tier: "Free developer tier (limited to non-commercial workloads, 100 requests/day).",
+          pricing_multiplier: 0.0008,
+          scores: { performance: 88, price: 80, trial: 85, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Excellent for trend monitoring, news gathering, and topical scripting.", warning: false },
+            { text: "Filters by country, category, search queries, or domains.", warning: false },
+            { text: "Free tier does not allow commercial application use.", warning: true }
+          ]
+        },
+        {
+          id: "bing-web-search",
+          rank: 17,
+          name: "Bing Web Search API",
+          type: "api",
+          description: "Microsoft's official web index search engine API providing robust global page indexing and answers.",
+          pricing: "Plans start at $3.00 per 1,000 queries.",
+          free_tier: "Free trial instances available inside Azure console.",
+          pricing_multiplier: 0.003,
+          scores: { performance: 90, price: 85, trial: 60, dx: 85, reliability: 95 },
+          pro_cons: [
+            { text: "Official high-uptime Azure integration.", warning: false },
+            { text: "Excellent query spelling suggestions and entity mappings.", warning: false },
+            { text: "Azure credential system can be complex for indie developers.", warning: true }
+          ]
+        },
+        {
+          id: "fetch-mcp-server",
+          rank: 18,
+          name: "Official Fetch/Puppeteer MCP Server",
+          type: "mcp",
+          description: "Enables AI agents to retrieve raw content or render pages directly from web URLs onto local storage or prompt memory.",
+          pricing: "Free ($0.00). Runs locally on the client runtime.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Zero network API cost: fetches and extracts text instantly.", warning: false },
+            { text: "Standard tool packaged officially with the Model Context Protocol.", warning: false },
+            { text: "Requires managing local proxy blocks if target sites have anti-bot protections.", warning: true }
+          ]
+        },
+        {
+          id: "duckduckgo-mcp-server",
+          rank: 19,
+          name: "DuckDuckGo Search MCP Server",
+          type: "mcp",
+          description: "Enables free web search queries on DuckDuckGo using MCP without any API tokens.",
+          pricing: "Free ($0.00). Runs on local compute.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 80, price: 100, trial: 100, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "No API keys or signup required.", warning: false },
+            { text: "Runs completely locally on client.", warning: false },
+            { text: "Subject to search rate limiting/IP flags if heavily looped.", warning: true }
+          ]
+        },
+        {
+          id: "wikipedia-mcp-server",
+          rank: 20,
+          name: "Wikipedia Search MCP Server",
+          type: "mcp",
+          description: "Allows agents to query and retrieve structured articles and summaries directly from Wikipedia.",
+          pricing: "Free ($0.00). Powered by Wikimedia API.",
+          free_tier: "100% Free / Public Domain.",
+          pricing_multiplier: 0,
+          scores: { performance: 85, price: 100, trial: 100, dx: 90, reliability: 100 },
+          pro_cons: [
+            { text: "Highly structured factual summaries.", warning: false },
+            { text: "Accesses global, multi-lingual knowledge base.", warning: false },
+            { text: "Limited to Wikipedia pages (no general live news index).", warning: true }
+          ]
+        },
+        {
+          id: "scraperapi",
+          rank: 21,
+          name: "ScraperAPI Proxy Scraper",
+          type: "api",
+          description: "Proxy scraping endpoint that handles browser headers, proxy rotations, and CAPTCHAs automatically.",
+          pricing: "Plans start at $49.00/mo (approx. $0.001 per page).",
+          free_tier: "5,000 free API credits upon registration.",
+          pricing_multiplier: 0.001,
+          scores: { performance: 90, price: 80, trial: 80, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Excellent proxy rotation bypasses geo-blocking easily.", warning: false },
+            { text: "Automatically handles Javascript rendering workloads.", warning: false },
+            { text: "Monthly credit caps reset without rollover.", warning: true }
+          ]
+        },
+        {
+          id: "scrapingbee-api",
+          rank: 22,
+          name: "ScrapingBee Chrome Scraper",
+          type: "api",
+          description: "Chrome-headless scraping service that resolves Javascript rendering and premium residential proxy requirements.",
+          pricing: "Plans start at $49.00/mo (uses credit multipliers).",
+          free_tier: "1,000 free scraping credits on signup.",
+          pricing_multiplier: 0.0015,
+          scores: { performance: 92, price: 78, trial: 75, dx: 88, reliability: 95 },
+          pro_cons: [
+            { text: "Top-tier stealth proxy rotation bypasses strict Cloudflare walls.", warning: false },
+            { text: "Supports simple JSON screenshot return parameters.", warning: false },
+            { text: "JS-rendered pages cost a 5x credit multiplier premium.", warning: true }
+          ]
+        },
+        {
+          id: "crawlbase-api",
+          rank: 23,
+          name: "Crawlbase (ProxyCrawl) API",
+          type: "api",
+          description: "Scraping and crawling API designed to charge only for successful 200 OK responses.",
+          pricing: "Plans start at $29/mo or flexible pay-as-you-go options.",
+          free_tier: "1,000 free successful requests on registration.",
+          pricing_multiplier: 0.0005,
+          scores: { performance: 88, price: 85, trial: 80, dx: 85, reliability: 90 },
+          pro_cons: [
+            { text: "Only bills for successful HTML responses, preventing waste on failed queries.", warning: false },
+            { text: "Includes a complete asynchronous web crawler engine.", warning: false },
+            { text: "Stealth residential proxy options require higher credit rates.", warning: true }
+          ]
+        },
+        {
+          id: "socialblade-api-search",
+          rank: 24,
+          name: "Social Blade Cross-Platform Analytics API",
+          type: "api",
+          description: "Research-grade cross-platform audience analytics for YouTube, Twitch, Instagram, and Twitter/X — tracks channel growth, rankings, and subscriber history for competitor intelligence.",
+          pricing: "Paid plans start at $19.00/mo",
+          free_tier: "No free API access (visual console tracker only).",
+          pricing_multiplier: 19.00 / 30,
+          scores: { performance: 90, price: 60, trial: 10, dx: 80, reliability: 95 },
+          pro_cons: [
+            { text: "Pre-aggregated audience growth stats across YouTube, Twitch, Instagram, Twitter.", warning: false },
+            { text: "Trusted industry benchmark for creator/channel growth analytics.", warning: false },
+            { text: "No free developer API tier; dashboard subscription required.", warning: true }
+          ]
+        },
+        {
+          id: "nexlev-niche-finder-search",
+          rank: 25,
+          name: "NexLev YouTube Niche Research Tool",
+          type: "api",
+          description: "AI-powered YouTube niche and market research suite scanning 122M+ channels to surface profitable low-competition niches, RPM predictions, and keyword opportunities.",
+          pricing: "Lite: ~$13/mo. Pro: ~$42/mo.",
+          free_tier: "14-day money-back guarantee only.",
+          pricing_multiplier: 42.00 / 30,
+          scores: { performance: 88, price: 65, trial: 40, dx: 80, reliability: 82 },
+          pro_cons: [
+            { text: "Scans 122M+ channels — one of the largest niche research databases available.", warning: false },
+            { text: "RPM predictor helps estimate channel monetization potential before committing.", warning: false },
+            { text: "No traditional free trial; subscription required to access niche data.", warning: true }
+          ]
+        },
+        {
+          id: "virlo-niche-monitor-search",
+          rank: 26,
+          name: "Virlo Multi-Platform Trend Intelligence",
+          type: "api",
+          description: "Short-form video trend intelligence platform tracking niche and hashtag performance across TikTok, YouTube Shorts, and Instagram Reels. Includes developer API for custom workflows.",
+          pricing: "Starter: $49/mo. Pro: $199/mo. Enterprise: custom.",
+          free_tier: "No free tier listed.",
+          pricing_multiplier: 49.00 / 30,
+          scores: { performance: 88, price: 55, trial: 30, dx: 78, reliability: 82 },
+          pro_cons: [
+            { text: "Unified trend tracking across all 3 major short-form platforms.", warning: false },
+            { text: "Developer API with Slack/Zapier/webhook integration on Pro tier.", warning: false },
+            { text: "No free tier; Starter plan required for any programmatic access.", warning: true }
+          ]
+        },
+        {
+          id: "dataforseo-youtube-search",
+          rank: 27,
+          name: "DataForSEO YouTube SERP & Data API",
+          type: "api",
+          description: "Pay-as-you-go YouTube SERP data, video info, comments, and subtitle extraction API. Industry standard for bulk SEO research pipelines with no monthly subscription.",
+          pricing: "PAYG: $0.60/1K (queued), $1.20/1K (priority), $2.00/1K (live).",
+          free_tier: "$50 minimum deposit; credits never expire.",
+          pricing_multiplier: 0.0012,
+          scores: { performance: 90, price: 75, trial: 60, dx: 82, reliability: 92 },
+          pro_cons: [
+            { text: "No monthly commitment — pay only for data consumed.", warning: false },
+            { text: "Dedicated YouTube endpoints: search results, comments, video info, subtitles.", warning: false },
+            { text: "$50 minimum deposit required to start; no zero-cost trial tier.", warning: true }
+          ]
+        },
+        {
+          id: "serper-dev-youtube-search",
+          rank: 28,
+          name: "Serper.dev YouTube Search API",
+          type: "api",
+          description: "Ultra-fast YouTube search results API (same provider as Serper.dev Google). Returns structured JSON with video metadata, thumbnails, and view counts in under 2 seconds.",
+          pricing: "Credits-based: ~$0.30–$1.00 per 1,000 queries.",
+          free_tier: "2,500 free queries on sign-up.",
+          pricing_multiplier: 0.0005,
+          scores: { performance: 93, price: 85, trial: 85, dx: 92, reliability: 90 },
+          pro_cons: [
+            { text: "Sub-2-second response times — optimal for real-time AI research agents.", warning: false },
+            { text: "Same 2,500 free queries as the Google API; one account covers both.", warning: false },
+            { text: "Less specialized for deep comment or subtitle extraction compared to DataForSEO.", warning: true }
+          ]
+        },
+        {
+          id: "serpapi-youtube-search",
+          rank: 29,
+          name: "SerpAPI YouTube Search API",
+          type: "api",
+          description: "Premium SERP scraping API covering 80+ search engines including dedicated YouTube endpoints. Returns fully structured JSON with video results, channel data, and related queries.",
+          pricing: "Subscription: starts ~$25/mo. ~$3.63–$7.25+ per 1,000 results.",
+          free_tier: "250 free searches/month forever.",
+          pricing_multiplier: 0.005,
+          scores: { performance: 90, price: 60, trial: 70, dx: 88, reliability: 93 },
+          pro_cons: [
+            { text: "250 free searches/month permanent tier — generous for research prototyping.", warning: false },
+            { text: "Single unified API covers Google, YouTube, Bing, Yahoo, Maps, and more.", warning: false },
+            { text: "Higher per-result cost than budget alternatives at scale.", warning: true }
+          ]
+        },
+        {
+          id: "zenserp-youtube-search",
+          rank: 30,
+          name: "Zenserp YouTube SERP API",
+          type: "api",
+          description: "Developer-friendly YouTube and Google SERP API with simple JSON schema and fast response times. Well-suited for research workflows at small-to-medium scale.",
+          pricing: "Subscription: starts ~$49.99/mo. ~$1.00–$2.00 per 1,000 queries.",
+          free_tier: "50 free requests/month.",
+          pricing_multiplier: 0.002,
+          scores: { performance: 86, price: 68, trial: 55, dx: 87, reliability: 85 },
+          pro_cons: [
+            { text: "Consistent JSON schema with minimal setup — easy to onboard.", warning: false },
+            { text: "Good balance of speed and reliability for medium-scale research.", warning: false },
+            { text: "Monthly subscription required; free tier is very limited at 50 requests.", warning: true }
+          ]
+        },
+        {
+          id: "serphouse-youtube-search",
+          rank: 31,
+          name: "SERPHouse YouTube SERP API",
+          type: "api",
+          description: "Budget-focused SERP API with strong YouTube coverage. Best per-request price for high-volume batch research queries with 4,000 free credits and no card required.",
+          pricing: "4,000 free credits on sign-up; paid plans under $1.00 per 1,000 results.",
+          free_tier: "4,000 free credits (no credit card required).",
+          pricing_multiplier: 0.0008,
+          scores: { performance: 84, price: 88, trial: 82, dx: 80, reliability: 83 },
+          pro_cons: [
+            { text: "Most generous free tier in SERP category — 4,000 credits with no card.", warning: false },
+            { text: "Under $1.00/1K pricing makes it ideal for high-volume research at low cost.", warning: false },
+            { text: "Smaller documentation and community than SerpAPI or DataForSEO.", warning: true }
+          ]
+        },
+        {
+          id: "brightdata-youtube-search",
+          rank: 32,
+          name: "Bright Data YouTube Scraper & Dataset API",
+          type: "api",
+          description: "Enterprise-grade YouTube data extraction via Bright Data's Web Scraper API and pre-built dataset marketplace. Supports headless, large-scale research and dataset downloads.",
+          pricing: "~$3.00 per 1,000 page loads (Scraper API). Dataset: ~$2.50/1K records.",
+          free_tier: "Free trial credits available on request.",
+          pricing_multiplier: 0.003,
+          scores: { performance: 93, price: 40, trial: 50, dx: 75, reliability: 95 },
+          pro_cons: [
+            { text: "Pre-built YouTube dataset marketplace for instant bulk data downloads.", warning: false },
+            { text: "Self-healing scrapers and residential proxies ensure near-zero block rate.", warning: false },
+            { text: "Highest per-request cost in the research scraper category.", warning: true }
+          ]
+        },
+        {
+          id: "oxylabs-youtube-search",
+          rank: 33,
+          name: "Oxylabs YouTube SERP Scraper API",
+          type: "api",
+          description: "AI-powered subscription-based YouTube and SERP scraper from Oxylabs. OxyCopilot and self-healing infrastructure make it best for stable enterprise research pipelines.",
+          pricing: "Subscription: ~$49/mo entry. ~$0.50–$1.30 per 1,000 results at scale.",
+          free_tier: "1,000–2,000 free result trial credits.",
+          pricing_multiplier: 0.0013,
+          scores: { performance: 91, price: 60, trial: 60, dx: 78, reliability: 93 },
+          pro_cons: [
+            { text: "AI OxyCopilot auto-generates and maintains scraper code.", warning: false },
+            { text: "Self-healing keeps pipelines stable even as YouTube changes its layout.", warning: false },
+            { text: "Subscription model is less flexible than pay-as-you-go for sporadic research.", warning: true }
+          ]
+        },
+        {
+          id: "scraperapi-youtube-search",
+          rank: 34,
+          name: "ScraperAPI YouTube Proxy Layer",
+          type: "api",
+          description: "Proxy API that transparently handles IP rotation, CAPTCHAs, and retries for your own YouTube parsing code. Simplest entry point for custom YouTube data extraction.",
+          pricing: "Starts $49/mo for 100,000 API credits.",
+          free_tier: "1,000 free API credits on sign-up (no card needed).",
+          pricing_multiplier: 0.00049,
+          scores: { performance: 85, price: 72, trial: 65, dx: 90, reliability: 85 },
+          pro_cons: [
+            { text: "Automatic CAPTCHA bypass, IP rotation, and retry logic out of the box.", warning: false },
+            { text: "1,000 free credits with no card — easiest entry point for experimentation.", warning: false },
+            { text: "Does not parse YouTube data itself; requires your own custom extraction code.", warning: true }
+          ]
+        }
+      ],
+      posting: [
+        {
+          id: "puppeteer-playwright",
+          rank: 4,
+          name: "Custom Puppeteer / Playwright",
+          type: "custom",
+          description: "Locally hosted browser automation scripts. Direct logins and upload flows for all accounts.",
+          pricing: "Free ($0.00). Only requires local compute hosting resources.",
+          free_tier: "100% Free / Open Source",
+          pricing_multiplier: 0,
+          scores: { performance: 90, price: 100, trial: 100, dx: 50, reliability: 50 },
+          pro_cons: [
+            { text: "Zero platform costs and bypasses API validation review gates.", warning: false },
+            { text: "Allows posting to any platform (YouTube, TikTok, Instagram) directly.", warning: false },
+            { text: "Requires maintenance: scripts break if web UI elements change.", warning: true },
+            { text: "Risk of automated account detection/shadowbans if setup is too robotic.", warning: true }
+          ]
+        },
+        {
+          id: "ayrshare-api",
+          rank: 1,
+          name: "Ayrshare API",
+          type: "api",
+          description: "Social media posting infrastructure API. Post programmatically to linked profiles.",
+          pricing: "Lite: $19.00/mo (up to 3 platforms). Premium/SaaS scales per profile.",
+          free_tier: "Free 28-day trial on the Launch plan",
+          pricing_multiplier: 19.00 / 30, // approximate daily overhead fraction
+          scores: { performance: 90, price: 60, trial: 65, dx: 90, reliability: 95 },
+          pro_cons: [
+            { text: "Superb reliability and API stability; official integrations.", warning: false },
+            { text: "Handles image and video processing automatically.", warning: false },
+            { text: "Requires official API connection authorizations.", warning: true }
+          ]
+        },
+        {
+          id: "buffer-api",
+          rank: 2,
+          name: "Buffer API",
+          type: "api",
+          description: "Official social media scheduling tool. Connects cleanly to automate posts.",
+          pricing: "Free (up to 3 channels). Paid tiers start at $6.00/mo per channel.",
+          free_tier: "Free-forever tier (limited to 3 accounts and scheduling cues)",
+          pricing_multiplier: 6.00 / 30,
+          scores: { performance: 85, price: 80, trial: 90, dx: 85, reliability: 95 },
+          pro_cons: [
+            { text: "Extremely safe: posts go through Buffer's official registered app permissions.", warning: false },
+            { text: "Very generous free plan for solo users.", warning: false },
+            { text: "API rate limits can occasionally delay instant posting cycles.", warning: true }
+          ]
+        },
+        {
+          id: "apify-posting-actors",
+          rank: 6,
+          name: "Apify Automated Posting Scripts",
+          type: "api",
+          description: "Run automated browser uploading actors on Apify's cloud cluster.",
+          pricing: "Approx. $0.20 per automated upload run",
+          free_tier: "Free $5.00 monthly credits",
+          pricing_multiplier: 0.20,
+          scores: { performance: 85, price: 80, trial: 80, dx: 75, reliability: 70 },
+          pro_cons: [
+            { text: "Keeps your local machine completely clear of browser tasks.", warning: false },
+            { text: "Provides built-in proxy rotations to avoid IP flags.", warning: false },
+            { text: "Session cookie management requires manual setup.", warning: true }
+          ]
+        },
+        {
+          id: "browserless-headless",
+          rank: 5,
+          name: "Browserless Headless Browser",
+          type: "api",
+          description: "Cloud-hosted Puppeteer/Playwright browser clusters. Scale script execution.",
+          pricing: "Plans start at $29.00/mo (~$0.02 per hour of usage)",
+          free_tier: "6 hours free usage",
+          pricing_multiplier: 0.02 / 3600,
+          scores: { performance: 95, price: 85, trial: 75, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Excellent for multi-threaded browser uploads and script execution.", warning: false },
+            { text: "Reduces server memory issues by moving browsers to the cloud.", warning: false },
+            { text: "Still requires you to write and maintain browser scraping code.", warning: true }
+          ]
+        },
+        {
+          id: "make-zapier-automation",
+          rank: 3,
+          name: "Zapier / Make.com Webhook APIs",
+          type: "api",
+          description: "Integrate low-code automation triggers to dispatch completed video assets directly to socials.",
+          pricing: "Zapier: $19.99/mo base. Make.com: $9.00/mo base (~$0.01 per run)",
+          free_tier: "Zapier: 100 tasks/mo. Make.com: 1,000 tasks/mo",
+          pricing_multiplier: 0.01,
+          scores: { performance: 80, price: 80, trial: 90, dx: 95, reliability: 95 },
+          pro_cons: [
+            { text: "Trivial setup using pre-built visual mapping connections.", warning: false },
+            { text: "Eliminates need for local code execution configurations.", warning: false },
+            { text: "Subject to platform transaction execution quotas and caps.", warning: true }
+          ]
+        },
+        {
+          id: "browserbase-api",
+          rank: 12,
+          name: "Browserbase AI Headless Browser API",
+          type: "api",
+          description: "Managed headless browser hosting built specifically for AI agents, handling session storage, cookies, and stealth anti-bot protections.",
+          pricing: "Usage-based per execution minute (~$0.02/minute), monthly developer plan at $20.00/mo.",
+          free_tier: "60 free browser minutes per month.",
+          pricing_multiplier: 0.02 / 60,
+          scores: { performance: 95, price: 85, trial: 80, dx: 95, reliability: 95 },
+          pro_cons: [
+            { text: "Excellent session recording and browser inspection logs.", warning: false },
+            { text: "Sophisticated proxy-routing and canvas fingerprint spoofing.", warning: false },
+            { text: "Quotas limit long-running continuous session streams.", warning: true }
+          ]
+        },
+        {
+          id: "bright-data-browser",
+          rank: 13,
+          name: "Bright Data Scraping Browser API",
+          type: "api",
+          description: "Enterprise-scale cloud browser automation cluster integrated with elite proxy networks and automatic CAPTCHA bypassing.",
+          pricing: "Pay-as-you-go proxy bandwidth based (~$8.00/GB of traffic).",
+          free_tier: "Trial credits available on request.",
+          pricing_multiplier: 0.20,
+          scores: { performance: 98, price: 40, trial: 20, dx: 80, reliability: 100 },
+          pro_cons: [
+            { text: "Flawless bypass rate against advanced bot-detection systems.", warning: false },
+            { text: "Seamless scaling to thousands of concurrent headless profiles.", warning: false },
+            { text: "Very high operational budget overhead for simple uploads.", warning: true }
+          ]
+        },
+        {
+          id: "multilogin-api",
+          rank: 14,
+          name: "Multilogin Antidetect Automation API",
+          type: "api",
+          description: "Isolates and controls individual browser profiles/fingerprints to log in and post to social accounts without association bans.",
+          pricing: "Plans start at approx. $10.00/mo. Developer API access requires high plans.",
+          free_tier: "Demo profile options upon email signup.",
+          pricing_multiplier: 10.00 / 30,
+          scores: { performance: 92, price: 75, trial: 40, dx: 70, reliability: 95 },
+          pro_cons: [
+            { text: "Completely separates canvas hashes, audio signatures, and session cookies.", warning: false },
+            { text: "Safest method to manage multiple target channel uploads.", warning: false },
+            { text: "Requires setting up local browser engine daemons on client host.", warning: true }
+          ]
+        },
+        {
+          id: "phantombuster-api",
+          rank: 15,
+          name: "Phantombuster Cloud Automation API",
+          type: "api",
+          description: "Pre-made social media outbound automation scripts ('Phantoms') running fully in the cloud.",
+          pricing: "Plans start at $69.00/mo (billed by execution time minutes).",
+          free_tier: "14-day free trial on signup.",
+          pricing_multiplier: 69.00 / 30,
+          scores: { performance: 85, price: 60, trial: 70, dx: 80, reliability: 90 },
+          pro_cons: [
+            { text: "Fully cloud-hosted: no local browser or code execution required.", warning: false },
+            { text: "Includes built-in proxy support for individual social networks.", warning: false },
+            { text: "Strict execution minute quotas restrict bulk uploading pipelines.", warning: true }
+          ]
+        },
+        {
+          id: "playwright-mcp-server",
+          rank: 16,
+          name: "Official Playwright Browser MCP Server",
+          type: "mcp",
+          description: "Standard model context server wrapping Playwright. Allows agents to navigate, click, fill inputs, and fetch pages in real-time.",
+          pricing: "Free ($0.00). Powered by local system execution.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Gives AI agent real-time direct interactive visual control of a web browser.", warning: false },
+            { text: "Allows taking screenshots to monitor automation workflows.", warning: false },
+            { text: "Requires developer setup and session state storage management.", warning: true }
+          ]
+        },
+        {
+          id: "agentql-api",
+          rank: 17,
+          name: "AgentQL AI Selector API",
+          type: "api",
+          description: "AI-based selector engine for Playwright and Puppeteer, allowing elements to be identified semantically instead of via brittle XPaths.",
+          pricing: "Starter plan is free, Professional plan starts at $99.00/mo.",
+          free_tier: "50 free calls/month + 10 hours remote browser.",
+          pricing_multiplier: 99.00 / 30,
+          scores: { performance: 94, price: 70, trial: 80, dx: 95, reliability: 95 },
+          pro_cons: [
+            { text: "Semantic selectors ignore changes to visual layouts or class tags.", warning: false },
+            { text: "Extremely resilient script execution.", warning: false },
+            { text: "API pricing structure scales up for heavy recursive scrapes.", warning: true }
+          ]
+        },
+        {
+          id: "stagehand-framework",
+          rank: 18,
+          name: "Stagehand AI Browser Automation",
+          type: "custom",
+          description: "Playwright-based AI browser automation framework from Browserbase, using LLMs to navigate and act naturally.",
+          pricing: "Free and Open Source (software), pay only for LLM tokens.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 93, price: 85, trial: 100, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Allows natural language automation directives (e.g. 'go to settings and toggle dark mode').", warning: false },
+            { text: "Auto-detects DOM interactive fields natively.", warning: false },
+            { text: "Reliability depends on the accuracy of the underlying LLM logic.", warning: true }
+          ]
+        },
+        {
+          id: "robocorp-rpa",
+          rank: 19,
+          name: "Robocorp (Sema4.ai) RPA API",
+          type: "api",
+          description: "Enterprise Python-based RPA browser automation platform running high-volume tasks concurrently in the cloud.",
+          pricing: "Pay-as-you-go run time models (~$0.10 per run minute).",
+          free_tier: "Free developer tier (240 run minutes/month).",
+          pricing_multiplier: 0.10,
+          scores: { performance: 90, price: 80, trial: 85, dx: 85, reliability: 95 },
+          pro_cons: [
+            { text: "Designed for stable enterprise orchestration workflows.", warning: false },
+            { text: "Robust control rooms and scheduling portals.", warning: false },
+            { text: "Requires setting up work item schemas for code script packages.", warning: true }
+          ]
+        },
+        {
+          id: "selenium-grid",
+          rank: 20,
+          name: "Selenium Grid / WebDriver",
+          type: "custom",
+          description: "The classic open-source industry standard for deterministic web browser control across multiple platforms.",
+          pricing: "Free ($0.00). Open-source client libraries.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 85, price: 100, trial: 100, dx: 70, reliability: 90 },
+          pro_cons: [
+            { text: "Supports massive parallel executions across browsers (Chrome, Firefox, Safari).", warning: false },
+            { text: "Extensive developer history and community documentation.", warning: false },
+            { text: "Brittle selectors require manual upkeep when layouts modify.", warning: true }
+          ]
+        },
+        {
+          id: "puppeteer-mcp-server",
+          rank: 21,
+          name: "Official Puppeteer Browser MCP Server",
+          type: "mcp",
+          description: "Official MCP wrapper exposing Chrome Puppeteer automation tools directly to AI client runtimes.",
+          pricing: "Free ($0.00). Operates on local client machine resources.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Direct native integrations with standard MCP servers.", warning: false },
+            { text: "Zero computational or API fee charges.", warning: false },
+            { text: "Needs local Chrome runtime environment setup in order to function.", warning: true }
+          ]
+        }
+      ],
+      yt: [
+        {
+          id: "youtube-data-api",
+          rank: 2,
+          name: "Official YouTube Data API v3",
+          type: "api",
+          description: "Official Google interface to search videos, retrieve channel statistics, and upload clips.",
+          pricing: "Free quota-based system (10,000 free quota points/day)",
+          free_tier: "100% Free up to standard daily quota limits",
+          pricing_multiplier: 0,
+          scores: { performance: 90, price: 100, trial: 100, dx: 85, reliability: 100 },
+          pro_cons: [
+            { text: "Highest reliable uptime, zero risk of IP blocks.", warning: false },
+            { text: "Does not cost money under standard developer workloads.", warning: false },
+            { text: "Quota cost for uploading videos is high; requires audit/request for higher limits.", warning: true },
+            { text: "Cannot extract transcript scripts (requires separate scraper).", warning: true }
+          ]
+        },
+        {
+          id: "youtube-transcript-api",
+          rank: 1,
+          name: "youtube-transcript-api (Python)",
+          type: "custom",
+          description: "Lightweight wrapper that extracts subtitle text from videos without requiring official API tokens.",
+          pricing: "Free ($0.00). Requires simple script execution.",
+          free_tier: "100% Free / Open Source",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 90, reliability: 75 },
+          pro_cons: [
+            { text: "Direct, fast access to video scripts and transcript structures.", warning: false },
+            { text: "Bypasses need for official Google API setup tasks.", warning: false },
+            { text: "May occasionally run into Google bot-check/rate block policies if heavily looped.", warning: true }
+          ]
+        },
+        {
+          id: "socialblade-api",
+          rank: 4,
+          name: "Social Blade Analytics API",
+          type: "api",
+          description: "Access cross-platform stats (YouTube, Twitch, Instagram, Twitter) for competitor tracking.",
+          pricing: "Paid plans start at $19.00/mo",
+          free_tier: "No free API access (Console visual tracker only)",
+          pricing_multiplier: 19.00 / 30,
+          scores: { performance: 90, price: 60, trial: 10, dx: 80, reliability: 95 },
+          pro_cons: [
+            { text: "Pre-aggregated audience growth stats and trends across multiple channels.", warning: false },
+            { text: "Highly trusted metrics database.", warning: false },
+            { text: "No free tier for developers; require subscription.", warning: true }
+          ]
+        },
+        {
+          id: "rapidapi-youtube",
+          rank: 3,
+          name: "RapidAPI YouTube Scraper API",
+          type: "api",
+          description: "Unofficial APIs that expose video lists, channels, subtitles, and search comments without quotas.",
+          pricing: "Average $0.01 per 100 queries",
+          free_tier: "100–500 free queries per month depending on vendor",
+          pricing_multiplier: 0.0001,
+          scores: { performance: 85, price: 90, trial: 80, dx: 85, reliability: 80 },
+          pro_cons: [
+            { text: "Gets access to full video comments, transcript metadata, and searches.", warning: false },
+            { text: "Bypasses standard Google Console quotas.", warning: false },
+            { text: "Vendor stability on RapidAPI can vary over time.", warning: true }
+          ]
+        },
+        {
+          id: "ytdlp-mcp-server",
+          rank: 5,
+          name: "yt-dlp YouTube MCP Server",
+          type: "mcp",
+          description: "Open-source MCP server powered by yt-dlp. Gives AI agents tools to extract video metadata, subtitles, and thumbnails from YouTube and 1000+ sites.",
+          pricing: "Free ($0.00). Requires local yt-dlp installation.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 100, dx: 85, reliability: 85 },
+          pro_cons: [
+            { text: "Works across 1,000+ video platforms beyond YouTube.", warning: false },
+            { text: "No API keys, quotas, or rate limits.", warning: false },
+            { text: "Occasional breakage when YouTube updates its internal structures.", warning: true }
+          ]
+        },
+        {
+          id: "youtube-mcp-server",
+          rank: 6,
+          name: "YouTube MCP Server (mcp-youtube)",
+          type: "mcp",
+          description: "Popular open-source MCP server that lets AI agents search YouTube videos, fetch metadata, and extract transcripts without official API quota.",
+          pricing: "Free ($0.00). Community-maintained open-source package.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 90, price: 100, trial: 100, dx: 90, reliability: 80 },
+          pro_cons: [
+            { text: "Simple, zero-configuration plug-and-play MCP integration.", warning: false },
+            { text: "Extracts transcripts, titles, descriptions, and channel data natively.", warning: false },
+            { text: "Dependent on community maintenance; not officially Google-supported.", warning: true }
+          ]
+        },
+        {
+          id: "apify-youtube-scraper",
+          rank: 7,
+          name: "Apify YouTube Channel Scraper",
+          type: "api",
+          description: "High-volume YouTube channel, video, and comment data extractor running on Apify's cloud actor infrastructure.",
+          pricing: "Pay-per-result model (~$0.40–$2.40 per 1,000 results).",
+          free_tier: "Free $5.00 monthly credits.",
+          pricing_multiplier: 0.0024,
+          scores: { performance: 88, price: 80, trial: 80, dx: 80, reliability: 80 },
+          pro_cons: [
+            { text: "Bulk channel crawling with no daily quota limitations.", warning: false },
+            { text: "Returns structured JSON with full comment trees and analytics.", warning: false },
+            { text: "Actor stability varies across different community actor authors.", warning: true }
+          ]
+        },
+        {
+          id: "apify-youtube-search",
+          rank: 8,
+          name: "Apify YouTube Search Scraper",
+          type: "api",
+          description: "Keyword-based YouTube search monitoring and trending video tracker for niche research.",
+          pricing: "Pay-per-result model (~$0.50 per 1,000 search results).",
+          free_tier: "Free $5.00 monthly credits.",
+          pricing_multiplier: 0.0005,
+          scores: { performance: 85, price: 85, trial: 80, dx: 80, reliability: 80 },
+          pro_cons: [
+            { text: "Real-time keyword monitoring for viral niche detection.", warning: false },
+            { text: "Returns thumbnail URLs, view counts, and publish timestamps.", warning: false },
+            { text: "Cannot access private video analytics or channel-specific admin data.", warning: true }
+          ]
+        },
+        {
+          id: "instagram-graph-api",
+          rank: 9,
+          name: "Instagram Graph API (Meta)",
+          type: "api",
+          description: "Official Meta developer API for accessing Instagram business accounts, post insights, audience analytics, and scheduling media.",
+          pricing: "Free (no per-call charges). Requires approved Facebook App Review.",
+          free_tier: "Free once app is approved.",
+          pricing_multiplier: 0,
+          scores: { performance: 88, price: 95, trial: 20, dx: 65, reliability: 90 },
+          pro_cons: [
+            { text: "Official, zero-cost access to Instagram business insights.", warning: false },
+            { text: "Supports media publishing and comment moderation via API.", warning: false },
+            { text: "Extremely slow, months-long App Review approval process required.", warning: true }
+          ]
+        },
+        {
+          id: "tiktok-research-api",
+          rank: 10,
+          name: "TikTok Research API",
+          type: "api",
+          description: "Official TikTok Research API providing access to public video metadata, user statistics, and trending content for verified researchers.",
+          pricing: "Free for approved academic/non-profit research institutions.",
+          free_tier: "Free (restricted to approved institutions only).",
+          pricing_multiplier: 0,
+          scores: { performance: 85, price: 90, trial: 10, dx: 60, reliability: 85 },
+          pro_cons: [
+            { text: "Official, zero-cost access to public TikTok video and user data.", warning: false },
+            { text: "Structured JSON with engagement metrics and hashtag metadata.", warning: false },
+            { text: "Strictly gated — only available to academic/non-profit orgs, not commercial.", warning: true }
+          ]
+        },
+        {
+          id: "reddit-praw-api",
+          rank: 11,
+          name: "Reddit Official API (PRAW)",
+          type: "api",
+          description: "Official Reddit API via the PRAW Python wrapper. Provides access to subreddit posts, comments, user data, and trending threads.",
+          pricing: "Free up to 100 req/min. Commercial use billed at ~$0.24 per 1,000 calls.",
+          free_tier: "Free rate-limited developer tier (OAuth required).",
+          pricing_multiplier: 0.00024,
+          scores: { performance: 85, price: 85, trial: 80, dx: 85, reliability: 90 },
+          pro_cons: [
+            { text: "Structured Python wrapper (PRAW) for easy subreddit and thread traversal.", warning: false },
+            { text: "Real-time access to post scores, comment trees, and user karma.", warning: false },
+            { text: "Commercial use requires formal agreement; scraping at scale is restricted.", warning: true }
+          ]
+        },
+        {
+          id: "linkedin-api",
+          rank: 12,
+          name: "LinkedIn Marketing / Partner API",
+          type: "api",
+          description: "LinkedIn's official API ecosystem for accessing company pages, post analytics, marketing data, and member profile lookups.",
+          pricing: "Free basic auth; advanced Marketing/Talent APIs require enterprise Partner Program.",
+          free_tier: "Free (Sign In with LinkedIn only).",
+          pricing_multiplier: 20.00 / 30,
+          scores: { performance: 85, price: 40, trial: 10, dx: 50, reliability: 95 },
+          pro_cons: [
+            { text: "Official access to company insights and LinkedIn Campaign Manager data.", warning: false },
+            { text: "Reliable enterprise-grade SLA guarantees.", warning: false },
+            { text: "Months-long Partner Program approval required for commercial data access.", warning: true }
+          ]
+        },
+        {
+          id: "x-twitter-api-v2",
+          rank: 13,
+          name: "X (Twitter) API v2",
+          type: "api",
+          description: "Official X platform API for reading tweets, trending hashtags, user timelines, and posting content programmatically.",
+          pricing: "Pay-per-use model: ~$0.015 per post, ~$0.005 per post read.",
+          free_tier: "Highly restricted write-only free stub.",
+          pricing_multiplier: 0.005,
+          scores: { performance: 88, price: 40, trial: 10, dx: 75, reliability: 80 },
+          pro_cons: [
+            { text: "Official, structured real-time access to tweet streams and user data.", warning: false },
+            { text: "Supports filtering by keyword, hashtag, and user at scale.", warning: false },
+            { text: "Pay-per-use pricing is extremely expensive at high read volumes.", warning: true }
+          ]
+        },
+        {
+          id: "meta-graph-api",
+          rank: 14,
+          name: "Meta Graph API (Facebook)",
+          type: "api",
+          description: "Official Meta Graph API providing access to Facebook Pages, Groups, audience insights, and Marketing API for ad management.",
+          pricing: "Free (no per-call charges). Requires Facebook App Review approval.",
+          free_tier: "Free once business-verified app is approved.",
+          pricing_multiplier: 0,
+          scores: { performance: 88, price: 90, trial: 20, dx: 65, reliability: 95 },
+          pro_cons: [
+            { text: "Access Facebook Pages, Groups, Events, and ad campaign insights.", warning: false },
+            { text: "Includes Marketing API for automated ad creation and audience targeting.", warning: false },
+            { text: "App Review and business verification process is complex and slow.", warning: true }
+          ]
+        },
+        {
+          id: "youtube-analytics-api",
+          rank: 15,
+          name: "YouTube Analytics API (Official)",
+          type: "api",
+          description: "Official Google API for querying channel analytics: views, watch time, audience demographics, traffic sources, and engagement — restricted to channels you own.",
+          pricing: "Free. OAuth2 access for channel owners only.",
+          free_tier: "100% Free (own channels only).",
+          pricing_multiplier: 0,
+          scores: { performance: 95, price: 100, trial: 80, dx: 80, reliability: 100 },
+          pro_cons: [
+            { text: "Real-time, custom-filtered analytics dashboard data including revenue metrics.", warning: false },
+            { text: "Same data as YouTube Studio — official, zero risk.", warning: false },
+            { text: "Strictly limited to channels you own; cannot analyze competitors.", warning: true }
+          ]
+        },
+        {
+          id: "youtube-reporting-api",
+          rank: 16,
+          name: "YouTube Reporting API (Official)",
+          type: "api",
+          description: "Official Google bulk CSV report downloader for historical channel analytics, audience retention, and ad performance at scale.",
+          pricing: "Free. OAuth2 access for channel owners only.",
+          free_tier: "100% Free (own channels only).",
+          pricing_multiplier: 0,
+          scores: { performance: 88, price: 100, trial: 80, dx: 75, reliability: 100 },
+          pro_cons: [
+            { text: "Designed for large-scale data warehousing and BI tool integration.", warning: false },
+            { text: "Pre-generated CSV reports eliminate quota pressure of per-request calls.", warning: false },
+            { text: "Not real-time; reports have a daily generation lag.", warning: true }
+          ]
+        },
+        {
+          id: "transcript-api-mcp",
+          rank: 17,
+          name: "TranscriptAPI MCP (kimtaeyoon83)",
+          type: "mcp",
+          description: "Highly popular MCP server for YouTube transcript extraction with timestamp support, video search, channel browsing, and playlist extraction. Works with Claude, Cursor, and GPT.",
+          pricing: "Free ($0.00). Open-source community package.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 92, price: 100, trial: 100, dx: 92, reliability: 82 },
+          pro_cons: [
+            { text: "6 distinct tools: transcripts, search, channel browser, playlist extractor.", warning: false },
+            { text: "Optional TwelveLabs integration for AI video analysis.", warning: false },
+            { text: "Not officially maintained by Google or YouTube.", warning: true }
+          ]
+        },
+        {
+          id: "youtube-marketing-skills-mcp",
+          rank: 18,
+          name: "YouTube Marketing Skills MCP (LobeHub)",
+          type: "mcp",
+          description: "MCP server focused on YouTube SEO and keyword research: live SERP data, channel analytics, content strategy suggestions — a headless VidIQ/TubeBuddy alternative for AI agents.",
+          pricing: "Free ($0.00). Open-source package on npm.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 85, price: 100, trial: 100, dx: 88, reliability: 78 },
+          pro_cons: [
+            { text: "Keyword difficulty, search volume, and live YouTube SERP data for AI agents.", warning: false },
+            { text: "Content strategy suggestions and channel competitive analysis built-in.", warning: false },
+            { text: "Community-maintained; quality depends on upstream YouTube structure changes.", warning: true }
+          ]
+        },
+        {
+          id: "nexlev-niche-finder",
+          rank: 19,
+          name: "NexLev YouTube Niche Finder",
+          type: "api",
+          description: "AI-powered YouTube niche research suite scanning 122M+ channels to surface growth opportunities, estimated RPM predictions, and low-competition niches for faceless channels.",
+          pricing: "Lite: ~$13/mo. Pro (Extension + Niche Finder): ~$42/mo.",
+          free_tier: "14-day money-back guarantee only.",
+          pricing_multiplier: 42.00 / 30,
+          scores: { performance: 88, price: 65, trial: 40, dx: 80, reliability: 82 },
+          pro_cons: [
+            { text: "Scans 122M+ channels for untapped niche opportunities with RPM predictions.", warning: false },
+            { text: "35+ AI features overlay directly onto YouTube Studio interface.", warning: false },
+            { text: "No free trial; subscription required to access niche database.", warning: true }
+          ]
+        },
+        {
+          id: "virlo-niche-monitor",
+          rank: 20,
+          name: "Virlo Multi-Platform Niche Monitor",
+          type: "api",
+          description: "Short-form video intelligence platform tracking trends and niche performance across TikTok, YouTube Shorts, and Instagram Reels with a developer API for custom integrations.",
+          pricing: "Starter: $49/mo. Pro: $199/mo. Enterprise: custom.",
+          free_tier: "No free tier listed.",
+          pricing_multiplier: 49.00 / 30,
+          scores: { performance: 88, price: 55, trial: 30, dx: 78, reliability: 82 },
+          pro_cons: [
+            { text: "Unified niche trend tracking across TikTok, YT Shorts, and Reels.", warning: false },
+            { text: "Developer API with Slack/Zapier/webhook integration on Pro tier.", warning: false },
+            { text: "No free tier; Starter plan required for API access.", warning: true }
+          ]
+        },
+        {
+          id: "dataforseo-youtube-api",
+          rank: 21,
+          name: "DataForSEO YouTube SERP API",
+          type: "api",
+          description: "Pay-as-you-go YouTube SERP, video info, comments, and subtitle extraction API with queued/priority/live modes. Industry standard for bulk SEO data pipelines.",
+          pricing: "Pay-as-you-go: $0.60/1K (queued), $1.20/1K (priority), $2.00/1K (live).",
+          free_tier: "$50 minimum deposit to start; credits never expire.",
+          pricing_multiplier: 0.0012,
+          scores: { performance: 90, price: 75, trial: 60, dx: 82, reliability: 92 },
+          pro_cons: [
+            { text: "No monthly subscription — pay only for what you use.", warning: false },
+            { text: "Dedicated YouTube endpoints: search, comments, video info, subtitles.", warning: false },
+            { text: "$50 minimum deposit required; no free tier.", warning: true }
+          ]
+        },
+        {
+          id: "serper-dev-youtube",
+          rank: 22,
+          name: "Serper.dev YouTube Search API",
+          type: "api",
+          description: "Ultra-fast YouTube search results API ideal for AI agents. Returns structured JSON with video metadata, thumbnails, and view counts in under 2 seconds.",
+          pricing: "Credits-based: ~$0.30–$1.00 per 1,000 queries depending on volume.",
+          free_tier: "2,500 free queries on sign-up.",
+          pricing_multiplier: 0.0005,
+          scores: { performance: 93, price: 85, trial: 85, dx: 92, reliability: 90 },
+          pro_cons: [
+            { text: "Sub-2-second response times — ideal for real-time AI agent workflows.", warning: false },
+            { text: "2,500 free queries on sign-up for immediate testing.", warning: false },
+            { text: "Less specialized than DataForSEO for deep comment or subtitle extraction.", warning: true }
+          ]
+        },
+        {
+          id: "serpapi-youtube",
+          rank: 23,
+          name: "SerpAPI YouTube Search API",
+          type: "api",
+          description: "Premium, veteran SERP scraping API with 80+ search engines including YouTube. Returns fully structured JSON with video results, channel data, and related content.",
+          pricing: "Subscription: starts ~$25/mo. Approx $3.63–$7.25+ per 1,000 results.",
+          free_tier: "250 free searches/month forever.",
+          pricing_multiplier: 0.005,
+          scores: { performance: 90, price: 60, trial: 70, dx: 88, reliability: 93 },
+          pro_cons: [
+            { text: "250 free searches/month — generously accessible for development.", warning: false },
+            { text: "Covers 80+ search engines beyond YouTube in one unified API.", warning: false },
+            { text: "Higher per-request cost than budget alternatives at scale.", warning: true }
+          ]
+        },
+        {
+          id: "zenserp-youtube",
+          rank: 24,
+          name: "Zenserp YouTube SERP API",
+          type: "api",
+          description: "Developer-friendly SERP API supporting YouTube, Google, and others. Praised for ease of integration, speed, and simple JSON schema output.",
+          pricing: "Subscription: starts ~$49.99/mo. ~$1.00–$2.00 per 1,000 queries at scale.",
+          free_tier: "50 free requests/month.",
+          pricing_multiplier: 0.002,
+          scores: { performance: 86, price: 68, trial: 55, dx: 87, reliability: 85 },
+          pro_cons: [
+            { text: "Simple, consistent JSON schema with minimal setup required.", warning: false },
+            { text: "Good balance of reliability and simplicity for small-medium projects.", warning: false },
+            { text: "Monthly subscription required; free tier is very limited (50 req).", warning: true }
+          ]
+        },
+        {
+          id: "serphouse-youtube",
+          rank: 25,
+          name: "SERPHouse YouTube SERP API",
+          type: "api",
+          description: "Budget-focused SERP API with strong YouTube and video-SERP coverage. Explicitly advertises competitive per-request pricing for large-volume batch queries.",
+          pricing: "4,000 free credits on sign-up; paid plans under $1.00 per 1,000 results.",
+          free_tier: "4,000 free credits (no credit card required).",
+          pricing_multiplier: 0.0008,
+          scores: { performance: 84, price: 88, trial: 82, dx: 80, reliability: 83 },
+          pro_cons: [
+            { text: "4,000 free credits to start — the most generous free tier in SERP category.", warning: false },
+            { text: "Under $1.00/1K pricing makes it excellent for high-volume batch workflows.", warning: false },
+            { text: "Smaller community and less documentation than SerpAPI or DataForSEO.", warning: true }
+          ]
+        },
+        {
+          id: "brightdata-youtube-scraper",
+          rank: 26,
+          name: "Bright Data YouTube Scraper API",
+          type: "api",
+          description: "Enterprise-grade cloud YouTube data extraction via Bright Data's Web Scraper API and pre-built dataset marketplace. Supports headless scraping at massive scale.",
+          pricing: "~$3.00 per 1,000 page loads (Scraper API). Dataset: ~$2.50/1K records.",
+          free_tier: "Free trial credits available on request.",
+          pricing_multiplier: 0.003,
+          scores: { performance: 93, price: 40, trial: 50, dx: 75, reliability: 95 },
+          pro_cons: [
+            { text: "Highest enterprise reliability with pre-built YouTube dataset marketplace.", warning: false },
+            { text: "Self-healing scrapers and residential proxy network for zero block rate.", warning: false },
+            { text: "One of the highest per-request costs in the category.", warning: true }
+          ]
+        },
+        {
+          id: "oxylabs-youtube-scraper",
+          rank: 27,
+          name: "Oxylabs YouTube SERP Scraper API",
+          type: "api",
+          description: "Subscription-based YouTube scraper API from Oxylabs with AI-powered OxyCopilot, self-healing infrastructure, and high success rates for large-volume batch scraping.",
+          pricing: "Subscription: ~$49/mo entry. ~$0.50–$1.30 per 1,000 results at scale.",
+          free_tier: "1,000–2,000 free result trial credits.",
+          pricing_multiplier: 0.0013,
+          scores: { performance: 91, price: 60, trial: 60, dx: 78, reliability: 93 },
+          pro_cons: [
+            { text: "AI-powered OxyCopilot simplifies scraper development and maintenance.", warning: false },
+            { text: "Self-healing infrastructure maintains high success rates automatically.", warning: false },
+            { text: "Monthly subscription model less flexible than pay-as-you-go alternatives.", warning: true }
+          ]
+        },
+        {
+          id: "scraperapi-youtube",
+          rank: 28,
+          name: "ScraperAPI YouTube Proxy Layer",
+          type: "api",
+          description: "Developer-friendly proxy API that handles IP rotation, CAPTCHAs, and retries automatically, allowing your own YouTube parsing code to run without blocks.",
+          pricing: "Starts $49/mo for 100,000 API credits.",
+          free_tier: "1,000 free API credits on sign-up (no card needed).",
+          pricing_multiplier: 0.00049,
+          scores: { performance: 85, price: 72, trial: 65, dx: 90, reliability: 85 },
+          pro_cons: [
+            { text: "Fully automatic CAPTCHA solving, IP rotation, and retry logic included.", warning: false },
+            { text: "1,000 free credits with no card required — easiest entry in proxy category.", warning: false },
+            { text: "Does not parse YouTube data; requires your own extraction logic.", warning: true }
+          ]
+        },
+        {
+          id: "phantombuster-social-api",
+          rank: 29,
+          name: "PhantomBuster Social Automation API",
+          type: "api",
+          description: "Cloud-based social media automation and data extraction platform for LinkedIn, Instagram, Twitter/X, and YouTube. Trigger automations programmatically via REST API.",
+          pricing: "Entry plan: ~$69/mo (20hr execution). Pro: ~$159/mo. Team: ~$439/mo.",
+          free_tier: "14-day free trial on all plans.",
+          pricing_multiplier: 69.00 / 30,
+          scores: { performance: 82, price: 50, trial: 60, dx: 72, reliability: 78 },
+          pro_cons: [
+            { text: "Covers LinkedIn, Instagram, Twitter/X, Facebook, and YouTube in one platform.", warning: false },
+            { text: "REST API lets you programmatically trigger and stream automation results.", warning: false },
+            { text: "Account safety risks; social platforms may restrict accounts for automation.", warning: true }
+          ]
+        },
+        {
+          id: "ayrshare-social-api",
+          rank: 30,
+          name: "Ayrshare Unified Social Media API",
+          type: "api",
+          description: "API-first unified social media platform: post, schedule, and pull analytics across 13+ networks (YouTube, Instagram, TikTok, LinkedIn, X, Bluesky, Threads, Pinterest, Reddit) with a single API call.",
+          pricing: "Premium: $149/mo (1 profile). Launch: $299/mo (10 profiles). Business: $599/mo (30 profiles).",
+          free_tier: "28-day free trial on Launch plan.",
+          pricing_multiplier: 149.00 / 30,
+          scores: { performance: 88, price: 40, trial: 70, dx: 90, reliability: 90 },
+          pro_cons: [
+            { text: "Single API call to post across 13+ social networks simultaneously.", warning: false },
+            { text: "Comprehensive analytics API: 100s of fields for video retention and demographics.", warning: false },
+            { text: "Expensive profile-based pricing escalates quickly for agencies.", warning: true }
+          ]
+        },
+        {
+          id: "buffer-api-yt",
+          rank: 31,
+          name: "Buffer Social Scheduling API",
+          type: "api",
+          description: "Developer-accessible social media scheduling API via GraphQL. Supports YouTube, Instagram, Facebook, Twitter/X, and LinkedIn. Most accessible management-tool API for indie developers.",
+          pricing: "Included in all Buffer plans. Free plan available.",
+          free_tier: "Free plan: 3 channels, 10 scheduled posts.",
+          pricing_multiplier: 0,
+          scores: { performance: 80, price: 85, trial: 90, dx: 82, reliability: 88 },
+          pro_cons: [
+            { text: "Free plan includes API access — unique in the scheduling platform category.", warning: false },
+            { text: "GraphQL-based API with SDKs for easy multi-platform scheduling automation.", warning: false },
+            { text: "Limited to scheduling/posting; no deep analytics or scraping capabilities.", warning: true }
+          ]
+        },
+        {
+          id: "bluesky-atprotocol-mcp",
+          rank: 32,
+          name: "Bluesky AT Protocol MCP Server",
+          type: "mcp",
+          description: "Open-source MCP server for the Bluesky decentralized social network. Allows AI agents to fetch timelines, search posts, retrieve profiles, create posts, and react to content.",
+          pricing: "Free ($0.00). Open-source community package.",
+          free_tier: "100% Free / Open Source (no API key cost).",
+          pricing_multiplier: 0,
+          scores: { performance: 85, price: 100, trial: 100, dx: 85, reliability: 80 },
+          pro_cons: [
+            { text: "Permissionless open protocol — no API gating or cost for reading/writing.", warning: false },
+            { text: "Full read/write: timelines, search, profile fetch, post, like, repost.", warning: false },
+            { text: "Bluesky's smaller audience base compared to X/Twitter or Meta.", warning: true }
+          ]
+        },
+        {
+          id: "mastodon-mcp-server",
+          rank: 33,
+          name: "Mastodon Fediverse MCP Server",
+          type: "mcp",
+          description: "Open-source MCP server for the Mastodon/Fediverse decentralized social network. Supports reading timelines, posting, following, notifications, and trending data across any Mastodon instance.",
+          pricing: "Free ($0.00). Open-source community package.",
+          free_tier: "100% Free / Open Source.",
+          pricing_multiplier: 0,
+          scores: { performance: 82, price: 100, trial: 100, dx: 80, reliability: 78 },
+          pro_cons: [
+            { text: "Works with ANY Mastodon instance via configurable MASTODON_INSTANCE URL.", warning: false },
+            { text: "Supports stdio and HTTP transports for local or remote deployment.", warning: false },
+            { text: "Federated network fragmentation means data is spread across many instances.", warning: true }
+          ]
+        },
+        {
+          id: "apify-tiktok-scraper-yt",
+          rank: 34,
+          name: "Apify TikTok Scraper",
+          type: "api",
+          description: "Cloud actor infrastructure for scraping TikTok user profiles, video metadata, comments, hashtag pages, and trending content at scale via Apify's marketplace.",
+          pricing: "Pay-per-result: ~$0.30–$2.30 per 1,000 results.",
+          free_tier: "Free $5.00 monthly credits.",
+          pricing_multiplier: 0.0023,
+          scores: { performance: 85, price: 78, trial: 78, dx: 80, reliability: 75 },
+          pro_cons: [
+            { text: "Pre-built actors for TikTok profiles, hashtags, trending, and comments.", warning: false },
+            { text: "No official TikTok API key required; bypass official Research API restrictions.", warning: false },
+            { text: "TikTok's aggressive anti-bot updates may cause actor instability.", warning: true }
+          ]
+        },
+        {
+          id: "lamatokio-tiktok-api",
+          rank: 35,
+          name: "LamaTok TikTok Data API",
+          type: "api",
+          description: "Per-request TikTok data extraction API specializing in granular, per-call cost control. Returns video stats, user profiles, hashtag analytics, and sound metadata.",
+          pricing: "Pay-per-request: from ~$0.0006 per call.",
+          free_tier: "Small free credit allowance on sign-up.",
+          pricing_multiplier: 0.0006,
+          scores: { performance: 83, price: 90, trial: 70, dx: 80, reliability: 76 },
+          pro_cons: [
+            { text: "Ultra-granular per-call pricing — ideal for low-volume automated workflows.", warning: false },
+            { text: "Returns structured JSON for video stats, sounds, hashtags, and profiles.", warning: false },
+            { text: "Less widely known than Apify; smaller community and fewer examples.", warning: true }
+          ]
+        },
+        {
+          id: "apify-reddit-scraper-yt",
+          rank: 36,
+          name: "Apify Reddit Content Scraper",
+          type: "api",
+          description: "Scrapes subreddits, posts, comments, and users. Essential for identifying viral discussion hooks, trending topics, and audience pain points for video research.",
+          pricing: "Approx. $0.50 per 1,000 posts extracted.",
+          free_tier: "Free $5.00 monthly trial credits.",
+          pricing_multiplier: 0.0005,
+          scores: { performance: 88, price: 80, trial: 80, dx: 80, reliability: 75 },
+          pro_cons: [
+            { text: "Extracts authentic audience feedback and viral hook ideas from Reddit threads.", warning: false },
+            { text: "No official Reddit API key required; bypasses rate-limit restrictions.", warning: false },
+            { text: "Reddit's anti-scraping walls can cause speed throttles at high volume.", warning: true }
+          ]
+        },
+        {
+          id: "apify-instagram-scraper-yt",
+          rank: 37,
+          name: "Apify Instagram Content Scraper",
+          type: "api",
+          description: "Crawls Instagram profiles, posts, Reels, hashtags, and likes for cross-platform social trend research and competitor content analysis.",
+          pricing: "Approx. $1.50 per 1,000 post records extracted.",
+          free_tier: "Free $5.00 monthly trial credits.",
+          pricing_multiplier: 0.0015,
+          scores: { performance: 85, price: 70, trial: 80, dx: 75, reliability: 65 },
+          pro_cons: [
+            { text: "Fetches Reels metrics, comment analytics, and hashtag engagement data.", warning: false },
+            { text: "Bypasses the complex Meta Developer App Review process.", warning: false },
+            { text: "Meta's bot detection can trigger login verification challenges at scale.", warning: true }
+          ]
+        },
+        {
+          id: "apify-x-scraper-yt",
+          rank: 38,
+          name: "Apify Twitter/X Crawler",
+          type: "api",
+          description: "Real-time tweet extraction, trending hashtag monitoring, and account analytics tracker. Useful for identifying viral social hooks and trending topics for video content.",
+          pricing: "$2.00 per 1,000 tweets retrieved.",
+          free_tier: "Free $5.00 monthly trial credits.",
+          pricing_multiplier: 0.002,
+          scores: { performance: 80, price: 65, trial: 80, dx: 80, reliability: 70 },
+          pro_cons: [
+            { text: "Extracts real-time viral threads and trending hashtags for content research.", warning: false },
+            { text: "Much cheaper than X's official paid API tiers for research use.", warning: false },
+            { text: "High risk of IP blocks if scraping volume is too fast or unthrottled.", warning: true }
+          ]
+        }
+      ]
+    };
+
+    // State
+    let activeSelections = {
+      llm: "gemini-15-flash",
+      video: "heygen-v3",
+      search: "brave-search-api",
+      posting: "puppeteer-playwright",
+      yt: "youtube-transcript-api"
+    };
+
+    // UI Theme Setter
+    function toggleLightMode(btn) {
+      document.body.classList.toggle('light-mode');
+      btn.classList.toggle('active');
+      localStorage.setItem('lightModeActive', document.body.classList.contains('light-mode') ? 'true' : 'false');
+    }
+
+    function setTheme(themeName, btn) {
+      const isLight = document.body.classList.contains('light-mode');
+      document.body.className = '';
+      document.body.classList.add('theme-' + themeName);
+      if (isLight) {
+        document.body.classList.add('light-mode');
+      }
+      localStorage.setItem('activeThemePreset', themeName);
+      document.querySelectorAll('.theme-btn').forEach(b => {
+        if (b.getAttribute('onclick') && b.getAttribute('onclick').includes('setTheme')) {
+          b.classList.remove('active');
+        }
+      });
+      btn.classList.add('active');
+    }
+
+    // Draw Card Component
+    function createCard(provider, categoryKey) {
+      const card = document.createElement("div");
+      const isSelected = activeSelections[categoryKey] === provider.id;
+      card.className = `option-card ${isSelected ? 'selected' : ''}`;
+      card.id = `card-${provider.id}`;
+      card.onclick = (e) => {
+        // Prevent opening details drawer from triggering selection double event
+        if (e.target.closest('.view-details-trigger')) return;
+        selectProvider(categoryKey, provider.id);
+      };
+
+      // Calculate Average Score
+      const scores = provider.scores;
+      const avg = ((scores.performance + scores.price + scores.trial + scores.dx + scores.reliability) / 5).toFixed(1);
+
+      card.innerHTML = `
+      <div class="card-top">
+        <span class="card-name">${provider.name}</span>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+          <span class="card-badge ${provider.type}">${provider.type}</span>
+          <span class="mono" style="font-size: 11px; font-weight: bold; color: var(--amber);">Rank #${provider.rank}</span>
+        </div>
+      </div>
+      <div class="card-description">${provider.description}</div>
+      
+      <div class="card-details-row">
+        <div><span class="card-detail">Pricing: <strong>${provider.pricing}</strong></span></div>
+        <div><span class="card-detail">Trial: <strong>${provider.free_tier}</strong></span></div>
+      </div>
+
+      <div class="scores-grid">
+        <div class="score-bar-wrapper">
+          <span class="score-label">Perf: ${scores.performance}</span>
+          <div class="score-bar-container"><div class="score-bar perf" style="width: ${scores.performance}%"></div></div>
+        </div>
+        <div class="score-bar-wrapper">
+          <span class="score-label">Price: ${scores.price}</span>
+          <div class="score-bar-container"><div class="score-bar price" style="width: ${scores.price}%"></div></div>
+        </div>
+        <div class="score-bar-wrapper">
+          <span class="score-label">Trial: ${scores.trial}</span>
+          <div class="score-bar-container"><div class="score-bar trial" style="width: ${scores.trial}%"></div></div>
+        </div>
+        <div class="score-bar-wrapper">
+          <span class="score-label">DX: ${scores.dx}</span>
+          <div class="score-bar-container"><div class="score-bar dx" style="width: ${scores.dx}%"></div></div>
+        </div>
+        <div class="score-bar-wrapper">
+          <span class="score-label">Safety: ${scores.reliability}</span>
+          <div class="score-bar-container"><div class="score-bar rel" style="style" style="width: ${scores.reliability}%"></div></div>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; text-align: right;">
+        <span class="mono view-details-trigger" style="font-size: 10px; color: var(--violet); text-transform: uppercase; cursor: pointer; text-decoration: underline;" onclick="openDetails('${categoryKey}', '${provider.id}')">
+          Specs & Deep-dive
+        </span>
+      </div>
+    `;
+
+      // Slight timeout adjustment for CSS animations to register widths
+      setTimeout(() => {
+        const bars = card.querySelectorAll('.score-bar');
+        bars.forEach(bar => {
+          // Workaround to make style attribute updates smooth
+          if (bar.classList.contains('rel')) {
+            bar.style.width = scores.reliability + '%';
+          }
+        });
+      }, 50);
+
+      return card;
+    }
+
+    // Populate Lists
+    function populateDirectory() {
+      filterProviders();
+    }
+
+    // Filter Providers logic
+    function filterProviders() {
+      const sortBy = document.getElementById('sort-by').value;
+      const categoryFilter = document.getElementById('filter-category').value;
+      const typeFilter = document.getElementById('filter-type').value;
+      const trialFilter = document.getElementById('filter-trial').value;
+      const dxFilter = document.getElementById('filter-dx').value;
+      const safetyFilter = document.getElementById('filter-safety').value;
+      const perfFilter = document.getElementById('filter-perf').value;
+
+      Object.keys(providersData).forEach(cat => {
+        const listEl = document.getElementById(`${cat}-options`);
+        const containerPanel = document.getElementById(`panel-${cat}`);
+        listEl.innerHTML = '';
+
+        let visibleCount = 0;
+
+        // Copy and sort based on selected metric
+        let sortedProviders = [...providersData[cat]];
+        if (sortBy === 'rank') {
+          sortedProviders.sort((a, b) => a.rank - b.rank);
+        } else if (sortBy === 'performance') {
+          sortedProviders.sort((a, b) => b.scores.performance - a.scores.performance);
+        } else if (sortBy === 'price') {
+          sortedProviders.sort((a, b) => b.scores.price - a.scores.price);
+        } else if (sortBy === 'trial') {
+          sortedProviders.sort((a, b) => b.scores.trial - a.scores.trial);
+        } else if (sortBy === 'dx') {
+          sortedProviders.sort((a, b) => b.scores.dx - a.scores.dx);
+        } else if (sortBy === 'reliability') {
+          sortedProviders.sort((a, b) => b.scores.reliability - a.scores.reliability);
+        }
+
+        sortedProviders.forEach(provider => {
+          // Apply filters
+          const matchesType = typeFilter === 'all' || provider.type === typeFilter;
+          const matchesTrial = trialFilter === 'all' ||
+            (trialFilter === 'generous' && provider.scores.trial >= 70) ||
+            (trialFilter === 'paid-only' && provider.scores.trial < 70);
+          const matchesDX = dxFilter === 'all' || (dxFilter === 'easy' && provider.scores.dx >= 80);
+          const matchesSafety = safetyFilter === 'all' || (safetyFilter === 'high' && provider.scores.reliability >= 80);
+          const matchesPerf = perfFilter === 'all' ||
+            (perfFilter === 'high' && provider.scores.performance >= 85) ||
+            (perfFilter === 'medium' && provider.scores.performance >= 60 && provider.scores.performance < 85) ||
+            (perfFilter === 'low' && provider.scores.performance < 60);
+
+          if (matchesType && matchesTrial && matchesDX && matchesSafety && matchesPerf) {
+            listEl.appendChild(createCard(provider, cat));
+            visibleCount++;
+          }
+        });
+
+        // Hide panel if no options are visible, or if this category is explicitly filtered out
+        const matchesCategory = categoryFilter === 'all' || cat === categoryFilter;
+        if (visibleCount === 0 || !matchesCategory) {
+          containerPanel.style.display = 'none';
+        } else {
+          containerPanel.style.display = 'block';
+        }
+      });
+
+      updateStackPanel();
+      recalculateCosts();
+    }
+
+    function resetFilters() {
+      document.getElementById('sort-by').value = 'rank';
+      document.getElementById('filter-category').value = 'all';
+      document.getElementById('filter-type').value = 'all';
+      document.getElementById('filter-trial').value = 'all';
+      document.getElementById('filter-dx').value = 'all';
+      document.getElementById('filter-safety').value = 'all';
+      document.getElementById('filter-perf').value = 'all';
+      filterProviders();
+    }
+
+    // Select Option
+    function selectProvider(categoryKey, providerId) {
+      activeSelections[categoryKey] = providerId;
+      localStorage.setItem('activeSelections', JSON.stringify(activeSelections));
+
+      // Toggle Selected CSS classes
+      document.querySelectorAll(`#${categoryKey}-options .option-card`).forEach(card => {
+        card.classList.remove('selected');
+      });
+      document.getElementById(`card-${providerId}`).classList.add('selected');
+
+      updateStackPanel();
+      recalculateCosts();
+    }
+
+    // Current Stack Display Panel
+    function updateStackPanel() {
+      const listEl = document.getElementById("current-stack-list");
+      listEl.innerHTML = '';
+
+      const categoriesText = {
+        llm: "LLM / Scripting",
+        video: "Video Production",
+        search: "Search & Intel",
+        posting: "Browser Posting",
+        yt: "YouTube scraping"
+      };
+
+      Object.keys(activeSelections).forEach(cat => {
+        const selectedId = activeSelections[cat];
+        const provider = providersData[cat].find(p => p.id === selectedId);
+
+        const div = document.createElement("div");
+        div.className = "stack-item";
+        div.innerHTML = `
+        <span class="stack-layer">${categoriesText[cat]}</span>
+        <span class="stack-selection">${provider.name}</span>
+      `;
+        listEl.appendChild(div);
+      });
+    }
+
+    // Calculate projected operating costs
+    function recalculateCosts() {
+      const videosCount = parseInt(document.getElementById("videos-count-slider").value);
+      const videoDurSeconds = parseInt(document.getElementById("video-dur-slider").value);
+      const estTokens = parseInt(document.getElementById("tokens-slider").value);
+
+      // Calculate details
+      let totalCost = 0;
+
+      // LLM costs
+      const selectedLLM = providersData.llm.find(p => p.id === activeSelections.llm);
+      // Rough simulation: 1 call for research, 1 call for formatting script per video
+      const tokenMultiplier = selectedLLM.pricing_multiplier;
+      const llmCost = videosCount * estTokens * tokenMultiplier * 2;
+
+      // Video costs
+      const selectedVideo = providersData.video.find(p => p.id === activeSelections.video);
+      const videoCost = videosCount * videoDurSeconds * selectedVideo.pricing_multiplier;
+
+      // Search costs (say 20 searches/scrapes per video)
+      const selectedSearch = providersData.search.find(p => p.id === activeSelections.search);
+      const searchCost = videosCount * 20 * selectedSearch.pricing_multiplier;
+
+      // Posting costs (mostly zero or SaaS API overhead)
+      const selectedPosting = providersData.posting.find(p => p.id === activeSelections.posting);
+      const postingCost = selectedPosting.pricing_multiplier * 30; // base monthly charge approximation
+
+      // YouTube tools (always $0 in standard setups)
+      const selectedYt = providersData.yt.find(p => p.id === activeSelections.yt);
+      const ytCost = selectedYt.pricing_multiplier * videosCount;
+
+      totalCost = llmCost + videoCost + searchCost + postingCost + ytCost;
+
+      // Update display
+      document.getElementById("monthly-total").textContent = `$${totalCost.toFixed(2)}`;
+    }
+
+    // Export JSON configuration object
+    function exportConfig() {
+      const config = {
+        project: "Jarvis AI Automated Video Machine",
+        timestamp: new Date().toISOString(),
+        architecture: {
+          logic_module: {
+            provider_id: activeSelections.llm,
+            name: providersData.llm.find(p => p.id === activeSelections.llm).name
+          },
+          video_rendering: {
+            provider_id: activeSelections.video,
+            name: providersData.video.find(p => p.id === activeSelections.video).name
+          },
+          search_engine: {
+            provider_id: activeSelections.search,
+            name: providersData.search.find(p => p.id === activeSelections.search).name
+          },
+          posting_connector: {
+            provider_id: activeSelections.posting,
+            name: providersData.posting.find(p => p.id === activeSelections.posting).name
+          },
+          yt_intelligence: {
+            provider_id: activeSelections.yt,
+            name: providersData.yt.find(p => p.id === activeSelections.yt).name
+          }
+        },
+        estimated_monthly_volume: {
+          videos: parseInt(document.getElementById("videos-count-slider").value),
+          avg_seconds: parseInt(document.getElementById("video-dur-slider").value),
+          token_workload: parseInt(document.getElementById("tokens-slider").value)
+        }
+      };
+
+      const area = document.getElementById("export-area");
+      area.textContent = JSON.stringify(config, null, 2);
+      area.style.display = 'block';
+    }
+
+    // Details drawer handler
+    function openDetails(cat, id) {
+      const provider = providersData[cat].find(p => p.id === id);
+      const overlay = document.getElementById("drawer-overlay");
+      const content = document.getElementById("drawer-content");
+
+      content.innerHTML = `
+      <div class="drawer-subtitle">${cat} // Specification Sheet</div>
+      <h2 class="drawer-title">${provider.name}</h2>
+      <div style="font-size: 13.5px; color: var(--fog); line-height: 1.5; margin-bottom: 24px;">
+        ${provider.description}
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">Financing & Quotas</div>
+        <div class="drawer-metric">
+          <span class="drawer-metric-label">Pricing Base:</span>
+          <span class="drawer-metric-val">${provider.pricing}</span>
+        </div>
+        <div class="drawer-metric">
+          <span class="drawer-metric-label">Free Tier Details:</span>
+          <span class="drawer-metric-val">${provider.free_tier}</span>
+        </div>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">Technical Index Scores</div>
+        <div class="score-detail-group">
+          ${createDrawerScoreRow("Performance", provider.scores.performance, "perf")}
+          ${createDrawerScoreRow("Price Score", provider.scores.price, "price")}
+          ${createDrawerScoreRow("Free Trial", provider.scores.trial, "trial")}
+          ${createDrawerScoreRow("Dev Experience", provider.scores.dx, "dx")}
+          ${createDrawerScoreRow("Reliability / Safety", provider.scores.reliability, "rel")}
+        </div>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">Key Capabilities & Overhead Risks</div>
+        <ul class="checklist">
+          ${provider.pro_cons.map(item => `
+            <li class="checklist-item ${item.warning ? 'warning' : ''}">${item.text}</li>
+          `).join('')}
+        </ul>
+      </div>
+    `;
+
+      overlay.classList.add("show");
+
+      // Smoothly animate drawer score bars
+      setTimeout(() => {
+        content.querySelectorAll(".score-progress-bar").forEach(bar => {
+          const targetWidth = bar.getAttribute("data-width");
+          bar.style.width = targetWidth + "%";
+        });
+      }, 100);
+    }
+
+    function createDrawerScoreRow(label, score, colorClass) {
+      return `
+      <div class="score-detail-row">
+        <span class="score-name">${label}</span>
+        <span class="score-num">${score}/100</span>
+        <div class="score-progress-container">
+          <div class="score-progress-bar ${colorClass}" data-width="${score}"></div>
+        </div>
+      </div>
+    `;
+    }
+
+    function closeDrawer(e) {
+      if (e.target.id === "drawer-overlay") {
+        document.getElementById("drawer-overlay").classList.remove("show");
+      }
+    }
+    function closeDrawerDirect() {
+      document.getElementById("drawer-overlay").classList.remove("show");
+    }
+
+    // Set up Event Listeners for sliders
+    document.getElementById("videos-count-slider").oninput = function () {
+      document.getElementById("videos-count-val").textContent = this.value;
+      localStorage.setItem('videosCount', this.value);
+      recalculateCosts();
+    };
+    document.getElementById("video-dur-slider").oninput = function () {
+      const mins = (this.value / 60).toFixed(1);
+      document.getElementById("video-dur-val").textContent = `${mins}m (${this.value}s)`;
+      localStorage.setItem('videoDuration', this.value);
+      recalculateCosts();
+    };
+    document.getElementById("tokens-slider").oninput = function () {
+      document.getElementById("tokens-val").textContent = parseInt(this.value).toLocaleString();
+      localStorage.setItem('tokenWorkload', this.value);
+      recalculateCosts();
+    };
+
+    // Initialize from memory (localStorage)
+    function initMemory() {
+      const savedSelections = localStorage.getItem('activeSelections');
+      if (savedSelections) {
+        activeSelections = JSON.parse(savedSelections);
+      }
+      const savedTheme = localStorage.getItem('activeThemePreset') || 'cyberpunk';
+      const themeButtons = document.querySelectorAll('.theme-btn');
+      let targetBtn = themeButtons[1]; // default Cyberpunk button
+      themeButtons.forEach(btn => {
+        if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(`setTheme('${savedTheme}'`)) {
+          targetBtn = btn;
+        }
+      });
+      setTheme(savedTheme, targetBtn);
+
+      const savedLightMode = localStorage.getItem('lightModeActive');
+      const lightModeBtn = themeButtons[0]; // first button in list is toggleLightMode
+      if (savedLightMode === 'true') {
+        document.body.classList.add('light-mode');
+        lightModeBtn.classList.add('active');
+      } else if (savedLightMode === 'false') {
+        document.body.classList.remove('light-mode');
+        lightModeBtn.classList.remove('active');
+      }
+
+      // Restore calculator slider parameters
+      const savedVideos = localStorage.getItem('videosCount');
+      if (savedVideos) {
+        document.getElementById("videos-count-slider").value = savedVideos;
+        document.getElementById("videos-count-val").textContent = savedVideos;
+      }
+      const savedDuration = localStorage.getItem('videoDuration');
+      if (savedDuration) {
+        document.getElementById("video-dur-slider").value = savedDuration;
+        const mins = (savedDuration / 60).toFixed(1);
+        document.getElementById("video-dur-val").textContent = `${mins}m (${savedDuration}s)`;
+      }
+      const savedTokens = localStorage.getItem('tokenWorkload');
+      if (savedTokens) {
+        document.getElementById("tokens-slider").value = savedTokens;
+        document.getElementById("tokens-val").textContent = parseInt(savedTokens).toLocaleString();
+      }
+    }
+
+    // Initialize
+    initMemory();
+    populateDirectory();
+  </script>
+</body>
+
+</html>
