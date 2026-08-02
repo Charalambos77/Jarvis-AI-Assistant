@@ -1,7 +1,11 @@
 import json
 import os
+import subprocess
+import time
+import threading
 from typing import Any
 
+import requests
 from dotenv import load_dotenv
 
 try:
@@ -11,16 +15,125 @@ except ImportError:
     genai = None  # type: ignore[assignment]
     types = None  # type: ignore[assignment]
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 import db
 from connectors.api_connector import call_external_api
 from connectors.mcp_connector import call_mcp
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "second_brain.db")
+
+def get_ollama_config():
+    try:
+        settings_path = os.path.join(BASE_DIR, "settings.json")
+        if os.path.exists(settings_path):
+            with open(settings_path, "r") as f:
+                sett = json.load(f)
+        else:
+            sett = {}
+    except Exception:
+        sett = {}
+    
+    url = sett.get("ollama_url") or os.getenv("OLLAMA_URL") or "http://127.0.0.1:11434"
+    model = sett.get("ollama_model") or os.getenv("OLLAMA_MODEL") or "qwen2.5:3b"
+    force_cpu = sett.get("ollama_force_cpu", False) or (os.getenv("OLLAMA_FORCE_CPU", "false").lower() == "true")
+    return url, model, force_cpu
+
+def ensure_ollama_running(url, model, force_cpu):
+    try:
+        res = requests.get(f"{url}/api/tags", timeout=1)
+        if res.status_code == 200:
+            print("[Ollama] Server is already running.")
+            return
+    except Exception:
+        pass
+
+    def start_server(cpu_only=False):
+        if cpu_only:
+            print("[Ollama] Starting programmatically in CPU-only mode...")
+            env = os.environ.copy()
+            env["CUDA_VISIBLE_DEVICES"] = ""
+        else:
+            print("[Ollama] Starting programmatically (GPU enabled)...")
+            env = None
+
+        try:
+            return subprocess.Popen(
+                ["ollama", "serve"],
+                env=env,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except Exception as e:
+            print(f"[Ollama] Failed to spawn Ollama server process: {e}")
+            return None
+
+    proc = start_server(cpu_only=force_cpu)
+    if not proc:
+        return
+
+    success = False
+    for _ in range(10):
+        time.sleep(1)
+        # Check if the process died (crashed on GPU start)
+        if proc.poll() is not None:
+            print(f"[Ollama] Server process terminated prematurely with exit code: {proc.returncode}")
+            break
+        try:
+            res = requests.get(f"{url}/api/tags", timeout=1)
+            if res.status_code == 200:
+                # Try loading the model to force-check CUDA driver compatibility
+                try:
+                    show_res = requests.post(f"{url}/api/show", json={"name": model}, timeout=3)
+                    if show_res.status_code == 200:
+                        success = True
+                        print("[Ollama] Server started and model loaded successfully.")
+                        break
+                    else:
+                        print(f"[Ollama] Model load returned error {show_res.status_code}: {show_res.text}")
+                except Exception as e:
+                    print(f"[Ollama] Exception while loading model: {e}")
+                    break
+        except Exception:
+            pass
+
+    if not success and not force_cpu:
+        print("[Ollama] GPU mode failed or crashed during model check. Initiating CPU-only fallback...")
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+
+        if os.name == 'nt':
+            subprocess.run(["taskkill", "/f", "/im", "ollama.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["taskkill", "/f", "/im", "ollama app.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        proc_cpu = start_server(cpu_only=True)
+        if proc_cpu:
+            for _ in range(10):
+                time.sleep(1)
+                try:
+                    if requests.get(f"{url}/api/tags", timeout=1).status_code == 200:
+                        print("[Ollama] Server started successfully on CPU fallback.")
+                        try:
+                            requests.post(f"{url}/api/show", json={"name": model}, timeout=2)
+                        except Exception:
+                            pass
+                        break
+                except Exception:
+                    pass
+
+threading.Thread(target=lambda: ensure_ollama_running(*get_ollama_config()), daemon=True).start()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 TOOLS = [
     {
@@ -162,6 +275,17 @@ TOOLS = [
             "required": ["action"],
         },
     },
+    {
+        "name": "google_search",
+        "description": "Search the web for real-time information, weather, news, current events, or general knowledge questions.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query to send to Google."}
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 
@@ -174,6 +298,25 @@ def focus_tasks_impl(task_ids):
         task_ids = []
     return {"status": "focused", "task_ids": task_ids}
 
+
+def outsource_google_search(query: str) -> str:
+    if not has_gemini() or client is None:
+        return "Google Search is not configured because the Gemini API key is missing."
+    try:
+        print(f"[Gemini Search Outsource] Searching: '{query}'")
+        search_config = types.GenerateContentConfig(
+            tools=[{"google_search": {}}],
+            system_instruction="You are a search grounding assistant. Search the web for the user's query and provide a factual, concise summary of the results with references if appropriate."
+        )
+        res = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=query,
+            config=search_config
+        )
+        return res.text or "No results found."
+    except Exception as e:
+        print(f"Error in outsourced Google Search: {e}")
+        return f"Failed to perform search: {e}"
 
 TOOL_IMPL = {
     "add_task": lambda conn, **kw: db.add_task(conn, **kw),
@@ -188,6 +331,7 @@ TOOL_IMPL = {
     "focus_tasks": lambda conn, **kw: focus_tasks_impl(**kw),
     "call_external_api": lambda conn, **kw: call_external_api(conn, **kw),
     "call_mcp": lambda conn, **kw: call_mcp(conn, **kw),
+    "google_search": lambda conn, query: outsource_google_search(query),
 }
 
 def has_gemini() -> bool:
@@ -288,35 +432,13 @@ def fallback_message() -> str:
 
 def proofread_text(text: str) -> str:
     """
-    Checks the given text for spelling and grammatical errors, correcting them
-    to ensure smooth delivery without changing the meaning or style.
+    Returns the text directly. The local model is responsible for generating
+    grammatically correct, speech-ready output.
     """
-    if not text or not has_gemini() or client is None:
-        return text
-
-    prompt = (
-        "You are an assistant's output proofreader. Review the following text for spelling, "
-        "grammatical errors, and typos. Correct them so it reads naturally and is ready to be spoken. "
-        "Do NOT change the style, tone, or information content. Keep it short. "
-        "Return ONLY the corrected text, with no preamble, comments, or quotes.\n\n"
-        f"Text: {text}"
-    )
-    try:
-        res = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=prompt,
-        )
-        if res.text:
-            cleaned = res.text.strip()
-            if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
-                cleaned = cleaned[1:-1].strip()
-            if cleaned != text:
-                print(f"[Proofreader] Corrected: '{text}' -> '{cleaned}'")
-            return cleaned
-    except Exception as e:
-        print(f"Error proofreading text: {e}")
     return text
 
+
+OLLAMA_CHAT_HISTORY = []
 
 def handle_request(transcript: str) -> str:
     conn = db.get_connection(DB_PATH)
@@ -332,21 +454,96 @@ def handle_request(transcript: str) -> str:
                     print(f"Error in tool listener: {e}")
             return format_tool_response(result)
 
-        if not has_gemini():
-            return fallback_message()
+        ollama_url, ollama_model, _ = get_ollama_config()
 
-        chat = get_chat_session()
-        response = chat.send_message(transcript)
+        if not OpenAI:
+            return "OpenAI library not installed. Please run pip install -r requirements.txt."
+
+        openai_tools = []
+        for t in TOOLS:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["parameters"]
+                }
+            })
+
+        client_ollama = OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama")
+
+        global OLLAMA_CHAT_HISTORY
+        # If history is empty, add system prompt
+        if not any(m.get("role") == "system" for m in OLLAMA_CHAT_HISTORY):
+            OLLAMA_CHAT_HISTORY.append({
+                "role": "system",
+                "content": (
+                    "You are a helpful personal assistant with access to the user's task "
+                    "and note database, as well as Google Search for real-time information. "
+                    "Use the database tools when the user asks you to add, list, complete, "
+                    "delete or search tasks and notes. If the user asks about anything else "
+                    "(like the weather, news, math, general knowledge, etc.), use the google_search tool "
+                    "to find the answer. You can perform multiple operations at once if the user requests it. "
+                    "You can set the priority of a task to 'low', 'medium', or 'high' if the user requests it. "
+                    "If the user speaks about a specific task, or asks to show/open/focus on it, "
+                    "you MUST invoke 'focus_tasks' with its ID. If multiple tasks seem to match "
+                    "or if there is ambiguity, invoke 'focus_tasks' with all potential matching task IDs "
+                    "so the UI can highlight them and let the user narrow it down. "
+                    "CRITICAL: Keep replies extremely brief, concise, and conversational (ideally under 1-2 sentences) "
+                    "since they'll be read aloud. Avoid long explanations."
+                )
+            })
+
+        # Append user message
+        OLLAMA_CHAT_HISTORY.append({"role": "user", "content": transcript})
 
         for _ in range(5):
-            if not response.function_calls:
-                break
+            try:
+                response = client_ollama.chat.completions.create(
+                    model=ollama_model,
+                    messages=OLLAMA_CHAT_HISTORY,
+                    tools=openai_tools,
+                    tool_choice="auto"
+                )
+            except Exception as e:
+                print(f"Error calling Ollama API: {e}")
+                return f"Sorry, I had trouble talking to the local model: {e}"
+            
+            choice = response.choices[0]
+            message = choice.message
+            
+            # Convert choice.message to a dict format compatible with history
+            assistant_msg = {
+                "role": "assistant",
+                "content": message.content or ""
+            }
+            if message.tool_calls:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    } for tc in message.tool_calls
+                ]
+            
+            OLLAMA_CHAT_HISTORY.append(assistant_msg)
 
-            response_parts = []
-            for call in response.function_calls:
-                fname = call.name
-                fargs = call.args
-                print(f"[tool call] {fname}({fargs})")
+            if not message.tool_calls:
+                # No more tool calls, we have our final text reply
+                reply = message.content or ""
+                return proofread_text(reply)
+
+            # We have tool calls, process them
+            for tool_call in message.tool_calls:
+                fname = tool_call.function.name
+                try:
+                    fargs = json.loads(tool_call.function.arguments or "{}")
+                except Exception:
+                    fargs = {}
+                print(f"[Ollama tool call] {fname}({fargs})")
                 try:
                     result = perform_tool_action(conn, fname, **fargs)
                     for listener in tool_listeners:
@@ -356,16 +553,17 @@ def handle_request(transcript: str) -> str:
                             print(f"Error in tool listener: {e}")
                 except Exception as e:
                     result = {"error": str(e)}
-                response_parts.append(
-                    types.Part.from_function_response(
-                        name=fname,
-                        response={"result": json.dumps(result, default=str)},
-                    )
-                )
 
-            response = chat.send_message(response_parts)
+                # Append tool response
+                OLLAMA_CHAT_HISTORY.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": fname,
+                    "content": json.dumps(result, default=str)
+                })
 
-        return proofread_text(response.text)
+        # Fallback if loop exceeded
+        return "I processed your request but took too many steps."
     finally:
         conn.close()
 

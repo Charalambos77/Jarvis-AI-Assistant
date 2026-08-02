@@ -8,3 +8,4 @@ numpy
 pywebview
 flask
 mcp
+openai
