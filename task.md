@@ -1,0 +1,6 @@
+- [x] Clean up syntax error/extra tags at the end of `command_center.html`
+- [x] Implement text navigation check for pages and panel triggers (e.g. "show plan", "close panel") in `command_center.html`
+- [x] Update `pollState` logic in `command_center.html` to process `focus_task_ids` correctly (focus on 3D node for 1/2/3, center on brain core for 0, or open live list for db tasks)
+- [x] Implement Phase 1: Signals and state triggers (`coordinator.py`, `jarvis.py`)
+- [x] Implement Phase 2: Live constellation node registry and 3D WebGL animation queue (`command_center.html`)
+- [x] Implement Phase 3: Testing & Verification (`test_endpoints.py`)

@@ -51,6 +51,14 @@ WAKE_WORD_THRESHOLD = 0.5   # lower = more sensitive (more false triggers)
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280           # openWakeWord expects 80ms chunks at 16kHz
 
+# Global speech recognizer configuration
+recognizer = sr.Recognizer()
+recognizer.energy_threshold = 300
+recognizer.dynamic_energy_threshold = True
+recognizer.dynamic_energy_adjustment_damping = 0.15
+recognizer.dynamic_energy_ratio = 1.5
+recognizer.pause_threshold = 0.8
+
 def speak(text: str):
     print(f"[Jarvis] {text}")
     
@@ -124,10 +132,8 @@ def handle_request(transcript: str) -> str:
 # ---------------------------------------------------------------------------
 
 def record_and_transcribe() -> str | None:
-    recognizer = sr.Recognizer()
     mic = sr.Microphone(sample_rate=SAMPLE_RATE)
     with mic as source:
-        recognizer.adjust_for_ambient_noise(source, duration=0.3)
         print("Listening...")
         try:
             audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
@@ -149,6 +155,11 @@ def record_and_transcribe() -> str | None:
 # ---------------------------------------------------------------------------
 
 def main():
+    print("Calibrating microphone for ambient noise...")
+    with sr.Microphone(sample_rate=SAMPLE_RATE) as source:
+        recognizer.adjust_for_ambient_noise(source, duration=1.0)
+    print(f"Calibrated energy threshold: {recognizer.energy_threshold:.2f}")
+
     print("Loading wake word model (Hey Jarvis)...")
     openwakeword.utils.download_models()
     oww_model = WakeModel(wakeword_models=["hey_jarvis"])

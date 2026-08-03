@@ -3,5 +3,6 @@
   "voice_speed": 200,
   "wake_word_threshold": 0.9,
   "ollama_url": "http://127.0.0.1:11434",
-  "ollama_model": "qwen2.5:3b"
+  "ollama_model": "qwen2.5:3b",
+  "provider": "gemini"
 }

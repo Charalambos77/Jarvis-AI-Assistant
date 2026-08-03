@@ -344,7 +344,7 @@ def outsource_google_search(query: str) -> str:
             system_instruction="You are a search grounding assistant. Search the web for the user's query and provide a factual, concise summary of the results with references if appropriate."
         )
         res = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-2.5-flash",
             contents=query,
             config=search_config
         )
@@ -382,17 +382,15 @@ if has_gemini():
         system_instruction=(
             "You are a helpful personal assistant with access to the user's task "
             "and note database, as well as Google Search for real-time information. "
+            "The user interface is a 3D Constellation Map where tasks are represented as nodes connected to a central brain core, and details slide in using a collapsible side panel. "
             "Use the database tools when the user asks you to add, list, complete, "
-            "delete or search tasks and notes. If the user asks about anything else "
-            "(like the weather, news, math, general knowledge, etc.), use the Google Search tool "
-            "to find the answer. You can perform multiple operations at once if the user requests it. "
-            "You can set the priority of a task to 'low', 'medium', or 'high' if the user requests it. "
+            "delete or search tasks and notes. The interface will automatically play 3D animations (like lasers, explosions, and warps) to reflect these database changes. "
             "If the user speaks about a specific task, or asks to show/open/focus on it, "
-            "you MUST invoke 'focus_tasks' with its ID. If multiple tasks seem to match "
-            "or if there is ambiguity, invoke 'focus_tasks' with all potential matching task IDs "
-            "so the UI can highlight them and let the user narrow it down. "
+            "you MUST invoke 'focus_tasks' with its ID. If multiple tasks seem to match, "
+            "invoke 'focus_tasks' with all potential matching IDs. "
+            "For general navigation commands (like 'show plan', 'open plan', 'close panel', 'focus on brain', or 'go to sleep'), you should respond conversationally to confirm the action (e.g. 'Opening your plan page' or 'Closing panel') and the frontend will handle the visual movement automatically. "
             "CRITICAL: Keep replies extremely brief, concise, and conversational (ideally under 1-2 sentences) "
-            "since they'll be read aloud. Avoid long explanations."
+            "since they'll be read aloud. Avoid long explanations. "
             "When the user asks to interact with an external service or connect to a system "
             "outside the local database, you may use call_external_api or call_mcp, but only if the user explicitly requires it."
         ),
@@ -415,7 +413,7 @@ def get_chat_session():
 
     global CHAT_SESSION
     if CHAT_SESSION is None:
-        CHAT_SESSION = client.chats.create(model="gemini-3.5-flash", config=config)
+        CHAT_SESSION = client.chats.create(model="gemini-2.5-flash", config=config)
     return CHAT_SESSION
 
 
@@ -491,6 +489,65 @@ def handle_request(transcript: str) -> str:
                     print(f"Error in tool listener: {e}")
             return format_tool_response(result)
 
+        # Check settings for preferred model provider (Gemini vs Ollama)
+        provider = "ollama"
+        try:
+            settings_path = os.path.join(BASE_DIR, "settings.json")
+            if os.path.exists(settings_path):
+                with open(settings_path, "r") as f:
+                    sett = json.load(f)
+                    provider = sett.get("provider") or os.getenv("MODEL_PROVIDER") or "ollama"
+        except Exception:
+            pass
+
+        # Fallback to Ollama if Gemini is selected but not configured
+        if provider == "gemini" and not has_gemini():
+            print("[Coordinator] Gemini requested but not configured (missing key). Falling back to Ollama.")
+            provider = "ollama"
+
+        if provider == "gemini":
+            chat = get_chat_session()
+            current_message = transcript
+            for _ in range(5):
+                try:
+                    response = chat.send_message(current_message)
+                except Exception as e:
+                    print(f"Error calling Gemini API: {e}")
+                    return f"Sorry, I had trouble talking to the Gemini model: {e}"
+                
+                # Check for function calls
+                function_calls = response.function_calls
+                if not function_calls:
+                    return response.text or ""
+                
+                # Execute all function calls
+                tool_responses = []
+                for fc in function_calls:
+                    fname = fc.name
+                    fargs = fc.args
+                    print(f"[Gemini tool call] {fname}({fargs})")
+                    try:
+                        result = perform_tool_action(conn, fname, **fargs)
+                        for listener in tool_listeners:
+                            try:
+                                listener(fname, fargs, result)
+                            except Exception as e:
+                                print(f"Error in tool listener: {e}")
+                    except Exception as e:
+                        result = {"error": str(e)}
+                    
+                    tool_responses.append(
+                        types.Part.from_function_response(
+                            name=fname,
+                            response=result if isinstance(result, dict) else {"result": result}
+                        )
+                    )
+                
+                # Send the function responses back to progress the chat
+                current_message = tool_responses
+            
+            return "I processed your request but took too many steps."
+
         ollama_url, ollama_model, _ = get_ollama_config()
 
         if not OpenAI:
@@ -517,15 +574,13 @@ def handle_request(transcript: str) -> str:
                 "content": (
                     "You are a helpful personal assistant with access to the user's task "
                     "and note database, as well as Google Search for real-time information. "
+                    "The user interface is a 3D Constellation Map where tasks are represented as nodes connected to a central brain core, and details slide in using a collapsible side panel. "
                     "Use the database tools when the user asks you to add, list, complete, "
-                    "delete or search tasks and notes. If the user asks about anything else "
-                    "(like the weather, news, math, general knowledge, etc.), use the google_search tool "
-                    "to find the answer. You can perform multiple operations at once if the user requests it. "
-                    "You can set the priority of a task to 'low', 'medium', or 'high' if the user requests it. "
+                    "delete or search tasks and notes. The interface will automatically play 3D animations (like lasers, explosions, and warps) to reflect these database changes. "
                     "If the user speaks about a specific task, or asks to show/open/focus on it, "
-                    "you MUST invoke 'focus_tasks' with its ID. If multiple tasks seem to match "
-                    "or if there is ambiguity, invoke 'focus_tasks' with all potential matching task IDs "
-                    "so the UI can highlight them and let the user narrow it down. "
+                    "you MUST invoke 'focus_tasks' with its ID. If multiple tasks seem to match, "
+                    "invoke 'focus_tasks' with all potential matching IDs. "
+                    "For general navigation commands (like 'show plan', 'open plan', 'close panel', 'focus on brain', or 'go to sleep'), you should respond conversationally to confirm the action (e.g. 'Opening your plan page' or 'Closing panel') and the frontend will handle the visual movement automatically. "
                     "CRITICAL: Keep replies extremely brief, concise, and conversational (ideally under 1-2 sentences) "
                     "since they'll be read aloud. Avoid long explanations."
                 )

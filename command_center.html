@@ -581,8 +581,8 @@
     <!-- Navigation buttons -->
     <div class="top-right-nav">
         <button class="nav-btn active" id="btn-brain">Brain</button>
-        <button class="nav-btn" id="btn-tasks">Tasks</button>
         <button class="nav-btn" id="btn-plan">Plan</button>
+        <button class="nav-btn" id="btn-apis">APIs/MCPs</button>
     </div>
 
     <!-- Transparent Chat terminal -->
@@ -661,54 +661,12 @@
         // ==========================================
         // 0. DATA DEFINITION FOR CONSTELLATION MAP
         // ==========================================
-        const tasksData = [
-            {
-                id: 't1',
-                title: 'Create Website for Car Hire',
-                desc: 'Create a responsive, modern website for a car hire business with booking functionality.',
-                type: 'TASK',
-                tags: ['car-hire', 'website', 'booking'],
-                replaces: 'Manual reservation sheets and legacy spreadsheets',
-                nodes: { human: 'Manual approval of booking dates', assisted: 'Auto-fill rental agreement forms', auto: 'Fully automated stripe checkout and reservation confirmation' },
-                color: '#60A5FA',
-                position: new THREE.Vector3(0.9, 0.4, -0.2),
-                subtasks: [
-                    { id: 't1_s1', title: 'UI Design & Mockup', desc: 'Sleek dark-mode vehicle detail pages.', type: 'SUBTASK' },
-                    { id: 't1_s2', title: 'Payment Integration', desc: 'Stripe API checkout sessions configuration.', type: 'SUBTASK' },
-                    { id: 't1_s3', title: 'Fleet Admin Dashboard', desc: 'CRUD interface to manage available vehicle fleets.', type: 'SUBTASK' }
-                ]
-            },
-            {
-                id: 't2',
-                title: 'Create Jarvis Assistant',
-                desc: 'Design and build the wake-word coordinate assistant and voice interface core.',
-                type: 'TASK',
-                tags: ['jarvis.py', 'openwakeword', 'speech_recognition'],
-                replaces: 'Manually typing CLI instructions and script triggers',
-                nodes: { human: 'Mouse-click interface commands', assisted: 'Wake-word detection with voice-override toggle', auto: 'Zero-latency voice transcription and spoken Gemini execution loop' },
-                color: '#22D3EE',
-                position: new THREE.Vector3(-0.8, -0.5, 0.3),
-                subtasks: [
-                    { id: 't2_s1', title: 'Model Fine-Tuning', desc: 'Optimizing wake model sensitivity thresholds.', type: 'SUBTASK' },
-                    { id: 't2_s2', title: 'TTS Voice Selector', desc: 'Edge speech output with ElevenLabs failover.', type: 'SUBTASK' }
-                ]
-            },
-            {
-                id: 't3',
-                title: 'Check out Bruno API Client',
-                desc: 'Evaluate the Git-friendly Bruno API client for collaborative testing and environment variables.',
-                type: 'TASK',
-                tags: ['bruno', 'api-client', 'git-friendly'],
-                replaces: 'Heavy postman workspaces and proprietary cloud sync models',
-                nodes: { human: 'Manually copy-pasting API tokens', assisted: 'Pre-request scripting for token automation', auto: 'Scheduled runner executing API collection health tests' },
-                color: '#A78BFA',
-                position: new THREE.Vector3(0.4, -0.7, -0.4),
-                subtasks: [
-                    { id: 't3_s1', title: 'Migrate Collections', desc: 'Import postman collections to bruno format.', type: 'SUBTASK' },
-                    { id: 't3_s2', title: 'Git Integration Check', desc: 'Verify text-based collection diffs in repository commits.', type: 'SUBTASK' }
-                ]
-            }
-        ];
+        let tasksData = [];
+        const liveNodeMap = new Map();
+        const pulsingNodes = [];
+        const pulses = [];
+        const interactiveObjects = [];
+        const animationQueue = [];
 
         // ==========================================
         // 1. THREE.JS SMOKY NEBULA EARTH (BRAIN)
@@ -826,9 +784,6 @@
         const nodesGroup = new THREE.Group();
         scene.add(nodesGroup);
 
-        const pulses = [];
-        const interactiveObjects = [];
-
         // Helper to generate a mini stardust core
         function createStardustNode(colorHex, sizeFactor, particleCount, radius) {
             const group = new THREE.Group();
@@ -897,134 +852,250 @@
             return group;
         }
 
-        const pulsingNodes = [];
+        function getSphericalPosition(index, total, radius = 0.95) {
+            const phi = Math.acos(-1 + (2 * index) / Math.max(total, 1));
+            const theta = Math.sqrt(Math.max(total, 1) * Math.PI) * phi;
+            return new THREE.Vector3(
+                radius * Math.sin(phi) * Math.cos(theta),
+                radius * Math.sin(phi) * Math.sin(theta),
+                radius * Math.cos(phi)
+            );
+        }
 
-        // Create tasks & nested subtasks (surrounding task in a ball)
-        tasksData.forEach(task => {
-            // Main Task Node
-            const taskNode = createStardustNode(task.color, 1.2, 200, 0.08);
-            taskNode.position.copy(task.position);
-            nodesGroup.add(taskNode);
+        function getSubtaskOffset(index, total, radius = 0.22) {
+            const phi = Math.acos(-1 + (2 * index) / Math.max(total, 1));
+            const theta = Math.sqrt(Math.max(total, 1) * Math.PI) * phi;
+            return new THREE.Vector3(
+                radius * Math.sin(phi) * Math.cos(theta),
+                radius * Math.sin(phi) * Math.sin(theta),
+                radius * Math.cos(phi)
+            );
+        }
 
-            pulsingNodes.push({
-                glow: taskNode.glowSprite,
-                center: taskNode.centerSprite,
-                baseGlowScale: 0.15 * 1.2,
-                baseCenterScale: 0.06 * 1.2,
+        function getTaskColor(priority) {
+            if (priority === 'high') return '#F59E0B';
+            if (priority === 'medium') return '#A78BFA';
+            return '#60A5FA';
+        }
+
+        function addNodeToScene(task, position, parentId = null) {
+            const isSubtask = !!parentId;
+            const color = isSubtask ? getTaskColor(task.priority || 'medium') : getTaskColor(task.priority || 'medium');
+            const sizeScale = isSubtask ? 0.7 : 1.2;
+            const particleCount = isSubtask ? 80 : 200;
+            const nodeRadius = isSubtask ? 0.04 : 0.08;
+
+            // Visual Node Group
+            const nodeGroup = createStardustNode(color, sizeScale, particleCount, nodeRadius);
+            nodeGroup.position.copy(position);
+            nodesGroup.add(nodeGroup);
+
+            // Pulsing metadata
+            const pulseObj = {
+                glow: nodeGroup.glowSprite,
+                center: nodeGroup.centerSprite,
+                baseGlowScale: 0.15 * sizeScale,
+                baseCenterScale: 0.06 * sizeScale,
                 pulseSpeed: 2.0,
-                offset: 0
-            });
+                offset: Math.random() * Math.PI
+            };
+            pulsingNodes.push(pulseObj);
 
-            // Invisible interactive click target
-            const hitGeo = new THREE.SphereGeometry(0.12, 8, 8);
+            // Interactive Hit Mesh
+            const hitGeo = new THREE.SphereGeometry(isSubtask ? 0.07 : 0.12, 8, 8);
             const hitMat = new THREE.MeshBasicMaterial({ visible: false });
             const hitMesh = new THREE.Mesh(hitGeo, hitMat);
-            hitMesh.position.copy(task.position);
-            hitMesh.userData = { data: task, visualGroup: taskNode };
+            hitMesh.position.copy(position);
+
+            // Map simple visual schema fields for side-panel detail display compatibility
+            const displayData = {
+                id: task.id,
+                title: task.content,
+                type: isSubtask ? 'SUBTASK' : 'TASK',
+                desc: task.content + ` (${task.priority || 'medium'} priority, status: ${task.status || 'open'})`,
+                tags: task.tags ? task.tags.split(',') : [task.priority || 'medium', task.status || 'open'],
+                replaces: isSubtask ? 'Subtask branch execution' : 'Replaces manual workflow steps and checklist items.',
+                nodes: {
+                    human: 'Task verification & approvals',
+                    assisted: 'AI execution drafts & status check',
+                    auto: 'Fully autonomous tool pipeline trigger'
+                },
+                color: color
+            };
+            hitMesh.userData = { data: displayData, visualGroup: nodeGroup };
             nodesGroup.add(hitMesh);
             interactiveObjects.push(hitMesh);
 
-            // Energy beam from Center to Task
-            const linePoints = [new THREE.Vector3(0, 0, 0), task.position];
+            // Connection Line to center (Main Task) or Parent (Subtask)
+            const startPos = isSubtask ? liveNodeMap.get(parentId).position : new THREE.Vector3(0, 0, 0);
+            const linePoints = [startPos, position];
             const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
             const lineMat = new THREE.LineBasicMaterial({
-                color: task.color,
+                color: color,
                 transparent: true,
-                opacity: 0.25,
+                opacity: isSubtask ? 0.15 : 0.25,
                 blending: THREE.AdditiveBlending
             });
             const line = new THREE.Line(lineGeo, lineMat);
             nodesGroup.add(line);
 
-            // Staggered animated pulses on the beam
-            for (let i = 0; i < 2; i++) {
+            // Beam Pulses
+            const nodePulses = [];
+            const pulseCount = isSubtask ? 1 : 2;
+            for (let i = 0; i < pulseCount; i++) {
                 const pSpriteMat = new THREE.SpriteMaterial({
                     map: texture,
                     color: 0xffffff,
                     transparent: true,
-                    opacity: 0.9,
+                    opacity: isSubtask ? 0.85 : 0.9,
                     blending: THREE.AdditiveBlending
                 });
                 const pulseSprite = new THREE.Sprite(pSpriteMat);
-                pulseSprite.scale.set(0.08, 0.08, 1);
+                pulseSprite.scale.set(isSubtask ? 0.05 : 0.08, isSubtask ? 0.05 : 0.08, 1);
                 nodesGroup.add(pulseSprite);
 
-                pulses.push({
+                const pulseTrack = {
                     sprite: pulseSprite,
-                    startPos: new THREE.Vector3(0, 0, 0),
-                    endPos: task.position,
-                    progress: (i / 2) + Math.random() * 0.1,
-                    speed: 0.004 + Math.random() * 0.003,
-                    color: new THREE.Color(task.color)
-                });
+                    startPos: startPos,
+                    endPos: position,
+                    progress: (i / pulseCount) + Math.random() * 0.1,
+                    speed: (isSubtask ? 0.006 : 0.004) + Math.random() * 0.003,
+                    color: new THREE.Color(color)
+                };
+                pulses.push(pulseTrack);
+                nodePulses.push(pulseTrack);
             }
 
-            // Sub-tasks positioned in a spherical cluster (ball) around the Task
-            const subtasks = task.subtasks || [];
-            const subRadius = 0.22;
-            subtasks.forEach((sub, sIdx) => {
-                const phi = Math.acos(-1 + (2 * sIdx) / subtasks.length);
-                const theta = Math.sqrt(subtasks.length * Math.PI) * phi;
-
-                const offset = new THREE.Vector3(
-                    subRadius * Math.sin(phi) * Math.cos(theta),
-                    subRadius * Math.sin(phi) * Math.sin(theta),
-                    subRadius * Math.cos(phi)
-                );
-
-                const subPos = task.position.clone().add(offset);
-
-                const subNode = createStardustNode(task.color, 0.7, 80, 0.04);
-                subNode.position.copy(subPos);
-                nodesGroup.add(subNode);
-
-                pulsingNodes.push({
-                    glow: subNode.glowSprite,
-                    center: subNode.centerSprite,
-                    baseGlowScale: 0.15 * 0.7,
-                    baseCenterScale: 0.06 * 0.7,
-                    pulseSpeed: 2.0,
-                    offset: 0
-                });
-
-                const hitMat2 = new THREE.MeshBasicMaterial({ visible: false });
-                const subHitMesh = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), hitMat2);
-                subHitMesh.position.copy(subPos);
-                subHitMesh.userData = { data: { ...sub, parentColor: task.color }, visualGroup: subNode };
-                nodesGroup.add(subHitMesh);
-                interactiveObjects.push(subHitMesh);
-
-                const subLinePoints = [task.position, subPos];
-                const subLineGeo = new THREE.BufferGeometry().setFromPoints(subLinePoints);
-                const subLineMat = new THREE.LineBasicMaterial({
-                    color: task.color,
-                    transparent: true,
-                    opacity: 0.15,
-                    blending: THREE.AdditiveBlending
-                });
-                const subLine = new THREE.Line(subLineGeo, subLineMat);
-                nodesGroup.add(subLine);
-
-                const subPulseSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-                    map: texture,
-                    color: 0xffffff,
-                    transparent: true,
-                    opacity: 0.85,
-                    blending: THREE.AdditiveBlending
-                }));
-                subPulseSprite.scale.set(0.05, 0.05, 1);
-                nodesGroup.add(subPulseSprite);
-
-                pulses.push({
-                    sprite: subPulseSprite,
-                    startPos: task.position,
-                    endPos: subPos,
-                    progress: Math.random(),
-                    speed: 0.006 + Math.random() * 0.005,
-                    color: new THREE.Color(task.color)
-                });
+            // Register in the registry
+            liveNodeMap.set(task.id, {
+                group: nodeGroup,
+                hitMesh: hitMesh,
+                line: line,
+                pulses: nodePulses,
+                pulseObj: pulseObj,
+                position: position.clone(),
+                data: displayData
             });
-        });
+        }
+
+        function removeNodeFromScene(taskId) {
+            const registry = liveNodeMap.get(taskId);
+            if (!registry) return;
+
+            // Remove visual node
+            nodesGroup.remove(registry.group);
+
+            // Remove hit mesh
+            nodesGroup.remove(registry.hitMesh);
+            const idx = interactiveObjects.indexOf(registry.hitMesh);
+            if (idx > -1) interactiveObjects.splice(idx, 1);
+
+            // Remove line
+            nodesGroup.remove(registry.line);
+
+            // Remove pulses
+            registry.pulses.forEach(p => {
+                nodesGroup.remove(p.sprite);
+                const pIdx = pulses.indexOf(p);
+                if (pIdx > -1) pulses.splice(pIdx, 1);
+            });
+
+            // Remove pulse animations
+            const pulseIdx = pulsingNodes.indexOf(registry.pulseObj);
+            if (pulseIdx > -1) pulsingNodes.splice(pulseIdx, 1);
+
+            liveNodeMap.delete(taskId);
+        }
+
+        // Check difference and trigger live additions/removals
+        function updateConstellation(tasks) {
+            // Keep a list of all open/active task data for sidebar tasks click access
+            tasksData = tasks;
+
+            const currentKeys = Array.from(liveNodeMap.keys()).filter(id => {
+                const reg = liveNodeMap.get(id);
+                return reg && !reg.animating;
+            });
+            const newKeys = tasks.filter(t => t.status !== 'done').map(t => t.id);
+
+            // 1. Remove deleted or finished tasks
+            currentKeys.forEach(id => {
+                if (!newKeys.includes(id)) {
+                    // Check if completed or deleted
+                    const completedTask = tasks.find(t => t.id === id);
+                    if (completedTask && completedTask.status === 'done') {
+                        triggerCompletedAnimation(id);
+                    } else {
+                        triggerDeletedAnimation(id);
+                    }
+                }
+            });
+
+            // 2. Separate parents and children for rendering
+            const openTasks = tasks.filter(t => t.status !== 'done');
+            const mainTasks = openTasks.filter(t => !t.parent_id);
+            const subTasks = openTasks.filter(t => t.parent_id);
+
+            // 3. Add new main tasks
+            mainTasks.forEach((t, index) => {
+                if (!liveNodeMap.has(t.id)) {
+                    const targetPos = getSphericalPosition(index, mainTasks.length);
+                    triggerCreatedAnimation(t, targetPos);
+                }
+            });
+
+            // 4. Add new subtasks
+            subTasks.forEach((t, index) => {
+                if (!liveNodeMap.has(t.id)) {
+                    const parentReg = liveNodeMap.get(t.parent_id);
+                    if (parentReg) {
+                        const offset = getSubtaskOffset(index, subTasks.length);
+                        const targetPos = parentReg.position.clone().add(offset);
+                        triggerSubtaskCreatedAnimation(t, t.parent_id, targetPos);
+                    }
+                }
+            });
+        }
+
+        async function initConstellation() {
+            try {
+                const res = await fetch('/tasks');
+                const data = await res.json();
+                const tasks = data.tasks || [];
+
+                tasksData = tasks;
+
+                const openTasks = tasks.filter(t => t.status !== 'done');
+                const mainTasks = openTasks.filter(t => !t.parent_id);
+                const subTasks = openTasks.filter(t => t.parent_id);
+
+                mainTasks.forEach((t, index) => {
+                    const pos = getSphericalPosition(index, mainTasks.length);
+                    addNodeToScene(t, pos);
+                });
+
+                subTasks.forEach((t, index) => {
+                    const parentReg = liveNodeMap.get(t.parent_id);
+                    if (parentReg) {
+                        const offset = getSubtaskOffset(index, subTasks.length);
+                        const pos = parentReg.position.clone().add(offset);
+                        addNodeToScene(t, pos, t.parent_id);
+                    }
+                });
+            } catch (e) {
+                console.error("Failed to initialize constellation:", e);
+            }
+        }
+        initConstellation();
+
+        setInterval(async () => {
+            try {
+                const res = await fetch('/tasks');
+                const data = await res.json();
+                const tasks = data.tasks || [];
+                updateConstellation(tasks);
+            } catch (e) { }
+        }, 5000);
 
         // Add the central core hit mesh for Brain clicks
         const brainHitMesh = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 8), new THREE.MeshBasicMaterial({ visible: false }));
@@ -1110,11 +1181,11 @@
                 let zWorldAttracted = zWorld + dZWorld * attraction;
 
                 // 4. Rotate the attracted world position BACK into the local space of the nebula
-                posAttribute.array[idx]     = xWorldAttracted * cosVal - zWorldAttracted * sinVal;
+                posAttribute.array[idx] = xWorldAttracted * cosVal - zWorldAttracted * sinVal;
                 posAttribute.array[idx + 1] = yWorldAttracted;
                 posAttribute.array[idx + 2] = xWorldAttracted * sinVal + zWorldAttracted * cosVal + attraction * 0.55; // Pull towards mouse + Z-projection bulge
                 let factor = Math.pow(1.0 - (dist / maxDistance), 1.5);
-                colorAttribute.array[idx]     = Math.min(1.0, baseColor.r * factor + attraction * 0.7);
+                colorAttribute.array[idx] = Math.min(1.0, baseColor.r * factor + attraction * 0.7);
                 colorAttribute.array[idx + 1] = Math.min(1.0, baseColor.g * factor + attraction * 0.85);
                 colorAttribute.array[idx + 2] = Math.min(1.0, baseColor.b * factor + attraction * 1.0);
             }
@@ -1141,16 +1212,20 @@
                 p.sprite.material.color.lerpColors(new THREE.Color(0xffffff), p.color, p.progress);
             });
 
-            // Animate task light pulsing
-            const elapsed = Date.now() * 0.001;
-            pulsingNodes.forEach(node => {
-                const wave = Math.sin(elapsed * node.pulseSpeed + node.offset);
-                const glowScale = node.baseGlowScale * (1.0 + wave * 0.35);
-                node.glow.scale.set(glowScale, glowScale, 1);
-                node.glow.material.opacity = 0.85;
-                const centerScale = node.baseCenterScale * (1.0 + wave * 0.15);
-                node.center.scale.set(centerScale, centerScale, 1);
-            });
+            // Process Animation Queue
+            const now = Date.now();
+            for (let i = animationQueue.length - 1; i >= 0; i--) {
+                const anim = animationQueue[i];
+                const animElapsed = (now - anim.startTime) / 1000; // in seconds
+                if (animElapsed >= anim.duration) {
+                    if (anim.onComplete) anim.onComplete();
+                    animationQueue.splice(i, 1);
+                    continue;
+                }
+                if (anim.tick) {
+                    anim.tick(animElapsed);
+                }
+            }
 
             // Smooth camera transition
             camera.position.lerp(targetCameraPos, 0.06);
@@ -1160,6 +1235,583 @@
 
         // Camera States
         let targetCameraPos = new THREE.Vector3(0, 0, 2.5);
+
+        // ==========================================
+        // ANIMATION TRIGGERS & SEQUENCES IMPLEMENTATION
+        // ==========================================
+        function triggerCreatedAnimation(task, position) {
+            if (liveNodeMap.has(task.id)) return;
+            liveNodeMap.set(task.id, { animating: 'creating', position: position.clone() });
+            const color = getTaskColor(task.priority);
+            const laserMat = new THREE.LineBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 1.0,
+                blending: THREE.AdditiveBlending
+            });
+            const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)]);
+            const tempLaser = new THREE.Line(laserGeo, laserMat);
+            nodesGroup.add(tempLaser);
+
+            let tempParticles = [];
+
+            animationQueue.push({
+                type: 'CREATE_TASK',
+                duration: 6.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    // Phase 1 (0-3s): grow laser line from center to destination
+                    if (elapsed < 3.0) {
+                        const progress = elapsed / 3.0;
+                        const currentEnd = new THREE.Vector3().lerpVectors(new THREE.Vector3(0, 0, 0), position, progress);
+                        tempLaser.geometry.setFromPoints([new THREE.Vector3(0, 0, 0), currentEnd]);
+                    }
+                    // Phase 2 (3-4s): fade the laser beam
+                    else if (elapsed < 4.0) {
+                        tempLaser.material.opacity = 1.0 - (elapsed - 3.0);
+                    }
+                    else {
+                        tempLaser.material.opacity = 0;
+                    }
+
+                    // Phase 3 (4-6s): shoot particles along the beam path
+                    if (elapsed >= 4.0) {
+                        if (tempParticles.length === 0) {
+                            for (let pIdx = 0; pIdx < 25; pIdx++) {
+                                const pMat = new THREE.SpriteMaterial({
+                                    map: texture,
+                                    color: color,
+                                    transparent: true,
+                                    opacity: 0.9,
+                                    blending: THREE.AdditiveBlending
+                                });
+                                const pSprite = new THREE.Sprite(pMat);
+                                pSprite.scale.set(0.045, 0.045, 1);
+                                nodesGroup.add(pSprite);
+                                tempParticles.push({
+                                    sprite: pSprite,
+                                    delay: pIdx * 0.06
+                                });
+                            }
+                        }
+
+                        const particleElapsed = elapsed - 4.0;
+                        tempParticles.forEach(p => {
+                            if (particleElapsed > p.delay) {
+                                const t = Math.min(1.0, (particleElapsed - p.delay) / 0.6);
+                                p.sprite.position.lerpVectors(new THREE.Vector3(0, 0, 0), position, t);
+                                p.sprite.material.opacity = 0.9 * (1.0 - t);
+                            } else {
+                                p.sprite.position.set(0, 0, 0);
+                                p.sprite.material.opacity = 0;
+                            }
+                        });
+                    }
+                },
+                onComplete: () => {
+                    tempParticles.forEach(p => nodesGroup.remove(p.sprite));
+                    nodesGroup.remove(tempLaser);
+                    addNodeToScene(task, position);
+                }
+            });
+        }
+
+        function triggerSubtaskCreatedAnimation(subtask, parentId, position) {
+            if (liveNodeMap.has(subtask.id)) return;
+            liveNodeMap.set(subtask.id, { animating: 'creating', position: position.clone() });
+            const color = getTaskColor(subtask.priority);
+            const parentReg = liveNodeMap.get(parentId);
+            if (!parentReg) {
+                liveNodeMap.delete(subtask.id);
+                addNodeToScene(subtask, position, parentId);
+                return;
+            }
+
+            const parentPos = parentReg.position;
+            let chargeParticles = [];
+            let tempLaser = null;
+
+            animationQueue.push({
+                type: 'CREATE_SUBTASK',
+                duration: 4.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    // Phase A (0-2s): charge pulses toward parent node
+                    if (elapsed < 2.0) {
+                        if (chargeParticles.length === 0) {
+                            for (let i = 0; i < 6; i++) {
+                                const pMat = new THREE.SpriteMaterial({
+                                    map: texture,
+                                    color: color,
+                                    transparent: true,
+                                    opacity: 0.9,
+                                    blending: THREE.AdditiveBlending
+                                });
+                                const pSprite = new THREE.Sprite(pMat);
+                                pSprite.scale.set(0.06, 0.06, 1);
+                                nodesGroup.add(pSprite);
+                                chargeParticles.push({
+                                    sprite: pSprite,
+                                    delay: i * 0.2
+                                });
+                            }
+                        }
+
+                        chargeParticles.forEach(p => {
+                            if (elapsed > p.delay) {
+                                const t = Math.min(1.0, (elapsed - p.delay) / 0.7);
+                                p.sprite.position.lerpVectors(new THREE.Vector3(0, 0, 0), parentPos, t);
+                                p.sprite.material.opacity = 0.9 * (1.0 - t);
+                            } else {
+                                p.sprite.position.set(0, 0, 0);
+                                p.sprite.material.opacity = 0;
+                            }
+                        });
+                    } else {
+                        chargeParticles.forEach(p => nodesGroup.remove(p.sprite));
+                    }
+
+                    // Phase B (2-3s): Parent node flashes and overloads
+                    if (elapsed >= 2.0 && elapsed < 3.0) {
+                        const flashElapsed = elapsed - 2.0; // 0 to 1
+                        const flashScale = 1.0 + Math.sin(flashElapsed * Math.PI) * 1.2;
+                        parentReg.group.scale.set(flashScale, flashScale, flashScale);
+                        // Temporarily brighten center
+                        parentReg.group.centerSprite.material.color.set(0xffffff);
+                    } else if (elapsed >= 3.0) {
+                        parentReg.group.scale.set(1, 1, 1);
+                        parentReg.group.centerSprite.material.color.set(0xffffff);
+                    }
+
+                    // Phase C (3-4s): grow branch beam
+                    if (elapsed >= 3.0 && elapsed < 4.0) {
+                        if (!tempLaser) {
+                            const laserMat = new THREE.LineBasicMaterial({
+                                color: color,
+                                transparent: true,
+                                opacity: 1.0,
+                                blending: THREE.AdditiveBlending
+                            });
+                            const laserGeo = new THREE.BufferGeometry().setFromPoints([parentPos, parentPos]);
+                            tempLaser = new THREE.Line(laserGeo, laserMat);
+                            nodesGroup.add(tempLaser);
+                        }
+                        const t = (elapsed - 3.0) / 1.0;
+                        const currentEnd = new THREE.Vector3().lerpVectors(parentPos, position, t);
+                        tempLaser.geometry.setFromPoints([parentPos, currentEnd]);
+                    }
+                },
+                onComplete: () => {
+                    chargeParticles.forEach(p => nodesGroup.remove(p.sprite));
+                    if (tempLaser) nodesGroup.remove(tempLaser);
+                    if (parentReg) parentReg.group.scale.set(1, 1, 1);
+                    addNodeToScene(subtask, position, parentId);
+                }
+            });
+        }
+
+        function triggerDeletedAnimation(taskId) {
+            const registry = liveNodeMap.get(taskId);
+            if (!registry || registry.animating === 'deleting') return;
+            registry.animating = 'deleting';
+
+            const nodePos = registry.position;
+            const color = registry.data.color;
+            let chargeBeams = [];
+            let explosionParticles = [];
+
+            animationQueue.push({
+                type: 'DELETE_TASK',
+                duration: 3.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    // Phase A (0-1s): charge beams target the node
+                    if (elapsed < 1.0) {
+                        if (chargeBeams.length === 0) {
+                            for (let i = 0; i < 8; i++) {
+                                const laserMat = new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+                                const laserGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)]);
+                                const beam = new THREE.Line(laserGeo, laserMat);
+                                nodesGroup.add(beam);
+                                chargeBeams.push({
+                                    line: beam,
+                                    delay: i * 0.1
+                                });
+                            }
+                        }
+
+                        chargeBeams.forEach(b => {
+                            if (elapsed > b.delay) {
+                                const t = Math.min(1.0, (elapsed - b.delay) / 0.4);
+                                const currentEnd = new THREE.Vector3().lerpVectors(new THREE.Vector3(0, 0, 0), nodePos, t);
+                                b.line.geometry.setFromPoints([new THREE.Vector3(0, 0, 0), currentEnd]);
+                                b.line.material.opacity = 0.9 * (1.0 - t);
+                            }
+                        });
+                    } else {
+                        chargeBeams.forEach(b => nodesGroup.remove(b.line));
+                    }
+
+                    // Phase B (1.0-1.5s): Supernova flare
+                    if (elapsed >= 1.0 && elapsed < 1.5) {
+                        const flashT = (elapsed - 1.0) / 0.5;
+                        const targetScale = 1.0 + flashT * 1.5;
+                        registry.group.scale.set(targetScale, targetScale, targetScale);
+                        registry.group.centerSprite.material.color.set(0xffffff);
+                    }
+
+                    // Phase C (1.5-2.0s): Collapse collapse to 0
+                    if (elapsed >= 1.5 && elapsed < 2.0) {
+                        const collapseT = 1.0 - ((elapsed - 1.5) / 0.5);
+                        registry.group.scale.set(collapseT * 2.5, collapseT * 2.5, collapseT * 2.5);
+                    }
+
+                    // Phase D (2.0-3.0s): Explode 50 particles
+                    if (elapsed >= 2.0) {
+                        // Hide original node components
+                        registry.group.visible = false;
+                        registry.line.visible = false;
+                        registry.pulses.forEach(p => p.sprite.visible = false);
+
+                        if (explosionParticles.length === 0) {
+                            for (let i = 0; i < 50; i++) {
+                                const pMat = new THREE.SpriteMaterial({
+                                    map: texture,
+                                    color: color,
+                                    transparent: true,
+                                    opacity: 1.0,
+                                    blending: THREE.AdditiveBlending
+                                });
+                                const pSprite = new THREE.Sprite(pMat);
+                                pSprite.scale.set(0.05, 0.05, 1);
+                                pSprite.position.copy(nodePos);
+                                nodesGroup.add(pSprite);
+
+                                // Random velocity vector
+                                const angle = Math.random() * Math.PI * 2;
+                                const phi = Math.acos(Math.random() * 2 - 1);
+                                const velocity = new THREE.Vector3(
+                                    Math.sin(phi) * Math.cos(angle),
+                                    Math.sin(phi) * Math.sin(angle),
+                                    Math.cos(phi)
+                                ).multiplyScalar(0.005 + Math.random() * 0.015);
+
+                                explosionParticles.push({
+                                    sprite: pSprite,
+                                    velocity: velocity
+                                });
+                            }
+                        }
+
+                        explosionParticles.forEach(p => {
+                            p.sprite.position.add(p.velocity);
+                            p.sprite.material.opacity = Math.max(0, 1.0 - (elapsed - 2.0));
+                        });
+                    }
+                },
+                onComplete: () => {
+                    chargeBeams.forEach(b => nodesGroup.remove(b.line));
+                    explosionParticles.forEach(p => nodesGroup.remove(p.sprite));
+                    removeNodeFromScene(taskId);
+                }
+            });
+        }
+
+        function triggerCompletedAnimation(taskId) {
+            const registry = liveNodeMap.get(taskId);
+            if (!registry || registry.animating === 'completing') return;
+            registry.animating = 'completing';
+
+            const nodePos = registry.position;
+
+            animationQueue.push({
+                type: 'COMPLETE_TASK',
+                duration: 1.5,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    const t = elapsed / 1.5;
+
+                    // Move towards camera (Z increases towards 2.5)
+                    registry.group.position.z = nodePos.z + t * (2.2 - nodePos.z);
+                    registry.group.position.x = nodePos.x * (1.0 - t);
+                    registry.group.position.y = nodePos.y * (1.0 - t);
+
+                    // Scale down to 0
+                    const scale = 1.0 - t;
+                    registry.group.scale.set(scale, scale, scale);
+
+                    // Shrink connection line back to origin
+                    const lineEnd = new THREE.Vector3().lerpVectors(nodePos, new THREE.Vector3(0, 0, 0), t);
+                    registry.line.geometry.setFromPoints([new THREE.Vector3(0, 0, 0), lineEnd]);
+                },
+                onComplete: () => {
+                    removeNodeFromScene(taskId);
+                }
+            });
+        }
+
+        function animateNoteCreated() {
+            let particles = [];
+            animationQueue.push({
+                type: 'NOTE_CREATED',
+                duration: 2.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    if (particles.length === 0) {
+                        for (let i = 0; i < 30; i++) {
+                            const pMat = new THREE.SpriteMaterial({
+                                map: texture,
+                                color: 0xF59E0B,
+                                transparent: true,
+                                opacity: 0.6,
+                                blending: THREE.AdditiveBlending
+                            });
+                            const pSprite = new THREE.Sprite(pMat);
+                            pSprite.scale.set(0.04, 0.04, 1);
+
+                            // Ring at bottom of sphere
+                            const angle = (i / 30) * Math.PI * 2;
+                            pSprite.position.set(Math.cos(angle) * 0.8, -0.6, Math.sin(angle) * 0.8);
+                            nodesGroup.add(pSprite);
+                            particles.push(pSprite);
+                        }
+                    }
+
+                    const t = elapsed / 2.0;
+                    particles.forEach(p => {
+                        // Move outward and up slightly
+                        p.position.multiplyScalar(1.008);
+                        p.position.y += 0.002;
+                        p.material.opacity = 0.6 * (1.0 - t);
+                    });
+                },
+                onComplete: () => {
+                    particles.forEach(p => nodesGroup.remove(p));
+                }
+            });
+        }
+
+        function animateNoteDeleted() {
+            let ring = null;
+            animationQueue.push({
+                type: 'NOTE_DELETED',
+                duration: 1.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    if (!ring) {
+                        const geo = new THREE.RingGeometry(0.1, 0.12, 32);
+                        const mat = new THREE.MeshBasicMaterial({ color: 0xF59E0B, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+                        ring = new THREE.Mesh(geo, mat);
+                        ring.rotation.x = Math.PI / 2;
+                        scene.add(ring);
+                    }
+                    const t = elapsed / 1.0;
+                    ring.scale.set(t * 8.0, t * 8.0, 1.0);
+                    ring.material.opacity = 0.8 * (1.0 - t);
+                },
+                onComplete: () => {
+                    if (ring) scene.remove(ring);
+                }
+            });
+        }
+
+        function animateNoteSearch() {
+            let sweepLine = null;
+            animationQueue.push({
+                type: 'NOTE_SEARCH',
+                duration: 1.5,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    if (!sweepLine) {
+                        const points = [new THREE.Vector3(-1.5, 0, 0), new THREE.Vector3(1.5, 0, 0)];
+                        const geo = new THREE.BufferGeometry().setFromPoints(points);
+                        const mat = new THREE.LineBasicMaterial({ color: 0xA78BFA, transparent: true, opacity: 0.8 });
+                        sweepLine = new THREE.Line(geo, mat);
+                        scene.add(sweepLine);
+                    }
+                    const t = elapsed / 1.5;
+                    sweepLine.position.y = 1.0 - t * 2.0;
+
+                    // Dim nebula
+                    smokeMat.opacity = 0.8 - Math.sin(t * Math.PI) * 0.5;
+                },
+                onComplete: () => {
+                    if (sweepLine) scene.remove(sweepLine);
+                    smokeMat.opacity = 0.8;
+                }
+            });
+        }
+
+        function animateGoogleSearch() {
+            let rings = [];
+            animationQueue.push({
+                type: 'GOOGLE_SEARCH',
+                duration: 1.5,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    if (rings.length === 0) {
+                        for (let i = 0; i < 3; i++) {
+                            const geo = new THREE.RingGeometry(0.05, 0.07, 32);
+                            const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+                            const ring = new THREE.Mesh(geo, mat);
+                            ring.rotation.x = Math.PI / 2;
+                            scene.add(ring);
+                            rings.push({ mesh: ring, delay: i * 0.3 });
+                        }
+                    }
+                    rings.forEach(r => {
+                        if (elapsed > r.delay) {
+                            const t = (elapsed - r.delay) / 0.8;
+                            if (t >= 0 && t <= 1.0) {
+                                r.mesh.scale.set(t * 12.0, t * 12.0, 1.0);
+                                r.mesh.material.opacity = 0.8 * (1.0 - t);
+                            } else {
+                                r.mesh.visible = false;
+                            }
+                        } else {
+                            r.mesh.scale.set(0, 0, 1);
+                            r.mesh.material.opacity = 0;
+                        }
+                    });
+                    smokeMat.opacity = 0.8 - Math.min(0.4, elapsed * 0.4);
+                },
+                onComplete: () => {
+                    rings.forEach(r => scene.remove(r.mesh));
+                    smokeMat.opacity = 0.8;
+                }
+            });
+        }
+
+        function animateWarpExit() {
+            let overlay = document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100vw';
+            overlay.style.height = '100vh';
+            overlay.style.background = '#ffffff';
+            overlay.style.opacity = '0';
+            overlay.style.zIndex = '9999';
+            overlay.style.transition = 'opacity 0.4s ease';
+            overlay.style.pointerEvents = 'none';
+            document.body.appendChild(overlay);
+
+            animationQueue.push({
+                type: 'WARP_EXIT',
+                duration: 1.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    // Scale nebula to 0
+                    const t = elapsed / 0.6;
+                    if (t <= 1.0) {
+                        const s = 1.25 * (1.0 - t);
+                        nebula.scale.set(s, s, s);
+                        core.scale.set(s, s, s);
+                    }
+                    if (elapsed >= 0.3) {
+                        overlay.style.opacity = Math.min(1.0, (elapsed - 0.3) / 0.4);
+                    }
+                },
+                onComplete: () => {
+                    window.location.href = 'plan.html';
+                }
+            });
+        }
+
+        function animateSleepMode(sleep) {
+            animationQueue.push({
+                type: 'SLEEP_MODE',
+                duration: 2.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    const t = elapsed / 2.0;
+                    if (sleep) {
+                        smokeMat.opacity = 0.8 - t * 0.65; // down to 0.15
+                        coreMat.opacity = 0.7 - t * 0.65; // down to 0.05
+                    } else {
+                        smokeMat.opacity = 0.15 + t * 0.65;
+                        coreMat.opacity = 0.05 + t * 0.65;
+                    }
+                },
+                onComplete: () => {
+                    if (sleep) {
+                        smokeMat.opacity = 0.15;
+                        coreMat.opacity = 0.05;
+                    } else {
+                        smokeMat.opacity = 0.8;
+                        coreMat.opacity = 0.7;
+                    }
+                }
+            });
+        }
+
+        function animateCoreCollapse() {
+            animationQueue.push({
+                type: 'CORE_COLLAPSE',
+                duration: 2.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    const t = elapsed / 1.0;
+                    if (t <= 1.0) {
+                        liveNodeMap.forEach(reg => {
+                            const lineEnd = new THREE.Vector3().lerpVectors(reg.position, new THREE.Vector3(0, 0, 0), t);
+                            reg.line.geometry.setFromPoints([new THREE.Vector3(0, 0, 0), lineEnd]);
+                        });
+                    }
+                    if (elapsed >= 1.0 && elapsed <= 2.0) {
+                        const collapseT = 1.0 - (elapsed - 1.0);
+                        const s = 1.25 * collapseT;
+                        nebula.scale.set(s, s, s);
+                        core.scale.set(s, s, s);
+                    }
+                },
+                onComplete: () => { }
+            });
+        }
+
+        function animateFocusTask(taskId) {
+            const reg = liveNodeMap.get(taskId);
+            if (!reg) return;
+            const targetPos = reg.position;
+            targetCameraPos.set(targetPos.x - 0.25, targetPos.y, 1.35);
+
+            let sonarRings = [];
+            animationQueue.push({
+                type: 'FOCUS_TASK_PING',
+                duration: 2.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    if (sonarRings.length === 0) {
+                        for (let i = 0; i < 3; i++) {
+                            const geo = new THREE.RingGeometry(0.04, 0.05, 32);
+                            const mat = new THREE.MeshBasicMaterial({ color: getTaskColor(reg.data.priority), side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+                            const mesh = new THREE.Mesh(geo, mat);
+                            mesh.position.copy(targetPos);
+                            // Face camera
+                            mesh.lookAt(camera.position);
+                            scene.add(mesh);
+                            sonarRings.push({ mesh, delay: i * 0.4 });
+                        }
+                    }
+
+                    sonarRings.forEach(r => {
+                        if (elapsed > r.delay) {
+                            const t = (elapsed - r.delay) / 1.0;
+                            if (t >= 0 && t <= 1.0) {
+                                r.mesh.scale.set(1.0 + t * 6.0, 1.0 + t * 6.0, 1.0);
+                                r.mesh.material.opacity = 0.8 * (1.0 - t);
+                            } else {
+                                r.mesh.visible = false;
+                            }
+                        }
+                    });
+                },
+                onComplete: () => {
+                    sonarRings.forEach(r => scene.remove(r.mesh));
+                    openDetailPanel(reg.data, targetPos);
+                }
+            });
+        }
 
         animateGlobe();
 
@@ -1337,8 +1989,8 @@
         // ==========================================
         const buttons = {
             brain: document.getElementById('btn-brain'),
-            tasks: document.getElementById('btn-tasks'),
-            plan: document.getElementById('btn-plan')
+            plan: document.getElementById('btn-plan'),
+            apis: document.getElementById('btn-apis')
         };
 
         function setActiveButton(activeKey) {
@@ -1358,14 +2010,12 @@
             openDetailPanel(brainData);
         });
 
-        buttons.tasks.addEventListener('click', () => {
-            setActiveButton('tasks');
-            targetCameraPos.set(0, 0, 2.5);
-            openTasksPanel();
-        });
-
         buttons.plan.addEventListener('click', () => {
             window.location.href = 'plan.html';
+        });
+
+        buttons.apis.addEventListener('click', () => {
+            window.location.href = 'provider_comparison.html';
         });
 
         function openTasksPanel() {
@@ -1399,6 +2049,9 @@
                 const res = await fetch('/tasks');
                 const data = await res.json();
                 const tasks = data.tasks || [];
+
+                // Update 3D Constellation nodes state
+                updateConstellation(tasks);
 
                 if (tasks.length === 0) {
                     list.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; font-style: italic;">No tasks found. Ask Jarvis to add some.</div>';
@@ -1444,6 +2097,8 @@
         let orbCurrentState = 'idle';
 
         // Poll /state every 800ms for live updates from voice commands
+        let wasSleeping = false;
+
         function pollState() {
             fetch('/state')
                 .then(r => r.json())
@@ -1456,6 +2111,17 @@
                         orbLabel.textContent = orb === 'speaking' ? 'SPEAKING' : orb === 'thinking' ? 'THINKING' : 'IDLE';
                     }
 
+                    // Handle sleep mode visual changes
+                    const isSleeping = !!data.sleeping;
+                    if (isSleeping !== wasSleeping) {
+                        wasSleeping = isSleeping;
+                        animateSleepMode(isSleeping);
+                        if (isSleeping) {
+                            orbIndicator.className = 'orb-indicator sleep';
+                            orbLabel.textContent = 'SLEEPING';
+                        }
+                    }
+
                     // Render any new messages from voice interaction
                     const messages = data.messages || [];
                     if (messages.length > lastMessageCount) {
@@ -1463,31 +2129,86 @@
                             const msg = messages[i];
                             const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : 'user';
                             appendChatMessage(msg.text, role);
+
+                            // Voice / Text navigation triggers
+                            if (role === 'user') {
+                                const textLower = msg.text.toLowerCase();
+                                if (textLower.includes('show plan') || textLower.includes('open plan') || textLower.includes('go to plan')) {
+                                    animateWarpExit();
+                                } else if (textLower.includes('close panel') || textLower.includes('exit focus') || textLower.includes('hide panel') || textLower.includes('close focus')) {
+                                    closePanel();
+                                } else if (textLower.includes('show task database') || textLower.includes('open task database') || textLower.includes('show tasks') || textLower.includes('open tasks')) {
+                                    targetCameraPos.set(0, 0, 2.5);
+                                    openTasksPanel();
+                                } else if (textLower.includes('show brain') || textLower.includes('open brain') || textLower.includes('focus on brain')) {
+                                    targetCameraPos.set(0, 0, 1.8);
+                                    const brainData = brainHitMesh.userData.data;
+                                    openDetailPanel(brainData);
+                                } else if (textLower.includes('exit completely') || textLower.includes('shutdown completely')) {
+                                    animateCoreCollapse();
+                                }
+                            }
                         }
                         lastMessageCount = messages.length;
+                    }
+
+                    // Dispatch custom Three.js UI Action animations
+                    if (data.ui_action) {
+                        const act = data.ui_action;
+                        if (act.type === 'task_created') {
+                            const tempTask = { id: act.task_id, content: 'New Task', priority: act.priority || 'medium', status: 'open' };
+                            const targetPos = getSphericalPosition(liveNodeMap.size, liveNodeMap.size + 1);
+                            triggerCreatedAnimation(tempTask, targetPos);
+                        } else if (act.type === 'subtask_created') {
+                            const tempSub = { id: act.task_id, content: 'New Subtask', priority: 'medium', status: 'open' };
+                            const parentReg = liveNodeMap.get(act.parent_id);
+                            if (parentReg) {
+                                const offset = getSubtaskOffset(0, 1);
+                                const targetPos = parentReg.position.clone().add(offset);
+                                triggerSubtaskCreatedAnimation(tempSub, act.parent_id, targetPos);
+                            }
+                        } else if (act.type === 'task_deleted') {
+                            triggerDeletedAnimation(act.task_id);
+                        } else if (act.type === 'task_completed') {
+                            triggerCompletedAnimation(act.task_id);
+                        } else if (act.type === 'note_created') {
+                            animateNoteCreated();
+                        } else if (act.type === 'note_deleted') {
+                            animateNoteDeleted();
+                        } else if (act.type === 'note_search') {
+                            animateNoteSearch();
+                        } else if (act.type === 'google_search') {
+                            animateGoogleSearch();
+                        }
                     }
 
                     // Highlight focused tasks
                     const focusIds = data.focus_task_ids || [];
                     if (focusIds.length > 0) {
-                        // If tasks panel is open, highlight them
                         focusIds.forEach(id => {
-                            const el = document.getElementById(`task-live-${id}`);
-                            if (el) {
-                                el.classList.add('focused-task');
-                                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                                setTimeout(() => el.classList.remove('focused-task'), 4000);
+                            if (liveNodeMap.has(id)) {
+                                animateFocusTask(id);
+                            } else {
+                                // If database task list is open, flash it
+                                openTasksPanel();
+                                setTimeout(() => {
+                                    const el = document.getElementById(`task-live-${id}`);
+                                    if (el) {
+                                        el.classList.add('focused-task');
+                                        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                        setTimeout(() => el.classList.remove('focused-task'), 4000);
+                                    }
+                                }, 300);
                             }
                         });
                     }
                 })
-                .catch(() => { }) // silently ignore when Jarvis is not running
+                .catch(() => { })
                 .finally(() => {
                     setTimeout(pollState, 800);
                 });
         }
 
-        // Start polling
         pollState();
 
         function appendChatMessage(text, sender) {
@@ -1545,12 +2266,9 @@
             }
         });
 
-        // Initial greeting via chat based on brain click
-        buttons.brain.click();
+        // Open the tasks panel by default on load
+        openTasksPanel();
     </script>
-</body>
-
-</html>cript>
 </body>
 
 </html>

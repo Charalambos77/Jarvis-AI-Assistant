@@ -108,6 +108,8 @@ STATE_LOCK = threading.Lock()
 CONVO = []            # list of {"role": "user"|"ai"|"system", "text": ...}
 ORB_STATE = "idle"     # "idle" | "thinking" | "speaking"
 FOCUS_TASK_IDS = []   # list of task IDs to highlight/focus on in UI
+UI_ACTION = None      # e.g. {"type": "task_created", "task_id": 5, "priority": "high"}
+JARVIS_SLEEPING = False # tracks sleep/wake visual state of UI/nebula
 
 # --- Pipeline Gate State ---
 PIPELINE_STATE = {
@@ -200,8 +202,8 @@ def speak(text: str):
 import coordinator
 
 def jarvis_tool_listener(name, args, result):
+    global FOCUS_TASK_IDS, UI_ACTION
     if name == "focus_tasks":
-        global FOCUS_TASK_IDS
         with STATE_LOCK:
             task_ids = result.get("task_ids", [])
             if isinstance(task_ids, (int, float)):
@@ -211,6 +213,53 @@ def jarvis_tool_listener(name, args, result):
             else:
                 FOCUS_TASK_IDS = []
 
+    with STATE_LOCK:
+        if name == "add_task":
+            parent_id = args.get("parent_id")
+            new_id = result
+            if parent_id:
+                UI_ACTION = {
+                    "type": "subtask_created",
+                    "task_id": new_id,
+                    "parent_id": parent_id
+                }
+            else:
+                UI_ACTION = {
+                    "type": "task_created",
+                    "task_id": new_id,
+                    "priority": args.get("priority", "medium")
+                }
+        elif name == "delete_task":
+            task_id = args.get("task_id")
+            if task_id:
+                UI_ACTION = {
+                    "type": "task_deleted",
+                    "task_id": task_id
+                }
+        elif name == "complete_task":
+            task_id = args.get("task_id")
+            if task_id:
+                UI_ACTION = {
+                    "type": "task_completed",
+                    "task_id": task_id
+                }
+        elif name == "add_note":
+            UI_ACTION = {
+                "type": "note_created"
+            }
+        elif name == "delete_note":
+            UI_ACTION = {
+                "type": "note_deleted"
+            }
+        elif name == "search_notes":
+            UI_ACTION = {
+                "type": "note_search"
+            }
+        elif name == "google_search":
+            UI_ACTION = {
+                "type": "google_search"
+            }
+
 coordinator.register_tool_listener(jarvis_tool_listener)
 
 def handle_request(transcript: str) -> str:
@@ -219,6 +268,14 @@ def handle_request(transcript: str) -> str:
 
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280
+
+# Global speech recognizer configuration
+recognizer = sr.Recognizer()
+recognizer.energy_threshold = 300
+recognizer.dynamic_energy_threshold = True
+recognizer.dynamic_energy_adjustment_damping = 0.15
+recognizer.dynamic_energy_ratio = 1.5
+recognizer.pause_threshold = 0.8
 
 # ---------------------------------------------------------------------------
 # Local-only web server (127.0.0.1 - not reachable from your network)
@@ -268,7 +325,7 @@ def settings_route():
     if request.method == "POST":
         data = request.get_json(force=True) or {}
         current = load_settings()
-        for k in ["theme", "voice_speed", "wake_word_threshold"]:
+        for k in ["theme", "voice_speed", "wake_word_threshold", "provider", "ollama_model", "ollama_url"]:
             if k in data:
                 if k == "voice_speed":
                     current[k] = int(data[k])
@@ -284,15 +341,18 @@ def settings_route():
 
 @app.route("/state", methods=["GET"])
 def state():
-    global FOCUS_TASK_IDS
+    global FOCUS_TASK_IDS, UI_ACTION, JARVIS_SLEEPING
     with STATE_LOCK:
         res = jsonify({
             "orb": ORB_STATE,
             "messages": CONVO,
-            "focus_task_ids": FOCUS_TASK_IDS
+            "focus_task_ids": FOCUS_TASK_IDS,
+            "ui_action": UI_ACTION,
+            "sleeping": JARVIS_SLEEPING
         })
-        # Clear focused task IDs after serving so it only triggers once in UI
+        # Clear focused task IDs and UI action after serving so they only trigger once
         FOCUS_TASK_IDS = []
+        UI_ACTION = None
         return res
 
 
@@ -456,10 +516,8 @@ def run_server():
 # ---------------------------------------------------------------------------
 
 def record_and_transcribe():
-    recognizer = sr.Recognizer()
     mic = sr.Microphone(sample_rate=SAMPLE_RATE)
     with mic as source:
-        recognizer.adjust_for_ambient_noise(source, duration=0.3)
         print("Listening...")
         try:
             audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
@@ -534,6 +592,11 @@ def reminder_loop():
 # ---------------------------------------------------------------------------
 
 def mic_loop(window):
+    print("Calibrating microphone for ambient noise...")
+    with sr.Microphone(sample_rate=SAMPLE_RATE) as source:
+        recognizer.adjust_for_ambient_noise(source, duration=1.0)
+    print(f"Calibrated energy threshold: {recognizer.energy_threshold:.2f}")
+
     print("Loading wake word model (Hey Jarvis)...")
     openwakeword.utils.download_models()
     oww_model = WakeModel(wakeword_models=["hey_jarvis"])
@@ -568,12 +631,14 @@ def mic_loop(window):
             if triggered:
                 print("\nWake word detected!")
                 oww_model.reset()
+                global JARVIS_SLEEPING
+                with STATE_LOCK:
+                    JARVIS_SLEEPING = False
 
                 # Determine whether they said "Hey Jarvis" or just "Jarvis"
                 greeting = "Hello Sir, how can I help you?"
                 try:
                     wake_audio = bytes(buffer)
-                    recognizer = sr.Recognizer()
                     sr_audio = sr.AudioData(wake_audio, 16000, 2)
                     text = recognizer.recognize_google(sr_audio).lower()
                     print(f"[wake analysis] {text}")
@@ -614,6 +679,8 @@ def mic_loop(window):
                         push_message("user", transcript)
                         speak("Okay, going back to sleep.")
                         in_conversation = False
+                        with STATE_LOCK:
+                            JARVIS_SLEEPING = True
                         
                         keep_open = (
                             "without closing" in transcript_lower or 
