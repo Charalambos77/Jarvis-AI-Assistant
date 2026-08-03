@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Second Brain // Pipeline Coordinator</title>
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #05060b;
+            --grid-color: rgba(255, 255, 255, 0.02);
+            --text-main: #FFFFFF;
+            --text-muted: #6B7280;
+            --text-dim: #4B5563;
+
+            /* Glow and Accent Colors */
+            --cyan-glow: rgba(6, 182, 212, 0.15);
+            --cyan-border: #06b6d4;
+            --orange-glow: rgba(249, 115, 22, 0.2);
+            --orange-border: #f97316;
+            --green-glow: rgba(34, 197, 94, 0.2);
+            --green-border: #22c55e;
+            --red-glow: rgba(239, 68, 68, 0.15);
+            --red-border: #ef4444;
+
+            --card-bg: rgba(13, 16, 28, 0.7);
+            --card-border: rgba(255, 255, 255, 0.05);
+            --inner-box-bg: rgba(255, 255, 255, 0.01);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+
+            /* Dotted Grid Background */
+            background-image:
+                radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        /* Subtle radial gradient vignette */
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, transparent 30%, rgba(5, 6, 11, 0.95) 100%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Top Navigation Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 40px 0px 40px;
+            z-index: 10;
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .logo span {
+            color: var(--cyan-border);
+        }
+
+        .nav-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        .nav-btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #9CA3AF;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            padding: 8px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: #FFFFFF;
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .nav-btn.active {
+            background: #FFFFFF;
+            color: #000000;
+            border-color: #FFFFFF;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+            font-weight: 700;
+        }
+
+        /* Pipeline Main Container */
+        .pipeline-container {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            padding: 20px 40px 30px 40px;
+            gap: 16px;
+            position: relative;
+            z-index: 5;
+            flex-grow: 1;
+            align-items: stretch;
+            overflow: hidden;
+            width: 100%;
+        }
+
+        /* Stage Columns styling */
+        .stage-column {
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            min-width: 0;
+            height: 100%;
+        }
+
+        .stage-header {
+            margin-bottom: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            flex-shrink: 0;
+        }
+
+        .stage-num {
+            font-size: 9px;
+            color: var(--cyan-border);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .stage-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #FFFFFF;
+            letter-spacing: -0.5px;
+        }
+
+        .stage-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 1px;
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Card panels */
+        .stage-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+            transition: all 0.3s ease;
+            flex-grow: 1;
+            height: calc(100% - 50px);
+            overflow-y: auto;
+            scrollbar-width: none;
+        }
+
+        .stage-card::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Neon Border Glow states */
+        .stage-card.cyan-glow {
+            border-color: rgba(6, 182, 212, 0.4);
+            box-shadow: 0 0 25px var(--cyan-glow), inset 0 0 10px rgba(6, 182, 212, 0.05);
+        }
+
+        .stage-card.orange-glow {
+            border-color: rgba(249, 115, 22, 0.5);
+            box-shadow: 0 0 30px var(--orange-glow), inset 0 0 10px rgba(249, 115, 22, 0.05);
+        }
+
+        .stage-card.green-glow {
+            border-color: rgba(34, 197, 94, 0.4);
+            box-shadow: 0 0 25px var(--green-glow);
+        }
+
+        .card-section-title {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-muted);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background-color: var(--cyan-border);
+            display: inline-block;
+            box-shadow: 0 0 8px var(--cyan-border);
+        }
+
+        .status-dot.orange {
+            background-color: var(--orange-border);
+            box-shadow: 0 0 8px var(--orange-border);
+        }
+
+        .status-dot.green {
+            background-color: var(--green-border);
+            box-shadow: 0 0 8px var(--green-border);
+            animation: pulse 1.5s infinite alternate;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 0.4;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        /* Lists and layout items inside cards */
+        .items-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .item-row {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+            cursor: default;
+        }
+
+        .item-row:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.1);
+            transform: translateX(3px);
+        }
+
+        .item-icon {
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+
+        .item-text {
+            font-weight: 500;
+            color: #E5E7EB;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Stage 2: JSON Code Output */
+        .code-box {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9.5px;
+            color: #60A5FA;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre;
+        }
+
+        /* Stage 4: Directory File Tree */
+        .file-tree {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .tree-folder {
+            color: #F3F4F6;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 500;
+        }
+
+        .tree-folder::before {
+            content: "📁";
+            font-size: 11px;
+        }
+
+        .tree-file {
+            padding-left: 20px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: color 0.2s;
+            cursor: pointer;
+        }
+
+        .tree-file::before {
+            content: "📄";
+            font-size: 11px;
+        }
+
+        .tree-file:hover {
+            color: var(--cyan-border);
+        }
+
+        .tree-file.highlighted {
+            color: #60A5FA;
+            font-weight: 600;
+            text-shadow: 0 0 10px rgba(96, 165, 250, 0.3);
+        }
+
+        /* Stage 5: HITL Gate Panel styling */
+        .hitl-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .hitl-desc {
+            font-size: 11px;
+            line-height: 1.5;
+            color: #D1D5DB;
+        }
+
+        .hitl-desc strong {
+            color: #FFFFFF;
+        }
+
+        .hitl-meta {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            border: 1px solid rgba(255, 255, 255, 0.02);
+        }
+
+        .meta-line {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .meta-label {
+            color: var(--text-dim);
+        }
+
+        .meta-val {
+            color: var(--text-muted);
+        }
+
+        .meta-val.pulse-orange {
+            color: var(--orange-border);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .hitl-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .action-button {
+            flex: 1;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+            border: 1px solid transparent;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .action-button.approve {
+            background: rgba(34, 197, 94, 0.1);
+            border-color: rgba(34, 197, 94, 0.4);
+            color: #4ade80;
+        }
+
+        .action-button.approve:hover {
+            background: var(--green-border);
+            color: #000000;
+            box-shadow: 0 0 15px var(--green-glow);
+        }
+
+        .action-button.reject {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #f87171;
+        }
+
+        .action-button.reject:hover {
+            background: var(--red-border);
+            color: #FFFFFF;
+            box-shadow: 0 0 15px var(--red-glow);
+        }
+
+        /* SVG Connection Canvas overlay */
+        .connectors-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Bottom chat overlay message */
+        .jarvis-toast {
+            position: fixed;
+            bottom: 30px;
+            right: 40px;
+            font-size: 11px;
+            color: #60A5FA;
+            font-family: 'JetBrains Mono', monospace;
+            text-shadow: 0 0 8px rgba(96, 165, 250, 0.35);
+            z-index: 100;
+            animation: hover-pulse 3s infinite ease-in-out;
+        }
+
+        @keyframes hover-pulse {
+
+            0%,
+            100% {
+                transform: translateY(0);
+                opacity: 0.85;
+            }
+
+            50% {
+                transform: translateY(-3px);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Header navigation -->
+    <header>
+        <div class="logo">SECOND BRAIN <span>//</span> PIPELINE COORDINATOR</div>
+        <div class="nav-group">
+            <button class="nav-btn" onclick="window.location.href='agent_map_final.html'">Brain</button>
+            <button class="nav-btn active">Plan</button>
+            <button class="nav-btn" onclick="alert('Viewing APIs and MCP configurations...')">APIs/MCPs</button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="pipeline-container" id="pipeline">
+        <!-- SVG Connections -->
+        <svg class="connectors-svg" id="svg-canvas"></svg>
+
+        <!-- Stage 01 -->
+        <div class="stage-column" id="stage-1">
+            <div class="stage-header">
+                <span class="stage-num">Stage 01</span>
+                <span class="stage-title">Capture</span>
+                <span class="stage-meta">vaults/_inbox/</span>
+            </div>
+            <div class="stage-card cyan-glow">
+                <div class="card-section-title">
+                    INPUT SOURCES <span class="status-dot"></span>
+                </div>
+                <div class="items-list">
+                    <div class="item-row">
+                        <span class="item-icon">⚡</span>
+                        <span class="item-text">Initial Task Input</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">🧠</span>
+                        <span class="item-text">Long-Term Memory Lookup</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">🛠️</span>
+                        <span class="item-text">Available Tools Discovery</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">📄</span>
+                        <span class="item-text">Initial Research Plan Build</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stage 02 -->
+        <div class="stage-column" id="stage-2">
+            <div class="stage-header">
+                <span class="stage-num">Stage 02</span>
+                <span class="stage-title">Classify</span>
+                <span class="stage-meta">inbox-classifier</span>
+            </div>
+            <div class="stage-card">
+                <div class="card-section-title">
+                    CLASSIFIER STATUS <span class="status-dot"></span>
+                </div>
+                <div class="items-list">
+                    <div class="item-row">
+                        <span class="item-icon">⏰</span>
+                        <span class="item-text">cron - every 5min</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">⚙️</span>
+                        <span class="item-text">route_inbox_item.py</span>
+                    </div>
+                </div>
+                <div class="code-box" id="json-logs">{
+                    "Route": "project_staged",
+                    "tag": "to-type-it",
+                    "confidence": 0.94,
+                    "context": "multiagent_upgrade"
+                    }</div>
+            </div>
+        </div>
+
+        <!-- Stage 03 -->
+        <div class="stage-column" id="stage-3">
+            <div class="stage-header">
+                <span class="stage-num">Stage 03</span>
+                <span class="stage-title">Route</span>
+                <span class="stage-meta">5-way fork</span>
+            </div>
+            <div class="stage-card">
+                <div class="card-section-title">
+                    ROUTING TARGET <span class="status-dot"></span>
+                </div>
+                <div class="items-list">
+                    <div class="item-row">
+                        <span class="item-icon">📁</span>
+                        <span class="item-text">Project Staged</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">📄</span>
+                        <span class="item-text">GTD / Action</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">💡</span>
+                        <span class="item-text">Idea Capture</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">📚</span>
+                        <span class="item-text">Reference Library</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">🗄️</span>
+                        <span class="item-text">Archive</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stage 04 -->
+        <div class="stage-column" id="stage-4">
+            <div class="stage-header">
+                <span class="stage-num">Stage 04</span>
+                <span class="stage-title">Process</span>
+                <span class="stage-meta">vault/potential_projects/</span>
+            </div>
+            <div class="stage-card">
+                <div class="card-section-title">
+                    AUTO-RESEARCH & FILES <span class="status-dot"></span>
+                </div>
+                <div class="file-tree">
+                    <div class="tree-folder">to-type-it/</div>
+                    <div class="tree-file">1-tech-stack.md</div>
+                    <div class="tree-file highlighted">proposed-plan.md</div>
+
+                    <div class="tree-folder" style="margin-top: 8px;">research/</div>
+                    <div class="tree-file">findings.md</div>
+
+                    <div class="tree-folder" style="margin-top: 8px;">sources/</div>
+                    <div class="tree-file">transcripts.txt</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stage 05 -->
+        <div class="stage-column" id="stage-5">
+            <div class="stage-header">
+                <span class="stage-num">Stage 05</span>
+                <span class="stage-title">Human Gate</span>
+                <span class="stage-meta">the only checkpoint</span>
+            </div>
+            <div class="stage-card orange-glow" id="hitl-card">
+                <div class="card-section-title">
+                    HITL REVIEW <span class="status-dot orange"></span>
+                </div>
+                <div class="hitl-panel">
+                    <div class="hitl-desc">
+                        Reviewing <strong>proposed-plan.md</strong> created by Central Brain context engine.
+                    </div>
+                    <div class="hitl-meta">
+                        <div class="meta-line">
+                            <span class="meta-label">Status:</span>
+                            <span class="meta-val pulse-orange" id="status-text">
+                                <span class="status-dot orange"
+                                    style="animation: pulse 1s infinite alternate;"></span>NOTIFIED
+                            </span>
+                        </div>
+                        <div class="meta-line">
+                            <span class="meta-label">Start:</span>
+                            <span class="meta-val" id="time-text">18m 32s ago</span>
+                        </div>
+                        <div class="meta-line">
+                            <span class="meta-label">Path:</span>
+                            <span class="meta-val">/process-project</span>
+                        </div>
+                    </div>
+                    <div class="hitl-actions">
+                        <button class="action-button approve" onclick="approvePlan()">Approve</button>
+                        <button class="action-button reject" onclick="rejectPlan()">Reject</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stage 06 -->
+        <div class="stage-column" id="stage-6">
+            <div class="stage-header">
+                <span class="stage-num">Stage 06</span>
+                <span class="stage-title">Execute & Save</span>
+                <span class="stage-meta">deployment & memory</span>
+            </div>
+            <div class="stage-card" id="execute-card">
+                <div class="card-section-title">
+                    EXECUTION PIPELINE <span class="status-dot" id="exec-status"></span>
+                </div>
+                <div class="items-list">
+                    <div class="item-row">
+                        <span class="item-icon">🚀</span>
+                        <span class="item-text">Spawn Execution Workers</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">📦</span>
+                        <span class="item-text">Deploy Live App / Artifacts</span>
+                    </div>
+                    <div class="item-row">
+                        <span class="item-icon">💾</span>
+                        <span class="item-text">Save Winning Patterns to LTM</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast / Notification status -->
+    <div class="jarvis-toast">Hello. I am Jarvis. How can I help you coordinate the pipeline plan today?</div>
+
+    <script>
+        // Setup simple timeline time counting
+        let minutes = 18;
+        let seconds = 32;
+        setInterval(() => {
+            seconds++;
+            if (seconds >= 60) {
+                minutes++;
+                seconds = 0;
+            }
+            document.getElementById('time-text').innerText = `${minutes}m ${seconds}s ago`;
+        }, 1000);
+
+        // Approve / Reject Handlers
+        function approvePlan() {
+            const hitlCard = document.getElementById('hitl-card');
+            const execCard = document.getElementById('execute-card');
+            const statusText = document.getElementById('status-text');
+            const execStatus = document.getElementById('exec-status');
+
+            // Set Human Gate Card to green
+            hitlCard.className = "stage-card green-glow";
+            statusText.innerHTML = '<span class="status-dot green"></span>APPROVED';
+            statusText.style.color = '#4ade80';
+
+            // Activate Stage 06
+            execCard.className = "stage-card cyan-glow";
+            execStatus.className = "status-dot green";
+
+            // Update Jarvis Toast
+            document.querySelector('.jarvis-toast').innerText = "Plan approved. Spawning execution agents and compiling project metrics...";
+        }
+
+        function rejectPlan() {
+            const hitlCard = document.getElementById('hitl-card');
+            const execCard = document.getElementById('execute-card');
+            const statusText = document.getElementById('status-text');
+            const execStatus = document.getElementById('exec-status');
+
+            // Set Human Gate Card to red
+            hitlCard.className = "stage-card";
+            hitlCard.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+            hitlCard.style.boxShadow = '0 0 30px rgba(239, 68, 68, 0.2)';
+            statusText.innerHTML = '<span class="status-dot orange" style="background-color:#ef4444; box-shadow: 0 0 8px #ef4444;"></span>REJECTED';
+            statusText.style.color = '#f87171';
+
+            // Deactivate Stage 06
+            execCard.className = "stage-card";
+            execStatus.className = "status-dot";
+
+            document.querySelector('.jarvis-toast').innerText = "Plan rejected. Sending feedback to the Central Brain to adjust criteria...";
+        }
+
+        // Draw animated connection paths using SVG
+        function drawConnectors() {
+            const svg = document.getElementById('svg-canvas');
+            svg.innerHTML = ''; // clear previous paths
+
+            const pipeline = document.getElementById('pipeline');
+            svg.setAttribute('width', pipeline.scrollWidth);
+            svg.setAttribute('height', pipeline.scrollHeight);
+
+            const stages = 6;
+            for (let i = 1; i < stages; i++) {
+                const sourceCard = document.querySelector(`#stage-${i} .stage-card`);
+                const targetCard = document.querySelector(`#stage-${i + 1} .stage-card`);
+
+                if (sourceCard && targetCard) {
+                    const sourceRect = sourceCard.getBoundingClientRect();
+                    const targetRect = targetCard.getBoundingClientRect();
+                    const pipelineRect = pipeline.getBoundingClientRect();
+
+                    // Coordinates relative to pipeline container
+                    const startX = sourceRect.right - pipelineRect.left + pipeline.scrollLeft;
+                    const startY = sourceRect.top + (sourceRect.height / 2) - pipelineRect.top;
+
+                    const endX = targetRect.left - pipelineRect.left + pipeline.scrollLeft;
+                    const endY = targetRect.top + (targetRect.height / 2) - pipelineRect.top;
+
+                    // Draw cubic bezier curve for futuristic flow
+                    const midX = (startX + endX) / 2;
+                    const pathD = `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`;
+
+                    // Main connection path
+                    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    path.setAttribute('d', pathD);
+                    path.setAttribute('stroke', 'rgba(255,255,255,0.06)');
+                    path.setAttribute('stroke-width', '2');
+                    path.setAttribute('fill', 'none');
+                    svg.appendChild(path);
+
+                    // Pulsing animated point
+                    const pulse = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    pulse.setAttribute('r', '3');
+                    pulse.setAttribute('fill', i === 5 ? '#f97316' : '#06b6d4');
+
+                    // SVG animateMotion for the pulses
+                    const animate = document.createElementNS('http://www.w3.org/2000/svg', 'animateMotion');
+                    animate.setAttribute('path', pathD);
+                    animate.setAttribute('dur', `${2.5 + i * 0.4}s`);
+                    animate.setAttribute('repeatCount', 'indefinite');
+
+                    pulse.appendChild(animate);
+                    svg.appendChild(pulse);
+                }
+            }
+        }
+
+        // Draw initially and handle resizing / scrolling
+        window.addEventListener('load', drawConnectors);
+        window.addEventListener('resize', drawConnectors);
+        document.getElementById('pipeline').addEventListener('scroll', drawConnectors);
+    </script>
+</body>
+
+</html>

@@ -1,860 +1,1405 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Second Brain // Command Center</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  /* --- Theme Definitions --- */
-  body.theme-cyberpunk {
-    --void: #0a0b0d;
-    --panel: rgba(16, 18, 22, 0.7);
-    --panel-line: rgba(61, 222, 209, 0.15);
-    --cyan: #3dded1;
-    --cyan-dim: #1d5a56;
-    --violet: #7c6cf0;
-    --violet-dim: #3a3470;
-    --amber: #f0a83d;
-    --fog: #7a8790;
-    --ink: #e8edf0;
-    --glass-blur: 14px;
-    --orb-glow: 0 0 30px rgba(61, 222, 209, 0.4);
-  }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Second Brain // Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    /* --- Theme Definitions --- */
+    body.theme-cyberpunk {
+      --void: #0a0b0d;
+      --panel: rgba(16, 18, 22, 0.7);
+      --panel-line: rgba(61, 222, 209, 0.15);
+      --cyan: #3dded1;
+      --cyan-dim: #1d5a56;
+      --violet: #7c6cf0;
+      --violet-dim: #3a3470;
+      --amber: #f0a83d;
+      --fog: #7a8790;
+      --ink: #e8edf0;
+      --glass-blur: 14px;
+      --orb-glow: 0 0 30px rgba(61, 222, 209, 0.4);
+    }
 
-  body.theme-synthwave {
-    --void: #150624;
-    --panel: rgba(30, 10, 48, 0.7);
-    --panel-line: rgba(255, 0, 127, 0.2);
-    --cyan: #ff007f;
-    --cyan-dim: #8c0046;
-    --violet: #f1df11;
-    --violet-dim: #8a7e02;
-    --amber: #00f0ff;
-    --fog: #9b7ba3;
-    --ink: #ffe3fa;
-    --glass-blur: 16px;
-    --orb-glow: 0 0 30px rgba(255, 0, 127, 0.5);
-  }
+    body.theme-synthwave {
+      --void: #150624;
+      --panel: rgba(30, 10, 48, 0.7);
+      --panel-line: rgba(255, 0, 127, 0.2);
+      --cyan: #ff007f;
+      --cyan-dim: #8c0046;
+      --violet: #f1df11;
+      --violet-dim: #8a7e02;
+      --amber: #00f0ff;
+      --fog: #9b7ba3;
+      --ink: #ffe3fa;
+      --glass-blur: 16px;
+      --orb-glow: 0 0 30px rgba(255, 0, 127, 0.5);
+    }
 
-  body.theme-minimal {
-    --void: #0f172a;
-    --panel: rgba(30, 41, 59, 0.6);
-    --panel-line: rgba(148, 163, 184, 0.15);
-    --cyan: #38bdf8;
-    --cyan-dim: #0369a1;
-    --violet: #94a3b8;
-    --violet-dim: #475569;
-    --amber: #f59e0b;
-    --fog: #64748b;
-    --ink: #f8fafc;
-    --glass-blur: 10px;
-    --orb-glow: 0 0 30px rgba(56, 189, 248, 0.35);
-  }
+    body.theme-minimal {
+      --void: #0f172a;
+      --panel: rgba(30, 41, 59, 0.6);
+      --panel-line: rgba(148, 163, 184, 0.15);
+      --cyan: #38bdf8;
+      --cyan-dim: #0369a1;
+      --violet: #94a3b8;
+      --violet-dim: #475569;
+      --amber: #f59e0b;
+      --fog: #64748b;
+      --ink: #f8fafc;
+      --glass-blur: 10px;
+      --orb-glow: 0 0 30px rgba(56, 189, 248, 0.35);
+    }
 
-  body.theme-obsidian {
-    --void: #090b0e;
-    --panel: rgba(16, 20, 18, 0.7);
-    --panel-line: rgba(197, 160, 89, 0.2);
-    --cyan: #c5a059;
-    --cyan-dim: #6b5327;
-    --violet: #10b981;
-    --violet-dim: #064e3b;
-    --amber: #d97706;
-    --fog: #879b8a;
-    --ink: #edf4f0;
-    --glass-blur: 15px;
-    --orb-glow: 0 0 30px rgba(197, 160, 89, 0.4);
-  }
+    body.theme-obsidian {
+      --void: #090b0e;
+      --panel: rgba(16, 20, 18, 0.7);
+      --panel-line: rgba(197, 160, 89, 0.2);
+      --cyan: #c5a059;
+      --cyan-dim: #6b5327;
+      --violet: #10b981;
+      --violet-dim: #064e3b;
+      --amber: #d97706;
+      --fog: #879b8a;
+      --ink: #edf4f0;
+      --glass-blur: 15px;
+      --orb-glow: 0 0 30px rgba(197, 160, 89, 0.4);
+    }
 
-  * { box-sizing: border-box; }
-  html, body {
-    margin: 0; height: 100%;
-    background: var(--void);
-    color: var(--ink);
-    font-family: 'Inter', sans-serif;
-    overflow: hidden;
-    transition: background 0.5s ease;
-  }
-  .mono { font-family: 'Space Mono', monospace; }
+    * {
+      box-sizing: border-box;
+    }
 
-  /* Ambient Grid Overlay */
-  body::before {
-    content: '';
-    position: fixed; inset: 0;
-    background-image:
-      linear-gradient(var(--panel-line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--panel-line) 1px, transparent 1px);
-    background-size: 48px 48px;
-    opacity: 0.3;
-    pointer-events: none;
-    z-index: 1;
-  }
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      background: var(--void);
+      color: var(--ink);
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+      transition: background 0.5s ease;
+    }
 
-  .frame {
-    position: relative;
-    height: 100vh;
-    display: grid;
-    grid-template-columns: 320px 1fr 320px;
-    gap: 0;
-    z-index: 2;
-  }
+    .mono {
+      font-family: 'Space Mono', monospace;
+    }
 
-  header.eyebrow {
-    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-    font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase;
-    color: var(--fog);
-    z-index: 10;
-    pointer-events: none;
-  }
-  header.eyebrow b { color: var(--cyan); }
+    /* Ambient Grid Overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--panel-line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--panel-line) 1px, transparent 1px);
+      background-size: 48px 48px;
+      opacity: 0.3;
+      pointer-events: none;
+      z-index: 1;
+    }
 
-  /* Settings trigger */
-  .settings-btn {
-    position: fixed; top: 16px; right: 20px;
-    background: transparent; border: 1px solid var(--panel-line);
-    color: var(--fog); border-radius: 3px; cursor: pointer;
-    width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
-    z-index: 10;
-    transition: all 0.2s;
-  }
-  .settings-btn:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(61,222,209,0.08); }
-  .settings-btn svg { width: 16px; height: 16px; }
+    .frame {
+      position: relative;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 320px 1fr 320px;
+      gap: 0;
+      z-index: 2;
+    }
 
-  /* --- Glass Panels --- */
-  .panel {
-    padding: 72px 18px 24px;
-    overflow-y: auto;
-    background: var(--panel);
-    border-right: 1px solid var(--panel-line);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.3);
-    position: relative;
-  }
-  .panel.right { border-right: none; border-left: 1px solid var(--panel-line); }
+    header.eyebrow {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--fog);
+      z-index: 10;
+      pointer-events: none;
+    }
 
-  .panel-label {
-    font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
-    color: var(--violet); margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
-  }
-  .panel-label::after { content: ''; flex: 1; height: 1px; background: var(--panel-line); }
+    header.eyebrow b {
+      color: var(--cyan);
+    }
 
-  /* Subsection Header */
-  .sub-label {
-    font-size: 9px; letter-spacing: 0.15em; text-transform: uppercase;
-    color: var(--fog); margin: 16px 0 8px; font-weight: bold;
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  
-  .filter-clear-btn {
-    font-size: 8px; color: var(--amber); border: 1px solid var(--amber);
-    background: rgba(240, 168, 61, 0.1); padding: 1px 4px; border-radius: 2px; cursor: pointer;
-  }
+    /* Settings trigger */
+    .settings-btn {
+      position: fixed;
+      top: 16px;
+      right: 20px;
+      background: transparent;
+      border: 1px solid var(--panel-line);
+      color: var(--fog);
+      border-radius: 3px;
+      cursor: pointer;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      transition: all 0.2s;
+    }
 
-  /* --- Tasks Layout --- */
-  .task-wrapper {
-    margin-bottom: 6px;
-  }
-  .task {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.03);
-    padding: 10px 12px;
-    border-left: 3px solid var(--panel-line);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-  .task:hover {
-    background: rgba(124,108,240,0.08);
-    border-left-color: var(--violet);
-    transform: translateX(2px);
-  }
-  .task.focused { border-left-color: var(--amber); background: rgba(240,168,61,0.08); }
-  .task.highlighted-match {
-    outline: 2px solid var(--amber);
-    box-shadow: 0 0 15px rgba(240, 168, 61, 0.4);
-    animation: flashGlow 1.5s infinite alternate;
-  }
-  @keyframes flashGlow {
-    from { box-shadow: 0 0 5px rgba(240, 168, 61, 0.2); }
-    to { box-shadow: 0 0 15px rgba(240, 168, 61, 0.5); }
-  }
-  .task.done { opacity: 0.4; }
-  .task.done .task-content { text-decoration: line-through; }
-  
-  .task-content { font-size: 13px; line-height: 1.4; font-weight: 500; }
-  .task-meta { font-size: 10px; color: var(--fog); margin-top: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  
-  /* Priority Badges */
-  .priority-tag {
-    font-size: 8px; padding: 1px 4px; border-radius: 2px; text-transform: uppercase; font-weight: bold;
-  }
-  .priority-tag.high { background: rgba(240, 168, 61, 0.2); color: var(--amber); border: 1px solid var(--amber); }
-  .priority-tag.medium { background: rgba(124, 108, 240, 0.2); color: var(--violet); border: 1px solid var(--violet); }
-  .priority-tag.low { background: rgba(122, 135, 144, 0.2); color: var(--fog); border: 1px solid var(--fog); }
+    .settings-btn:hover {
+      border-color: var(--cyan);
+      color: var(--cyan);
+      background: rgba(61, 222, 209, 0.08);
+    }
 
-  .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
-  .status-dot.open { border: 1px solid var(--cyan); }
-  .status-dot.in_progress { background: var(--amber); }
-  .status-dot.done { background: var(--fog); }
-  .blocked-tag { color: var(--amber); font-weight: bold; }
+    .settings-btn svg {
+      width: 16px;
+      height: 16px;
+    }
 
-  /* Subtasks indentation nesting */
-  .subtasks-container {
-    margin-left: 18px;
-    border-left: 1px dashed var(--panel-line);
-    padding-left: 10px;
-    margin-top: 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .subtasks-container .task {
-    padding: 6px 8px;
-  }
-  .subtasks-container .task-content {
-    font-size: 12px;
-  }
+    /* --- Glass Panels --- */
+    .panel {
+      padding: 72px 18px 24px;
+      overflow-y: auto;
+      background: var(--panel);
+      border-right: 1px solid var(--panel-line);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.3);
+      position: relative;
+    }
 
-  /* Task-attached Notes styling (smaller under task) */
-  .task-notes-container {
-    margin-left: 18px;
-    margin-top: 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .task-note {
-    background: rgba(61, 222, 209, 0.04);
-    border: 1px solid rgba(61, 222, 209, 0.1);
-    border-radius: 3px;
-    padding: 5px 8px;
-    font-size: 11px;
-    color: var(--fog);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition: all 0.2s;
-  }
-  .task-note:hover {
-    background: rgba(61, 222, 209, 0.08);
-    color: var(--ink);
-    border-color: var(--cyan);
-  }
-  .task-note-bullet { color: var(--cyan); font-size: 12px; }
-  .task-note.done { opacity: 0.5; }
-  .task-note.done .task-note-content { text-decoration: line-through; }
+    .panel.right {
+      border-right: none;
+      border-left: 1px solid var(--panel-line);
+    }
 
-  /* --- Notes UI --- */
-  .notes-search {
-    width: 100%; background: rgba(0,0,0,0.2); border: 1px solid var(--panel-line);
-    color: var(--ink); font-family: 'Inter', sans-serif; font-size: 12px;
-    padding: 8px 12px; border-radius: 4px; outline: none; margin-bottom: 14px;
-  }
-  .notes-search:focus { border-color: var(--cyan); }
-  
-  .note-item {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.03);
-    padding: 12px; border-radius: 4px; cursor: pointer; margin-bottom: 8px;
-    transition: all 0.2s ease;
-  }
-  .note-item:hover {
-    background: rgba(61,222,209,0.05);
-    border-color: var(--cyan);
-    transform: translateX(-2px);
-  }
-  .note-item.done { opacity: 0.4; }
-  .note-item.done .note-body { text-decoration: line-through; }
-  
-  .note-body {
-    font-size: 12.5px; line-height: 1.45;
-    overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-  }
-  .note-tags {
-    display: flex; gap: 4px; flex-wrap: wrap; margin-top: 8px;
-  }
-  .note-tag {
-    font-size: 8.5px; color: var(--cyan); background: rgba(61, 222, 209, 0.1);
-    padding: 1px 5px; border-radius: 2px;
-  }
-  .note-date { font-size: 8.5px; color: var(--fog); margin-top: 6px; text-align: right; }
+    .panel-label {
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--violet);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
 
-  /* --- Center Stage & Orb --- */
-  .stage {
-    display: flex; flex-direction: column; align-items: center;
-    height: 100vh;
-    padding: 72px 24px 24px;
-    position: relative;
-    z-index: 5;
-  }
+    .panel-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--panel-line);
+    }
 
-  .orb-wrap {
-    width: 170px; height: 170px; position: relative; flex-shrink: 0;
-    border-radius: 50%;
-    box-shadow: var(--orb-glow);
-    transition: box-shadow 0.3s ease;
-  }
-  .orb-wrap svg { width: 100%; height: 100%; }
-  .dial-ring { transform-origin: 100px 100px; }
-  .dial-ring.slow { animation: spin 50s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+    /* Subsection Header */
+    .sub-label {
+      font-size: 9px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--fog);
+      margin: 16px 0 8px;
+      font-weight: bold;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
 
-  .orb-core {
-    fill: var(--void);
-    stroke: var(--cyan);
-    stroke-width: 1;
-    opacity: 0.6;
-    transition: stroke 0.3s;
-  }
-  .tick { stroke: var(--cyan); stroke-width: 1.4; opacity: 0.35; transition: opacity 0.2s, stroke 0.2s; }
-  .pulse-ring {
-    fill: none; stroke: var(--cyan); stroke-width: 1;
-    opacity: 0; transform-origin: 100px 100px;
-    transition: stroke 0.3s;
-  }
-  .speaking .pulse-ring { animation: ripple 1.1s ease-out infinite; }
-  .speaking .tick { stroke: var(--cyan); opacity: 0.9; }
-  .thinking .tick { stroke: var(--violet); opacity: 0.7; animation: flicker 0.6s ease-in-out infinite alternate; }
-  
-  @keyframes ripple {
-    0%   { opacity: 0.5; transform: scale(0.85); }
-    100% { opacity: 0;   transform: scale(1.5); }
-  }
-  @keyframes flicker { from { opacity: 0.3; } to { opacity: 0.85; } }
+    .filter-clear-btn {
+      font-size: 8px;
+      color: var(--amber);
+      border: 1px solid var(--amber);
+      background: rgba(240, 168, 61, 0.1);
+      padding: 1px 4px;
+      border-radius: 2px;
+      cursor: pointer;
+    }
 
-  .speaking .tick {
-    animation: tickBurst 0.55s ease-in-out infinite;
-    animation-delay: var(--delay, 0s);
-    stroke: var(--cyan);
-    opacity: 1;
-  }
-  @keyframes tickBurst {
-    0%, 100% { transform: translate(0, 0) scaleY(1); opacity: 0.6; }
-    50%      { transform: translate(calc(var(--nx) * 11px), calc(var(--ny) * 11px)) scaleY(1.6); opacity: 1; }
-  }
+    /* --- Tasks Layout --- */
+    .task-wrapper {
+      margin-bottom: 6px;
+    }
 
-  .orb-label {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fog);
-    pointer-events: none;
-  }
+    .task {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 10px 12px;
+      border-left: 3px solid var(--panel-line);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
 
-  /* --- Dashboard Stats Panel --- */
-  .stats-dashboard {
-    display: flex; gap: 10px; width: 100%; max-width: 560px; margin-top: 15px;
-  }
-  .stat-card {
-    flex: 1; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--panel-line);
-    border-radius: 4px; padding: 10px; text-align: center;
-  }
-  .stat-val { font-size: 18px; font-weight: 600; color: var(--cyan); }
-  .stat-lbl { font-size: 9px; letter-spacing: 0.1em; color: var(--fog); margin-top: 2px; text-transform: uppercase; }
+    .task:hover {
+      background: rgba(124, 108, 240, 0.08);
+      border-left-color: var(--violet);
+      transform: translateX(2px);
+    }
 
-  /* --- Chat & Messages --- */
-  .chat-col {
-    width: 100%; max-width: 560px; display: flex; flex-direction: column;
-    flex: 1; min-height: 0; margin-top: 15px;
-    border: 1px solid rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.15);
-    padding: 10px;
-    margin-bottom: 5px;
-  }
-  .transcript {
-    flex: 1; overflow-y: auto; padding: 24px 8px 16px;
-    display: flex; flex-direction: column; gap: 12px;
-    /* Fades out at the top using linear gradient mask */
-    mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 20%);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,1) 20%);
-  }
-  
-  /* Pushes initial chat items to bottom and scrolls normally on overflow */
-  .transcript::before {
-    content: '';
-    flex-grow: 1;
-  }
-  
-  .msg { max-width: 85%; font-size: 13.5px; line-height: 1.5; animation: fadeIn 0.25s ease-out; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-  
-  .msg .tag { font-size: 8.5px; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 4px; display: block; }
-  .msg.user { align-self: flex-end; text-align: right; }
-  .msg.user .tag { color: var(--violet); }
-  .msg.user .bubble {
-    background: rgba(124, 108, 240, 0.1); border: 1px solid rgba(124, 108, 240, 0.25);
-    border-radius: 12px 12px 2px 12px;
-  }
-  .msg.ai .tag { color: var(--cyan); }
-  .msg.ai .bubble {
-    background: rgba(61, 222, 209, 0.06); border: 1px solid rgba(61, 222, 209, 0.2);
-    border-radius: 12px 12px 12px 2px;
-  }
-  .msg.system .tag { color: var(--amber); }
-  .msg.system .bubble {
-    background: rgba(240, 168, 61, 0.08); border: 1px solid rgba(240, 168, 61, 0.25);
-    border-radius: 8px; border-left: 3px solid var(--amber);
-  }
-  .bubble { padding: 10px 14px; color: var(--ink); display: inline-block; word-break: break-word; text-align: left; }
+    .task.focused {
+      border-left-color: var(--amber);
+      background: rgba(240, 168, 61, 0.08);
+    }
 
-  /* Input Composer */
-  .composer {
-    display: flex; gap: 8px; align-items: center;
-    border-top: 1px solid var(--panel-line);
-    padding-top: 12px;
-  }
-  .composer input {
-    flex: 1; background: rgba(0,0,0,0.25); border: 1px solid var(--panel-line);
-    color: var(--ink); font-family: 'Inter', sans-serif; font-size: 14px;
-    padding: 10px 14px; border-radius: 4px; outline: none;
-  }
-  .composer input:focus { border-color: var(--cyan); }
-  .composer button {
-    background: transparent; border: 1px solid var(--panel-line); color: var(--cyan);
-    width: 38px; height: 38px; border-radius: 4px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.2s;
-  }
-  .composer button:hover { border-color: var(--cyan); background: rgba(61,222,209,0.08); }
-  .composer button.mic-active { background: var(--cyan); color: var(--void); box-shadow: 0 0 10px var(--cyan); }
-  .composer svg { width: 16px; height: 16px; }
+    .task.highlighted-match {
+      outline: 2px solid var(--amber);
+      box-shadow: 0 0 15px rgba(240, 168, 61, 0.4);
+      animation: flashGlow 1.5s infinite alternate;
+    }
 
-  /* --- Modals & Scrim --- */
-  .scrim {
-    position: fixed; inset: 0; background: rgba(10,11,13,0.75);
-    backdrop-filter: blur(5px);
-    opacity: 0; pointer-events: none; transition: opacity 0.2s;
-    z-index: 100;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .scrim.show { opacity: 1; pointer-events: auto; }
-  .focus-card {
-    width: min(520px, 94vw);
-    background: var(--void); border: 1px solid var(--panel-line);
-    box-shadow: 0 0 50px rgba(0,0,0,0.5);
-    border-radius: 6px; padding: 24px;
-    transform: scale(0.95); opacity: 0; transition: all 0.2s ease;
-    max-height: 85vh;
-    overflow-y: auto;
-  }
-  .scrim.show .focus-card { transform: scale(1); opacity: 1; }
-  
-  .focus-card.focus-card-alert { border-color: var(--amber); }
-  .focus-card.focus-card-note { border-color: var(--cyan); }
-  
-  .focus-eyebrow { font-size: 10px; letter-spacing: 0.2em; color: var(--violet); margin-bottom: 12px; text-transform: uppercase; }
-  .focus-content { font-size: 15px; margin-bottom: 18px; line-height: 1.5; white-space: pre-wrap; }
-  .focus-row { font-size: 12px; color: var(--fog); margin-bottom: 6px; }
-  .focus-row b { color: var(--ink); }
-  
-  /* Focus card sub-items details */
-  .focus-sub-section {
-    border-top: 1px solid var(--panel-line);
-    margin-top: 18px;
-    padding-top: 12px;
-  }
-  .focus-sub-title {
-    font-size: 11px; letter-spacing: 0.1em; color: var(--violet);
-    margin-bottom: 8px; font-weight: bold; text-transform: uppercase;
-  }
-  .focus-sub-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 10px;
-  }
-  .focus-sub-item {
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.04);
-    padding: 6px 10px;
-    border-radius: 4px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-  }
-  .focus-sub-item.done { opacity: 0.5; }
-  .focus-sub-item.done span { text-decoration: line-through; }
-  
-  .focus-sub-actions {
-    display: flex;
-    gap: 6px;
-  }
-  .focus-sub-btn {
-    background: transparent; border: 1px solid var(--panel-line);
-    color: var(--fog); font-size: 9px; cursor: pointer; padding: 2px 6px; border-radius: 2px;
-  }
-  .focus-sub-btn:hover { color: var(--cyan); border-color: var(--cyan); }
-  .focus-sub-btn.delete:hover { color: #ef4444; border-color: #ef4444; }
+    @keyframes flashGlow {
+      from {
+        box-shadow: 0 0 5px rgba(240, 168, 61, 0.2);
+      }
 
-  .focus-add-wrap {
-    display: flex; gap: 8px; margin-top: 6px;
-  }
-  .focus-add-wrap input {
-    flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-line);
-    color: var(--ink); font-size: 11px; padding: 6px 8px; border-radius: 4px; outline: none;
-  }
-  .focus-add-wrap input:focus { border-color: var(--cyan); }
-  .focus-add-wrap button {
-    background: rgba(61, 222, 209, 0.1); border: 1px solid var(--panel-line);
-    color: var(--cyan); font-size: 10px; padding: 6px 12px; border-radius: 4px; cursor: pointer;
-  }
-  .focus-add-wrap button:hover { border-color: var(--cyan); background: rgba(61, 222, 209, 0.2); }
+      to {
+        box-shadow: 0 0 15px rgba(240, 168, 61, 0.5);
+      }
+    }
 
-  .focus-action-btn {
-    flex: 1; background: transparent; border: 1px solid var(--panel-line);
-    color: var(--ink); font-family: 'Space Mono', monospace; font-size: 11px;
-    padding: 10px; border-radius: 4px; cursor: pointer; text-transform: uppercase;
-    transition: all 0.2s;
-  }
-  .focus-action-btn.complete { border-color: var(--violet); color: var(--violet); }
-  .focus-action-btn.complete:hover { background: rgba(124, 108, 240, 0.1); }
-  .focus-action-btn.delete { border-color: #ef4444; color: #ef4444; }
-  .focus-action-btn.delete:hover { background: rgba(239, 68, 68, 0.1); }
+    .task.done {
+      opacity: 0.4;
+    }
 
-  .focus-close {
-    margin-top: 16px; background: transparent; border: 1px solid var(--panel-line);
-    color: var(--fog); font-family: 'Space Mono', monospace; font-size: 11px;
-    letter-spacing: 0.1em; text-transform: uppercase;
-    padding: 8px 16px; border-radius: 4px; cursor: pointer; width: 100%; text-align: center;
-    transition: all 0.2s;
-  }
-  .focus-close:hover { border-color: var(--cyan); color: var(--cyan); background: rgba(61,222,209,0.08); }
+    .task.done .task-content {
+      text-decoration: line-through;
+    }
 
-  /* Settings Modal fields */
-  .settings-group {
-    margin-bottom: 18px;
-  }
-  .settings-group label {
-    display: block; font-size: 10px; letter-spacing: 0.15em; color: var(--fog); margin-bottom: 6px;
-  }
-  .settings-group select {
-    width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--panel-line);
-    color: var(--ink); font-family: 'Inter', sans-serif; font-size: 13px;
-    padding: 8px 12px; border-radius: 4px; outline: none;
-  }
-  .settings-group select:focus { border-color: var(--cyan); }
-  .settings-group input[type="range"] {
-    width: 100%; accent-color: var(--cyan);
-  }
-  .settings-val { font-size: 11px; font-weight: bold; color: var(--cyan); margin-left: 6px; }
+    .task-content {
+      font-size: 13px;
+      line-height: 1.4;
+      font-weight: 500;
+    }
 
-  .empty { color: var(--fog); font-size: 12px; font-style: italic; padding: 8px 0; }
+    .task-meta {
+      font-size: 10px;
+      color: var(--fog);
+      margin-top: 6px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
 
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-thumb { background: var(--panel-line); border-radius: 3px; }
-</style>
+    /* Priority Badges */
+    .priority-tag {
+      font-size: 8px;
+      padding: 1px 4px;
+      border-radius: 2px;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+
+    .priority-tag.high {
+      background: rgba(240, 168, 61, 0.2);
+      color: var(--amber);
+      border: 1px solid var(--amber);
+    }
+
+    .priority-tag.medium {
+      background: rgba(124, 108, 240, 0.2);
+      color: var(--violet);
+      border: 1px solid var(--violet);
+    }
+
+    .priority-tag.low {
+      background: rgba(122, 135, 144, 0.2);
+      color: var(--fog);
+      border: 1px solid var(--fog);
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .status-dot.open {
+      border: 1px solid var(--cyan);
+    }
+
+    .status-dot.in_progress {
+      background: var(--amber);
+    }
+
+    .status-dot.done {
+      background: var(--fog);
+    }
+
+    .blocked-tag {
+      color: var(--amber);
+      font-weight: bold;
+    }
+
+    /* Subtasks indentation nesting */
+    .subtasks-container {
+      margin-left: 18px;
+      border-left: 1px dashed var(--panel-line);
+      padding-left: 10px;
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .subtasks-container .task {
+      padding: 6px 8px;
+    }
+
+    .subtasks-container .task-content {
+      font-size: 12px;
+    }
+
+    /* Task-attached Notes styling (smaller under task) */
+    .task-notes-container {
+      margin-left: 18px;
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .task-note {
+      background: rgba(61, 222, 209, 0.04);
+      border: 1px solid rgba(61, 222, 209, 0.1);
+      border-radius: 3px;
+      padding: 5px 8px;
+      font-size: 11px;
+      color: var(--fog);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+
+    .task-note:hover {
+      background: rgba(61, 222, 209, 0.08);
+      color: var(--ink);
+      border-color: var(--cyan);
+    }
+
+    .task-note-bullet {
+      color: var(--cyan);
+      font-size: 12px;
+    }
+
+    .task-note.done {
+      opacity: 0.5;
+    }
+
+    .task-note.done .task-note-content {
+      text-decoration: line-through;
+    }
+
+    /* --- Notes UI --- */
+    .notes-search {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--panel-line);
+      color: var(--ink);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      outline: none;
+      margin-bottom: 14px;
+    }
+
+    .notes-search:focus {
+      border-color: var(--cyan);
+    }
+
+    .note-item {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-bottom: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .note-item:hover {
+      background: rgba(61, 222, 209, 0.05);
+      border-color: var(--cyan);
+      transform: translateX(-2px);
+    }
+
+    .note-item.done {
+      opacity: 0.4;
+    }
+
+    .note-item.done .note-body {
+      text-decoration: line-through;
+    }
+
+    .note-body {
+      font-size: 12.5px;
+      line-height: 1.45;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+
+    .note-tags {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .note-tag {
+      font-size: 8.5px;
+      color: var(--cyan);
+      background: rgba(61, 222, 209, 0.1);
+      padding: 1px 5px;
+      border-radius: 2px;
+    }
+
+    .note-date {
+      font-size: 8.5px;
+      color: var(--fog);
+      margin-top: 6px;
+      text-align: right;
+    }
+
+    /* --- Center Stage & Orb --- */
+    .stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+      padding: 72px 24px 24px;
+      position: relative;
+      z-index: 5;
+    }
+
+    .orb-wrap {
+      width: 170px;
+      height: 170px;
+      position: relative;
+      flex-shrink: 0;
+      border-radius: 50%;
+      box-shadow: var(--orb-glow);
+      transition: box-shadow 0.3s ease;
+    }
+
+    .orb-wrap svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .dial-ring {
+      transform-origin: 100px 100px;
+    }
+
+    .dial-ring.slow {
+      animation: spin 50s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .orb-core {
+      fill: var(--void);
+      stroke: var(--cyan);
+      stroke-width: 1;
+      opacity: 0.6;
+      transition: stroke 0.3s;
+    }
+
+    .tick {
+      stroke: var(--cyan);
+      stroke-width: 1.4;
+      opacity: 0.35;
+      transition: opacity 0.2s, stroke 0.2s;
+    }
+
+    .pulse-ring {
+      fill: none;
+      stroke: var(--cyan);
+      stroke-width: 1;
+      opacity: 0;
+      transform-origin: 100px 100px;
+      transition: stroke 0.3s;
+    }
+
+    .speaking .pulse-ring {
+      animation: ripple 1.1s ease-out infinite;
+    }
+
+    .speaking .tick {
+      stroke: var(--cyan);
+      opacity: 0.9;
+    }
+
+    .thinking .tick {
+      stroke: var(--violet);
+      opacity: 0.7;
+      animation: flicker 0.6s ease-in-out infinite alternate;
+    }
+
+    @keyframes ripple {
+      0% {
+        opacity: 0.5;
+        transform: scale(0.85);
+      }
+
+      100% {
+        opacity: 0;
+        transform: scale(1.5);
+      }
+    }
+
+    @keyframes flicker {
+      from {
+        opacity: 0.3;
+      }
+
+      to {
+        opacity: 0.85;
+      }
+    }
+
+    .speaking .tick {
+      animation: tickBurst 0.55s ease-in-out infinite;
+      animation-delay: var(--delay, 0s);
+      stroke: var(--cyan);
+      opacity: 1;
+    }
+
+    @keyframes tickBurst {
+
+      0%,
+      100% {
+        transform: translate(0, 0) scaleY(1);
+        opacity: 0.6;
+      }
+
+      50% {
+        transform: translate(calc(var(--nx) * 11px), calc(var(--ny) * 11px)) scaleY(1.6);
+        opacity: 1;
+      }
+    }
+
+    .orb-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--fog);
+      pointer-events: none;
+    }
+
+    /* --- Dashboard Stats Panel --- */
+    .stats-dashboard {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+      max-width: 560px;
+      margin-top: 15px;
+    }
+
+    .stat-card {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--panel-line);
+      border-radius: 4px;
+      padding: 10px;
+      text-align: center;
+    }
+
+    .stat-val {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--cyan);
+    }
+
+    .stat-lbl {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      color: var(--fog);
+      margin-top: 2px;
+      text-transform: uppercase;
+    }
+
+    /* --- Chat & Messages --- */
+    .chat-col {
+      width: 100%;
+      max-width: 560px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      margin-top: 15px;
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.15);
+      padding: 10px;
+      margin-bottom: 5px;
+    }
+
+    .transcript {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 8px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      /* Fades out at the top using linear gradient mask */
+      mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 1) 20%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 1) 20%);
+    }
+
+    /* Pushes initial chat items to bottom and scrolls normally on overflow */
+    .transcript::before {
+      content: '';
+      flex-grow: 1;
+    }
+
+    .msg {
+      max-width: 85%;
+      font-size: 13.5px;
+      line-height: 1.5;
+      animation: fadeIn 0.25s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(4px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .msg .tag {
+      font-size: 8.5px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      display: block;
+    }
+
+    .msg.user {
+      align-self: flex-end;
+      text-align: right;
+    }
+
+    .msg.user .tag {
+      color: var(--violet);
+    }
+
+    .msg.user .bubble {
+      background: rgba(124, 108, 240, 0.1);
+      border: 1px solid rgba(124, 108, 240, 0.25);
+      border-radius: 12px 12px 2px 12px;
+    }
+
+    .msg.ai .tag {
+      color: var(--cyan);
+    }
+
+    .msg.ai .bubble {
+      background: rgba(61, 222, 209, 0.06);
+      border: 1px solid rgba(61, 222, 209, 0.2);
+      border-radius: 12px 12px 12px 2px;
+    }
+
+    .msg.system .tag {
+      color: var(--amber);
+    }
+
+    .msg.system .bubble {
+      background: rgba(240, 168, 61, 0.08);
+      border: 1px solid rgba(240, 168, 61, 0.25);
+      border-radius: 8px;
+      border-left: 3px solid var(--amber);
+    }
+
+    .bubble {
+      padding: 10px 14px;
+      color: var(--ink);
+      display: inline-block;
+      word-break: break-word;
+      text-align: left;
+    }
+
+    /* Input Composer */
+    .composer {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      border-top: 1px solid var(--panel-line);
+      padding-top: 12px;
+    }
+
+    .composer input {
+      flex: 1;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--panel-line);
+      color: var(--ink);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      padding: 10px 14px;
+      border-radius: 4px;
+      outline: none;
+    }
+
+    .composer input:focus {
+      border-color: var(--cyan);
+    }
+
+    .composer button {
+      background: transparent;
+      border: 1px solid var(--panel-line);
+      color: var(--cyan);
+      width: 38px;
+      height: 38px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .composer button:hover {
+      border-color: var(--cyan);
+      background: rgba(61, 222, 209, 0.08);
+    }
+
+    .composer button.mic-active {
+      background: var(--cyan);
+      color: var(--void);
+      box-shadow: 0 0 10px var(--cyan);
+    }
+
+    .composer svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    /* --- Modals & Scrim --- */
+    .scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 11, 13, 0.75);
+      backdrop-filter: blur(5px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .scrim.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .focus-card {
+      width: min(520px, 94vw);
+      background: var(--void);
+      border: 1px solid var(--panel-line);
+      box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+      border-radius: 6px;
+      padding: 24px;
+      transform: scale(0.95);
+      opacity: 0;
+      transition: all 0.2s ease;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+
+    .scrim.show .focus-card {
+      transform: scale(1);
+      opacity: 1;
+    }
+
+    .focus-card.focus-card-alert {
+      border-color: var(--amber);
+    }
+
+    .focus-card.focus-card-note {
+      border-color: var(--cyan);
+    }
+
+    .focus-eyebrow {
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--violet);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .focus-content {
+      font-size: 15px;
+      margin-bottom: 18px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    .focus-row {
+      font-size: 12px;
+      color: var(--fog);
+      margin-bottom: 6px;
+    }
+
+    .focus-row b {
+      color: var(--ink);
+    }
+
+    /* Focus card sub-items details */
+    .focus-sub-section {
+      border-top: 1px solid var(--panel-line);
+      margin-top: 18px;
+      padding-top: 12px;
+    }
+
+    .focus-sub-title {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--violet);
+      margin-bottom: 8px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    .focus-sub-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .focus-sub-item {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      padding: 6px 10px;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+
+    .focus-sub-item.done {
+      opacity: 0.5;
+    }
+
+    .focus-sub-item.done span {
+      text-decoration: line-through;
+    }
+
+    .focus-sub-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .focus-sub-btn {
+      background: transparent;
+      border: 1px solid var(--panel-line);
+      color: var(--fog);
+      font-size: 9px;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 2px;
+    }
+
+    .focus-sub-btn:hover {
+      color: var(--cyan);
+      border-color: var(--cyan);
+    }
+
+    .focus-sub-btn.delete:hover {
+      color: #ef4444;
+      border-color: #ef4444;
+    }
+
+    .focus-add-wrap {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .focus-add-wrap input {
+      flex: 1;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--panel-line);
+      color: var(--ink);
+      font-size: 11px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      outline: none;
+    }
+
+    .focus-add-wrap input:focus {
+      border-color: var(--cyan);
+    }
+
+    .focus-add-wrap button {
+      background: rgba(61, 222, 209, 0.1);
+      border: 1px solid var(--panel-line);
+      color: var(--cyan);
+      font-size: 10px;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .focus-add-wrap button:hover {
+      border-color: var(--cyan);
+      background: rgba(61, 222, 209, 0.2);
+    }
+
+    .focus-action-btn {
+      flex: 1;
+      background: transparent;
+      border: 1px solid var(--panel-line);
+      color: var(--ink);
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      padding: 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: all 0.2s;
+    }
+
+    .focus-action-btn.complete {
+      border-color: var(--violet);
+      color: var(--violet);
+    }
+
+    .focus-action-btn.complete:hover {
+      background: rgba(124, 108, 240, 0.1);
+    }
+
+    .focus-action-btn.delete {
+      border-color: #ef4444;
+      color: #ef4444;
+    }
+
+    .focus-action-btn.delete:hover {
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .focus-close {
+      margin-top: 16px;
+      background: transparent;
+      border: 1px solid var(--panel-line);
+      color: var(--fog);
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      width: 100%;
+      text-align: center;
+      transition: all 0.2s;
+    }
+
+    .focus-close:hover {
+      border-color: var(--cyan);
+      color: var(--cyan);
+      background: rgba(61, 222, 209, 0.08);
+    }
+
+    /* Settings Modal fields */
+    .settings-group {
+      margin-bottom: 18px;
+    }
+
+    .settings-group label {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--fog);
+      margin-bottom: 6px;
+    }
+
+    .settings-group select {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--panel-line);
+      color: var(--ink);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      outline: none;
+    }
+
+    .settings-group select:focus {
+      border-color: var(--cyan);
+    }
+
+    .settings-group input[type="range"] {
+      width: 100%;
+      accent-color: var(--cyan);
+    }
+
+    .settings-val {
+      font-size: 11px;
+      font-weight: bold;
+      color: var(--cyan);
+      margin-left: 6px;
+    }
+
+    .empty {
+      color: var(--fog);
+      font-size: 12px;
+      font-style: italic;
+      padding: 8px 0;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--panel-line);
+      border-radius: 3px;
+    }
+  </style>
 </head>
+
 <body class="theme-cyberpunk">
 
-<header class="eyebrow mono">SECOND BRAIN <b>//</b> NEURAL INTERFACE</header>
+  <header class="eyebrow mono">SECOND BRAIN <b>//</b> NEURAL INTERFACE</header>
 
-<button class="settings-btn" id="settingsBtn" title="System Settings">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="3"></circle>
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-  </svg>
-</button>
+  <button class="settings-btn" id="settingsBtn" title="System Settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path
+        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z">
+      </path>
+    </svg>
+  </button>
 
-<div class="frame">
-  <!-- Left Panel: Tasks Browser -->
-  <div class="panel left">
-    <div class="panel-label mono">TASKS DATABASE</div>
-    
-    <div class="sub-label mono">
-      <span>TIME-BOUND</span>
-      <span id="timeboundFilterBadge" class="filter-clear-btn" style="display:none;" onclick="clearActiveFilters()">Clear Filter</span>
+  <div class="frame">
+    <!-- Left Panel: Tasks Browser -->
+    <div class="panel left">
+      <div class="panel-label mono">TASKS DATABASE</div>
+
+      <div class="sub-label mono">
+        <span>TIME-BOUND</span>
+        <span id="timeboundFilterBadge" class="filter-clear-btn" style="display:none;"
+          onclick="clearActiveFilters()">Clear Filter</span>
+      </div>
+      <div id="timeboundList"></div>
+
+      <div class="sub-label mono">
+        <span>BACKLOG</span>
+        <span id="backlogFilterBadge" class="filter-clear-btn" style="display:none;"
+          onclick="clearActiveFilters()">Clear Filter</span>
+      </div>
+      <div id="backlogList"></div>
     </div>
-    <div id="timeboundList"></div>
 
-    <div class="sub-label mono">
-      <span>BACKLOG</span>
-      <span id="backlogFilterBadge" class="filter-clear-btn" style="display:none;" onclick="clearActiveFilters()">Clear Filter</span>
+    <!-- Center: Neural Visualizer Orb, Dashboard & Messages -->
+    <div class="stage">
+      <div class="orb-wrap" id="orbWrap">
+        <svg viewBox="0 0 200 200">
+          <circle class="orb-core" cx="100" cy="100" r="62"></circle>
+          <g id="tickGroup"></g>
+          <circle class="pulse-ring" cx="100" cy="100" r="62"></circle>
+          <circle class="pulse-ring" cx="100" cy="100" r="62" style="animation-delay: 0.4s"></circle>
+        </svg>
+        <div class="orb-label mono" id="orbLabel">JARVIS</div>
+      </div>
+
+      <!-- Stats Dashboard -->
+      <div class="stats-dashboard">
+        <div class="stat-card">
+          <div class="stat-val" id="statsCompleted">0/0</div>
+          <div class="stat-lbl mono">Tasks Done</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="statsNotes">0</div>
+          <div class="stat-lbl mono">Notes Total</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="statsHigh">0</div>
+          <div class="stat-lbl mono">High Priority</div>
+        </div>
+      </div>
+
+      <!-- Chat / Logs -->
+      <div class="chat-col">
+        <div class="transcript mono" id="transcript"></div>
+        <div class="composer">
+          <input type="text" id="textInput" placeholder="Type a instruction, or use the mic..." />
+          <button id="micBtn" title="Talk">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+            </svg>
+          </button>
+          <button id="sendBtn" title="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
-    <div id="backlogList"></div>
+
+    <!-- Right Panel: Notes Browser -->
+    <div class="panel right">
+      <div class="panel-label mono">NOTES ARCHIVE</div>
+      <input type="text" id="noteSearch" class="notes-search" placeholder="Search notes..." />
+      <div id="notesList"></div>
+    </div>
   </div>
 
-  <!-- Center: Neural Visualizer Orb, Dashboard & Messages -->
-  <div class="stage">
-    <div class="orb-wrap" id="orbWrap">
-      <svg viewBox="0 0 200 200">
-        <circle class="orb-core" cx="100" cy="100" r="62"></circle>
-        <g id="tickGroup"></g>
-        <circle class="pulse-ring" cx="100" cy="100" r="62"></circle>
-        <circle class="pulse-ring" cx="100" cy="100" r="62" style="animation-delay: 0.4s"></circle>
-      </svg>
-      <div class="orb-label mono" id="orbLabel">JARVIS</div>
-    </div>
+  <!-- Modal: Focus Task Card -->
+  <div class="scrim" id="scrim">
+    <div class="focus-card" id="focusCard">
+      <div class="focus-eyebrow mono" id="focusEyebrow">TASK #0</div>
+      <div class="focus-content" id="focusContent"></div>
+      <div class="focus-row mono" id="focusPriority"></div>
+      <div class="focus-row mono" id="focusEffort"></div>
+      <div class="focus-row mono" id="focusWhen"></div>
+      <div class="focus-row mono" id="focusStatus"></div>
 
-    <!-- Stats Dashboard -->
-    <div class="stats-dashboard">
-      <div class="stat-card">
-        <div class="stat-val" id="statsCompleted">0/0</div>
-        <div class="stat-lbl mono">Tasks Done</div>
+      <!-- Dynamic subtasks details controls -->
+      <div class="focus-sub-section" id="focusSubtasksSection">
+        <div class="focus-sub-title mono">Subtasks</div>
+        <div class="focus-sub-list" id="focusSubtasksList"></div>
+        <div class="focus-add-wrap">
+          <input type="text" id="newSubtaskInput" placeholder="Add a new subtask..." />
+          <button id="addSubtaskBtn" class="mono">ADD</button>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-val" id="statsNotes">0</div>
-        <div class="stat-lbl mono">Notes Total</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-val" id="statsHigh">0</div>
-        <div class="stat-lbl mono">High Priority</div>
-      </div>
-    </div>
 
-    <!-- Chat / Logs -->
-    <div class="chat-col">
-      <div class="transcript mono" id="transcript"></div>
-      <div class="composer">
-        <input type="text" id="textInput" placeholder="Type a instruction, or use the mic..." />
-        <button id="micBtn" title="Talk">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-            <line x1="12" y1="19" x2="12" y2="23"></line>
-          </svg>
-        </button>
-        <button id="sendBtn" title="Send">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </button>
+      <!-- Dynamic connected notes details controls -->
+      <div class="focus-sub-section" id="focusNotesSection">
+        <div class="focus-sub-title mono">Connected Notes</div>
+        <div class="focus-sub-list" id="focusNotesList"></div>
+        <div class="focus-add-wrap">
+          <input type="text" id="newNoteInput" placeholder="Add note connected to task..." />
+          <button id="addNoteBtn" class="mono">ADD</button>
+        </div>
       </div>
+
+      <div style="display: flex; gap: 10px; margin-top: 20px;" id="focusActions">
+        <button class="focus-action-btn complete mono" id="focusActionComplete">MARK DONE</button>
+        <button class="focus-action-btn delete mono" id="focusActionDelete">DELETE</button>
+      </div>
+
+      <button class="focus-close mono" id="focusClose">CLOSE</button>
     </div>
   </div>
 
-  <!-- Right Panel: Notes Browser -->
-  <div class="panel right">
-    <div class="panel-label mono">NOTES ARCHIVE</div>
-    <input type="text" id="noteSearch" class="notes-search" placeholder="Search notes..." />
-    <div id="notesList"></div>
-  </div>
-</div>
+  <!-- Modal: System Settings -->
+  <div class="scrim" id="settingsScrim">
+    <div class="focus-card settings-card">
+      <div class="focus-eyebrow mono">SYSTEM SETTINGS</div>
 
-<!-- Modal: Focus Task Card -->
-<div class="scrim" id="scrim">
-  <div class="focus-card" id="focusCard">
-    <div class="focus-eyebrow mono" id="focusEyebrow">TASK #0</div>
-    <div class="focus-content" id="focusContent"></div>
-    <div class="focus-row mono" id="focusPriority"></div>
-    <div class="focus-row mono" id="focusEffort"></div>
-    <div class="focus-row mono" id="focusWhen"></div>
-    <div class="focus-row mono" id="focusStatus"></div>
-    
-    <!-- Dynamic subtasks details controls -->
-    <div class="focus-sub-section" id="focusSubtasksSection">
-      <div class="focus-sub-title mono">Subtasks</div>
-      <div class="focus-sub-list" id="focusSubtasksList"></div>
-      <div class="focus-add-wrap">
-        <input type="text" id="newSubtaskInput" placeholder="Add a new subtask..." />
-        <button id="addSubtaskBtn" class="mono">ADD</button>
+      <div class="settings-group">
+        <label class="mono">INTERFACE THEME</label>
+        <select id="themeSelect">
+          <option value="cyberpunk">Cyberpunk Neon (Cyan)</option>
+          <option value="synthwave">Synthwave sunset (Pink)</option>
+          <option value="minimal">Minimal Slate (Blue)</option>
+          <option value="obsidian">Obsidian Dark (Gold)</option>
+        </select>
       </div>
-    </div>
 
-    <!-- Dynamic connected notes details controls -->
-    <div class="focus-sub-section" id="focusNotesSection">
-      <div class="focus-sub-title mono">Connected Notes</div>
-      <div class="focus-sub-list" id="focusNotesList"></div>
-      <div class="focus-add-wrap">
-        <input type="text" id="newNoteInput" placeholder="Add note connected to task..." />
-        <button id="addNoteBtn" class="mono">ADD</button>
+      <div class="settings-group">
+        <label class="mono">TTS VOICE SPEED <span class="settings-val" id="voiceSpeedVal">175</span></label>
+        <input type="range" id="voiceSpeedSlider" min="100" max="250" step="5" value="175" />
       </div>
+
+      <div class="settings-group">
+        <label class="mono">WAKE WORD THRESHOLD <span class="settings-val" id="thresholdVal">0.5</span></label>
+        <input type="range" id="thresholdSlider" min="0.10" max="0.90" step="0.05" value="0.50" />
+      </div>
+
+      <button class="focus-close mono" id="settingsClose">SAVE & APPLY</button>
     </div>
-    
-    <div style="display: flex; gap: 10px; margin-top: 20px;" id="focusActions">
-      <button class="focus-action-btn complete mono" id="focusActionComplete">MARK DONE</button>
-      <button class="focus-action-btn delete mono" id="focusActionDelete">DELETE</button>
-    </div>
-    
-    <button class="focus-close mono" id="focusClose">CLOSE</button>
   </div>
-</div>
 
-<!-- Modal: System Settings -->
-<div class="scrim" id="settingsScrim">
-  <div class="focus-card settings-card">
-    <div class="focus-eyebrow mono">SYSTEM SETTINGS</div>
-    
-    <div class="settings-group">
-      <label class="mono">INTERFACE THEME</label>
-      <select id="themeSelect">
-        <option value="cyberpunk">Cyberpunk Neon (Cyan)</option>
-        <option value="synthwave">Synthwave sunset (Pink)</option>
-        <option value="minimal">Minimal Slate (Blue)</option>
-        <option value="obsidian">Obsidian Dark (Gold)</option>
-      </select>
-    </div>
+  <script>
+    const transcriptEl = document.getElementById('transcript');
+    const textInput = document.getElementById('textInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const micBtn = document.getElementById('micBtn');
+    const orbWrap = document.getElementById('orbWrap');
+    const orbLabel = document.getElementById('orbLabel');
 
-    <div class="settings-group">
-      <label class="mono">TTS VOICE SPEED <span class="settings-val" id="voiceSpeedVal">175</span></label>
-      <input type="range" id="voiceSpeedSlider" min="100" max="250" step="5" value="175" />
-    </div>
+    const timeboundList = document.getElementById('timeboundList');
+    const backlogList = document.getElementById('backlogList');
+    const notesList = document.getElementById('notesList');
+    const noteSearch = document.getElementById('noteSearch');
 
-    <div class="settings-group">
-      <label class="mono">WAKE WORD THRESHOLD <span class="settings-val" id="thresholdVal">0.5</span></label>
-      <input type="range" id="thresholdSlider" min="0.10" max="0.90" step="0.05" value="0.50" />
-    </div>
+    const statsCompleted = document.getElementById('statsCompleted');
+    const statsNotes = document.getElementById('statsNotes');
+    const statsHigh = document.getElementById('statsHigh');
 
-    <button class="focus-close mono" id="settingsClose">SAVE & APPLY</button>
-  </div>
-</div>
+    const scrim = document.getElementById('scrim');
+    const focusCard = document.getElementById('focusCard');
+    const focusActionComplete = document.getElementById('focusActionComplete');
+    const focusActionDelete = document.getElementById('focusActionDelete');
 
-<script>
-  const transcriptEl = document.getElementById('transcript');
-  const textInput = document.getElementById('textInput');
-  const sendBtn = document.getElementById('sendBtn');
-  const micBtn = document.getElementById('micBtn');
-  const orbWrap = document.getElementById('orbWrap');
-  const orbLabel = document.getElementById('orbLabel');
-  
-  const timeboundList = document.getElementById('timeboundList');
-  const backlogList = document.getElementById('backlogList');
-  const notesList = document.getElementById('notesList');
-  const noteSearch = document.getElementById('noteSearch');
-  
-  const statsCompleted = document.getElementById('statsCompleted');
-  const statsNotes = document.getElementById('statsNotes');
-  const statsHigh = document.getElementById('statsHigh');
-  
-  const scrim = document.getElementById('scrim');
-  const focusCard = document.getElementById('focusCard');
-  const focusActionComplete = document.getElementById('focusActionComplete');
-  const focusActionDelete = document.getElementById('focusActionDelete');
-  
-  const focusSubtasksList = document.getElementById('focusSubtasksList');
-  const newSubtaskInput = document.getElementById('newSubtaskInput');
-  const addSubtaskBtn = document.getElementById('addSubtaskBtn');
-  
-  const focusNotesList = document.getElementById('focusNotesList');
-  const newNoteInput = document.getElementById('newNoteInput');
-  const addNoteBtn = document.getElementById('addNoteBtn');
+    const focusSubtasksList = document.getElementById('focusSubtasksList');
+    const newSubtaskInput = document.getElementById('newSubtaskInput');
+    const addSubtaskBtn = document.getElementById('addSubtaskBtn');
 
-  const timeboundFilterBadge = document.getElementById('timeboundFilterBadge');
-  const backlogFilterBadge = document.getElementById('backlogFilterBadge');
-  
-  const settingsScrim = document.getElementById('settingsScrim');
-  const settingsBtn = document.getElementById('settingsBtn');
-  const settingsClose = document.getElementById('settingsClose');
-  const themeSelect = document.getElementById('themeSelect');
-  const voiceSpeedSlider = document.getElementById('voiceSpeedSlider');
-  const voiceSpeedVal = document.getElementById('voiceSpeedVal');
-  const thresholdSlider = document.getElementById('thresholdSlider');
-  const thresholdVal = document.getElementById('thresholdVal');
+    const focusNotesList = document.getElementById('focusNotesList');
+    const newNoteInput = document.getElementById('newNoteInput');
+    const addNoteBtn = document.getElementById('addNoteBtn');
 
-  let tasksCache = [];
-  let notesCache = [];
-  let activeFocusId = null;
-  let activeFocusType = null; // 'task' or 'note'
-  let activeFilterIds = null; // Used for speech-driven search matches filter
+    const timeboundFilterBadge = document.getElementById('timeboundFilterBadge');
+    const backlogFilterBadge = document.getElementById('backlogFilterBadge');
 
-  // Build the tick-mark visualizer ring (32 radiating segments)
-  function buildTicks(groupId, count, radius, len) {
-    const g = document.getElementById(groupId);
-    g.setAttribute('transform', 'translate(100,100)');
-    for (let i = 0; i < count; i++) {
-      const angle = (i / count) * 2 * Math.PI;
-      const nx = Math.cos(angle);
-      const ny = Math.sin(angle);
-      const x1 = nx * radius;
-      const y1 = ny * radius;
-      const x2 = nx * (radius - len);
-      const y2 = ny * (radius - len);
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-      line.setAttribute('x2', x2); line.setAttribute('y2', y2);
-      line.setAttribute('class', 'tick');
-      line.style.setProperty('--nx', nx.toFixed(3));
-      line.style.setProperty('--ny', ny.toFixed(3));
-      line.style.setProperty('--delay', ((i % 12) * 0.045).toFixed(3) + 's');
-      g.appendChild(line);
+    const settingsScrim = document.getElementById('settingsScrim');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsClose = document.getElementById('settingsClose');
+    const themeSelect = document.getElementById('themeSelect');
+    const voiceSpeedSlider = document.getElementById('voiceSpeedSlider');
+    const voiceSpeedVal = document.getElementById('voiceSpeedVal');
+    const thresholdSlider = document.getElementById('thresholdSlider');
+    const thresholdVal = document.getElementById('thresholdVal');
+
+    let tasksCache = [];
+    let notesCache = [];
+    let activeFocusId = null;
+    let activeFocusType = null; // 'task' or 'note'
+    let activeFilterIds = null; // Used for speech-driven search matches filter
+
+    // Build the tick-mark visualizer ring (32 radiating segments)
+    function buildTicks(groupId, count, radius, len) {
+      const g = document.getElementById(groupId);
+      g.setAttribute('transform', 'translate(100,100)');
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * 2 * Math.PI;
+        const nx = Math.cos(angle);
+        const ny = Math.sin(angle);
+        const x1 = nx * radius;
+        const y1 = ny * radius;
+        const x2 = nx * (radius - len);
+        const y2 = ny * (radius - len);
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+        line.setAttribute('class', 'tick');
+        line.style.setProperty('--nx', nx.toFixed(3));
+        line.style.setProperty('--ny', ny.toFixed(3));
+        line.style.setProperty('--delay', ((i % 12) * 0.045).toFixed(3) + 's');
+        g.appendChild(line);
+      }
     }
-  }
-  buildTicks('tickGroup', 32, 52, 6);
+    buildTicks('tickGroup', 32, 52, 6);
 
-  function setOrbState(state) {
-    orbWrap.classList.remove('speaking', 'thinking');
-    if (state === 'speaking') {
-      orbWrap.classList.add('speaking');
-      orbLabel.textContent = 'SPEAKING';
-    } else if (state === 'thinking') {
-      orbWrap.classList.add('thinking');
-      orbLabel.textContent = 'THINKING';
-    } else {
-      orbLabel.textContent = 'JARVIS';
+    function setOrbState(state) {
+      orbWrap.classList.remove('speaking', 'thinking');
+      if (state === 'speaking') {
+        orbWrap.classList.add('speaking');
+        orbLabel.textContent = 'SPEAKING';
+      } else if (state === 'thinking') {
+        orbWrap.classList.add('thinking');
+        orbLabel.textContent = 'THINKING';
+      } else {
+        orbLabel.textContent = 'JARVIS';
+      }
     }
-  }
 
-  function addMessage(role, text) {
-    const div = document.createElement('div');
-    div.className = 'msg ' + role;
-    div.innerHTML = `<span class="tag">${role === 'user' ? 'YOU' : role === 'system' ? 'SYSTEM' : 'AI'}</span><span class="bubble"></span>`;
-    div.querySelector('.bubble').textContent = text;
-    transcriptEl.appendChild(div);
-    transcriptEl.scrollTop = transcriptEl.scrollHeight;
-  }
+    function addMessage(role, text) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      div.innerHTML = `<span class="tag">${role === 'user' ? 'YOU' : role === 'system' ? 'SYSTEM' : 'AI'}</span><span class="bubble"></span>`;
+      div.querySelector('.bubble').textContent = text;
+      transcriptEl.appendChild(div);
+      transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    }
 
-  function formatWhen(task) {
-    if (task.scheduled_at) return 'AT ' + new Date(task.scheduled_at).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit'});
-    if (task.due_date) return 'DUE ' + task.due_date;
-    return 'SOMEDAY';
-  }
+    function formatWhen(task) {
+      if (task.scheduled_at) return 'AT ' + new Date(task.scheduled_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      if (task.due_date) return 'DUE ' + task.due_date;
+      return 'SOMEDAY';
+    }
 
-  // Clear visual filter highlights
-  function clearActiveFilters() {
-    activeFilterIds = null;
-    timeboundFilterBadge.style.display = 'none';
-    backlogFilterBadge.style.display = 'none';
-    loadTasks();
-  }
-
-  // Hierarchical rendering of nested tasks and connected notes
-  function renderTasks(tasks) {
-    tasksCache = tasks;
-    
-    // Compute stats
-    const doneTasks = tasks.filter(t => t.status === 'done').length;
-    const highTasks = tasks.filter(t => t.priority === 'high' && t.status !== 'done').length;
-    statsCompleted.textContent = `${doneTasks}/${tasks.length}`;
-    statsHigh.textContent = highTasks;
-
-    // Filter main parent tasks
-    let mainTasks = tasks.filter(t => !t.parent_id);
-
-    // Apply voice matches filter if active
-    if (activeFilterIds && activeFilterIds.length > 0) {
-      mainTasks = mainTasks.filter(t => activeFilterIds.includes(t.id));
-      timeboundFilterBadge.style.display = 'inline-block';
-      backlogFilterBadge.style.display = 'inline-block';
-    } else {
+    // Clear visual filter highlights
+    function clearActiveFilters() {
+      activeFilterIds = null;
       timeboundFilterBadge.style.display = 'none';
       backlogFilterBadge.style.display = 'none';
+      loadTasks();
     }
 
-    const timebound = mainTasks.filter(t => t.scheduled_at || t.due_date)
-      .sort((a, b) => (a.scheduled_at || a.due_date).localeCompare(b.scheduled_at || b.due_date));
-    const backlog = mainTasks.filter(t => !t.scheduled_at && !t.due_date);
+    // Hierarchical rendering of nested tasks and connected notes
+    function renderTasks(tasks) {
+      tasksCache = tasks;
 
-    function buildTaskElement(t) {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'task-wrapper';
-      
-      const el = document.createElement('div');
-      
-      // Check if this task is one of the matched highlighted items
-      let matchedClass = '';
-      if (activeFilterIds && activeFilterIds.includes(t.id)) {
-        matchedClass = ' highlighted-match';
+      // Compute stats
+      const doneTasks = tasks.filter(t => t.status === 'done').length;
+      const highTasks = tasks.filter(t => t.priority === 'high' && t.status !== 'done').length;
+      statsCompleted.textContent = `${doneTasks}/${tasks.length}`;
+      statsHigh.textContent = highTasks;
+
+      // Filter main parent tasks
+      let mainTasks = tasks.filter(t => !t.parent_id);
+
+      // Apply voice matches filter if active
+      if (activeFilterIds && activeFilterIds.length > 0) {
+        mainTasks = mainTasks.filter(t => activeFilterIds.includes(t.id));
+        timeboundFilterBadge.style.display = 'inline-block';
+        backlogFilterBadge.style.display = 'inline-block';
+      } else {
+        timeboundFilterBadge.style.display = 'none';
+        backlogFilterBadge.style.display = 'none';
       }
-      
-      el.className = 'task' + (t.status === 'done' ? ' done' : '') + matchedClass;
-      el.dataset.taskId = t.id;
-      
-      const pClass = t.priority || 'medium';
-      el.innerHTML = `
+
+      const timebound = mainTasks.filter(t => t.scheduled_at || t.due_date)
+        .sort((a, b) => (a.scheduled_at || a.due_date).localeCompare(b.scheduled_at || b.due_date));
+      const backlog = mainTasks.filter(t => !t.scheduled_at && !t.due_date);
+
+      function buildTaskElement(t) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'task-wrapper';
+
+        const el = document.createElement('div');
+
+        // Check if this task is one of the matched highlighted items
+        let matchedClass = '';
+        if (activeFilterIds && activeFilterIds.includes(t.id)) {
+          matchedClass = ' highlighted-match';
+        }
+
+        el.className = 'task' + (t.status === 'done' ? ' done' : '') + matchedClass;
+        el.dataset.taskId = t.id;
+
+        const pClass = t.priority || 'medium';
+        el.innerHTML = `
         <div class="task-content">${t.content}</div>
         <div class="task-meta mono">
           <span class="status-dot ${t.status}"></span>
@@ -863,440 +1408,441 @@
           <span>${formatWhen(t)}</span>
           ${t.is_blocked ? '<span class="blocked-tag">BLOCKED</span>' : ''}
         </div>`;
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        focusTask(t.id);
-      });
-      wrapper.appendChild(el);
-
-      // Render connected subtasks
-      const children = tasks.filter(sub => sub.parent_id === t.id);
-      if (children.length > 0) {
-        const subContainer = document.createElement('div');
-        subContainer.className = 'subtasks-container';
-        children.forEach(sub => {
-          subContainer.appendChild(buildTaskElement(sub));
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          focusTask(t.id);
         });
-        wrapper.appendChild(subContainer);
-      }
+        wrapper.appendChild(el);
 
-      // Render connected notes
-      if (t.notes && t.notes.length > 0) {
-        const notesContainer = document.createElement('div');
-        notesContainer.className = 'task-notes-container';
-        t.notes.forEach(note => {
-          const noteEl = document.createElement('div');
-          noteEl.className = 'task-note' + (note.status === 'done' ? ' done' : '');
-          noteEl.innerHTML = `
+        // Render connected subtasks
+        const children = tasks.filter(sub => sub.parent_id === t.id);
+        if (children.length > 0) {
+          const subContainer = document.createElement('div');
+          subContainer.className = 'subtasks-container';
+          children.forEach(sub => {
+            subContainer.appendChild(buildTaskElement(sub));
+          });
+          wrapper.appendChild(subContainer);
+        }
+
+        // Render connected notes
+        if (t.notes && t.notes.length > 0) {
+          const notesContainer = document.createElement('div');
+          notesContainer.className = 'task-notes-container';
+          t.notes.forEach(note => {
+            const noteEl = document.createElement('div');
+            noteEl.className = 'task-note' + (note.status === 'done' ? ' done' : '');
+            noteEl.innerHTML = `
             <span class="task-note-bullet">&#128196;</span>
             <span class="task-note-content">${note.content}</span>
           `;
-          noteEl.addEventListener('click', (e) => {
-            e.stopPropagation();
-            focusNote(note);
+            noteEl.addEventListener('click', (e) => {
+              e.stopPropagation();
+              focusNote(note);
+            });
+            notesContainer.appendChild(noteEl);
           });
-          notesContainer.appendChild(noteEl);
-        });
-        wrapper.appendChild(notesContainer);
+          wrapper.appendChild(notesContainer);
+        }
+
+        return wrapper;
       }
-      
-      return wrapper;
+
+      function renderInto(container, list) {
+        container.innerHTML = '';
+        if (list.length === 0) {
+          container.innerHTML = '<div class="empty">No tasks loaded</div>';
+          return;
+        }
+        list.forEach(t => {
+          container.appendChild(buildTaskElement(t));
+        });
+      }
+
+      renderInto(timeboundList, timebound);
+      renderInto(backlogList, backlog);
     }
 
-    function renderInto(container, list) {
-      container.innerHTML = '';
-      if (list.length === 0) {
-        container.innerHTML = '<div class="empty">No tasks loaded</div>';
+    function renderNotes(notes) {
+      notesCache = notes;
+      notesList.innerHTML = '';
+
+      // Filter out notes connected to tasks so they don't show up in the main panel
+      const standaloneNotes = notes.filter(n => !n.task_id);
+      statsNotes.textContent = standaloneNotes.length;
+
+      if (standaloneNotes.length === 0) {
+        notesList.innerHTML = '<div class="empty">No notes archived</div>';
         return;
       }
-      list.forEach(t => {
-        container.appendChild(buildTaskElement(t));
-      });
-    }
 
-    renderInto(timeboundList, timebound);
-    renderInto(backlogList, backlog);
-  }
+      standaloneNotes.forEach(n => {
+        const item = document.createElement('div');
+        item.className = 'note-item' + (n.status === 'done' ? ' done' : '');
 
-  function renderNotes(notes) {
-    notesCache = notes;
-    notesList.innerHTML = '';
-    
-    // Filter out notes connected to tasks so they don't show up in the main panel
-    const standaloneNotes = notes.filter(n => !n.task_id);
-    statsNotes.textContent = standaloneNotes.length;
-    
-    if (standaloneNotes.length === 0) {
-      notesList.innerHTML = '<div class="empty">No notes archived</div>';
-      return;
-    }
+        const tagsHtml = (n.tags || '').split(',')
+          .filter(t => t.trim().length > 0)
+          .map(t => `<span class="note-tag">#${t.trim()}</span>`).join('');
 
-    standaloneNotes.forEach(n => {
-      const item = document.createElement('div');
-      item.className = 'note-item' + (n.status === 'done' ? ' done' : '');
-      
-      const tagsHtml = (n.tags || '').split(',')
-        .filter(t => t.trim().length > 0)
-        .map(t => `<span class="note-tag">#${t.trim()}</span>`).join('');
+        const cleanDate = n.created_at ? new Date(n.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
 
-      const cleanDate = n.created_at ? new Date(n.created_at).toLocaleDateString([], {month: 'short', day: 'numeric'}) : '';
-      
-      item.innerHTML = `
+        item.innerHTML = `
         <div class="note-body">${n.content}</div>
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div class="note-tags">${tagsHtml}</div>
           <div class="note-date mono">${cleanDate}</div>
         </div>
       `;
-      item.addEventListener('click', () => focusNote(n));
-      notesList.appendChild(item);
-    });
-  }
-
-  function focusNote(note) {
-    activeFocusId = note.id;
-    activeFocusType = 'note';
-    focusCard.className = "focus-card focus-card-note";
-    document.getElementById('focusEyebrow').textContent = `NOTE #${note.id}`;
-    document.getElementById('focusContent').textContent = note.content;
-    document.getElementById('focusPriority').innerHTML = `<b>TAGS</b> ${note.tags || '—'}`;
-    document.getElementById('focusEffort').innerHTML = `<b>CREATED AT</b> ${new Date(note.created_at).toLocaleString()}`;
-    document.getElementById('focusWhen').innerHTML = `<b>STATUS</b> ${note.status || 'open'}`;
-    document.getElementById('focusStatus').innerHTML = '';
-    
-    // Hide task-specific sections
-    document.getElementById('focusSubtasksSection').style.display = 'none';
-    document.getElementById('focusNotesSection').style.display = 'none';
-    
-    if (note.status === 'done') {
-      focusActionComplete.style.display = 'none';
-    } else {
-      focusActionComplete.style.display = 'block';
+        item.addEventListener('click', () => focusNote(n));
+        notesList.appendChild(item);
+      });
     }
-    
-    scrim.classList.add('show');
-  }
 
-  function focusTask(taskId) {
-    const task = tasksCache.find(t => t.id == taskId);
-    if (!task) return;
-    activeFocusId = task.id;
-    activeFocusType = 'task';
-    document.querySelectorAll('.task').forEach(el => el.classList.remove('focused'));
-    const el = document.querySelector(`.task[data-task-id="${taskId}"]`);
-    if (el) el.classList.add('focused');
+    function focusNote(note) {
+      activeFocusId = note.id;
+      activeFocusType = 'note';
+      focusCard.className = "focus-card focus-card-note";
+      document.getElementById('focusEyebrow').textContent = `NOTE #${note.id}`;
+      document.getElementById('focusContent').textContent = note.content;
+      document.getElementById('focusPriority').innerHTML = `<b>TAGS</b> ${note.tags || '—'}`;
+      document.getElementById('focusEffort').innerHTML = `<b>CREATED AT</b> ${new Date(note.created_at).toLocaleString()}`;
+      document.getElementById('focusWhen').innerHTML = `<b>STATUS</b> ${note.status || 'open'}`;
+      document.getElementById('focusStatus').innerHTML = '';
 
-    focusCard.className = "focus-card";
-    document.getElementById('focusEyebrow').textContent = `TASK #${task.id}`;
-    document.getElementById('focusContent').textContent = task.content;
-    document.getElementById('focusPriority').innerHTML = `<b>PRIORITY</b> <span class="priority-tag ${task.priority}">${task.priority || 'medium'}</span>`;
-    document.getElementById('focusEffort').innerHTML = `<b>EFFORT</b> ${task.effort_estimate || '—'}`;
-    document.getElementById('focusWhen').innerHTML = `<b>WHEN</b> ${formatWhen(task)}`;
-    document.getElementById('focusStatus').innerHTML = `<b>STATUS</b> ${task.status}${task.is_blocked ? ' (blocked)' : ''}`;
-    
-    // Show and build task-specific sections
-    document.getElementById('focusSubtasksSection').style.display = 'block';
-    document.getElementById('focusNotesSection').style.display = 'block';
-    
-    buildModalSubtasks(task);
-    buildModalConnectedNotes(task);
-    
-    if (task.status === 'done') {
-      focusActionComplete.style.display = 'none';
-    } else {
-      focusActionComplete.style.display = 'block';
+      // Hide task-specific sections
+      document.getElementById('focusSubtasksSection').style.display = 'none';
+      document.getElementById('focusNotesSection').style.display = 'none';
+
+      if (note.status === 'done') {
+        focusActionComplete.style.display = 'none';
+      } else {
+        focusActionComplete.style.display = 'block';
+      }
+
+      scrim.classList.add('show');
     }
-    
-    scrim.classList.add('show');
-  }
-  
-  // Render subtasks within the task modal details
-  function buildModalSubtasks(task) {
-    focusSubtasksList.innerHTML = '';
-    const children = tasksCache.filter(sub => sub.parent_id === task.id);
-    if (children.length === 0) {
-      focusSubtasksList.innerHTML = '<div class="empty">No subtasks</div>';
-      return;
+
+    function focusTask(taskId) {
+      const task = tasksCache.find(t => t.id == taskId);
+      if (!task) return;
+      activeFocusId = task.id;
+      activeFocusType = 'task';
+      document.querySelectorAll('.task').forEach(el => el.classList.remove('focused'));
+      const el = document.querySelector(`.task[data-task-id="${taskId}"]`);
+      if (el) el.classList.add('focused');
+
+      focusCard.className = "focus-card";
+      document.getElementById('focusEyebrow').textContent = `TASK #${task.id}`;
+      document.getElementById('focusContent').textContent = task.content;
+      document.getElementById('focusPriority').innerHTML = `<b>PRIORITY</b> <span class="priority-tag ${task.priority}">${task.priority || 'medium'}</span>`;
+      document.getElementById('focusEffort').innerHTML = `<b>EFFORT</b> ${task.effort_estimate || '—'}`;
+      document.getElementById('focusWhen').innerHTML = `<b>WHEN</b> ${formatWhen(task)}`;
+      document.getElementById('focusStatus').innerHTML = `<b>STATUS</b> ${task.status}${task.is_blocked ? ' (blocked)' : ''}`;
+
+      // Show and build task-specific sections
+      document.getElementById('focusSubtasksSection').style.display = 'block';
+      document.getElementById('focusNotesSection').style.display = 'block';
+
+      buildModalSubtasks(task);
+      buildModalConnectedNotes(task);
+
+      if (task.status === 'done') {
+        focusActionComplete.style.display = 'none';
+      } else {
+        focusActionComplete.style.display = 'block';
+      }
+
+      scrim.classList.add('show');
     }
-    children.forEach(sub => {
-      const item = document.createElement('div');
-      item.className = 'focus-sub-item' + (sub.status === 'done' ? ' done' : '');
-      item.innerHTML = `
+
+    // Render subtasks within the task modal details
+    function buildModalSubtasks(task) {
+      focusSubtasksList.innerHTML = '';
+      const children = tasksCache.filter(sub => sub.parent_id === task.id);
+      if (children.length === 0) {
+        focusSubtasksList.innerHTML = '<div class="empty">No subtasks</div>';
+        return;
+      }
+      children.forEach(sub => {
+        const item = document.createElement('div');
+        item.className = 'focus-sub-item' + (sub.status === 'done' ? ' done' : '');
+        item.innerHTML = `
         <span>${sub.content}</span>
         <div class="focus-sub-actions">
           ${sub.status !== 'done' ? `<button class="focus-sub-btn" onclick="completeModalItem('task', ${sub.id})">Done</button>` : ''}
           <button class="focus-sub-btn delete" onclick="deleteModalItem('task', ${sub.id})">Delete</button>
         </div>
       `;
-      focusSubtasksList.appendChild(item);
-    });
-  }
-
-  // Render connected notes inside the task modal details
-  function buildModalConnectedNotes(task) {
-    focusNotesList.innerHTML = '';
-    if (!task.notes || task.notes.length === 0) {
-      focusNotesList.innerHTML = '<div class="empty">No connected notes</div>';
-      return;
+        focusSubtasksList.appendChild(item);
+      });
     }
-    task.notes.forEach(n => {
-      const item = document.createElement('div');
-      item.className = 'focus-sub-item' + (n.status === 'done' ? ' done' : '');
-      item.innerHTML = `
+
+    // Render connected notes inside the task modal details
+    function buildModalConnectedNotes(task) {
+      focusNotesList.innerHTML = '';
+      if (!task.notes || task.notes.length === 0) {
+        focusNotesList.innerHTML = '<div class="empty">No connected notes</div>';
+        return;
+      }
+      task.notes.forEach(n => {
+        const item = document.createElement('div');
+        item.className = 'focus-sub-item' + (n.status === 'done' ? ' done' : '');
+        item.innerHTML = `
         <span>${n.content}</span>
         <div class="focus-sub-actions">
           ${n.status !== 'done' ? `<button class="focus-sub-btn" onclick="completeModalItem('note', ${n.id})">Done</button>` : ''}
           <button class="focus-sub-btn delete" onclick="deleteModalItem('note', ${n.id})">Delete</button>
         </div>
       `;
-      focusNotesList.appendChild(item);
-    });
-  }
-
-  // Modal actions helper dispatchers
-  function completeModalItem(type, id) {
-    scrim.classList.remove('show');
-    if (type === 'task') {
-      sendMessage(`complete task ${id}`);
-    } else {
-      sendMessage(`complete note ${id}`);
+        focusNotesList.appendChild(item);
+      });
     }
-  }
 
-  function deleteModalItem(type, id) {
-    if (confirm(`Delete this sub-${type}?`)) {
+    // Modal actions helper dispatchers
+    function completeModalItem(type, id) {
       scrim.classList.remove('show');
       if (type === 'task') {
-        sendMessage(`delete task ${id}`);
+        sendMessage(`complete task ${id}`);
       } else {
-        sendMessage(`delete note ${id}`);
+        sendMessage(`complete note ${id}`);
       }
     }
-  }
 
-  // Add subtask from focus card inputs
-  addSubtaskBtn.addEventListener('click', () => {
-    const val = newSubtaskInput.value.trim();
-    if (!val || !activeFocusId) return;
-    newSubtaskInput.value = '';
-    scrim.classList.remove('show');
-    sendMessage(`add a subtask to task ${activeFocusId} with content: ${val}`);
-  });
-
-  newSubtaskInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') addSubtaskBtn.click();
-  });
-
-  // Add connected note from focus card inputs
-  addNoteBtn.addEventListener('click', () => {
-    const val = newNoteInput.value.trim();
-    if (!val || !activeFocusId) return;
-    newNoteInput.value = '';
-    scrim.classList.remove('show');
-    sendMessage(`add a note connected to task ${activeFocusId} with content: ${val}`);
-  });
-
-  newNoteInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') addNoteBtn.click();
-  });
-
-  // Interactive action button handlers in focus details card
-  focusActionComplete.addEventListener('click', () => {
-    if (!activeFocusId) return;
-    scrim.classList.remove('show');
-    if (activeFocusType === 'task') {
-      sendMessage(`complete task ${activeFocusId}`);
-    } else {
-      sendMessage(`complete note ${activeFocusId}`);
+    function deleteModalItem(type, id) {
+      if (confirm(`Delete this sub-${type}?`)) {
+        scrim.classList.remove('show');
+        if (type === 'task') {
+          sendMessage(`delete task ${id}`);
+        } else {
+          sendMessage(`delete note ${id}`);
+        }
+      }
     }
-  });
 
-  focusActionDelete.addEventListener('click', () => {
-    if (!activeFocusId) return;
-    if (confirm(`Are you sure you want to delete this ${activeFocusType}?`)) {
+    // Add subtask from focus card inputs
+    addSubtaskBtn.addEventListener('click', () => {
+      const val = newSubtaskInput.value.trim();
+      if (!val || !activeFocusId) return;
+      newSubtaskInput.value = '';
+      scrim.classList.remove('show');
+      sendMessage(`add a subtask to task ${activeFocusId} with content: ${val}`);
+    });
+
+    newSubtaskInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') addSubtaskBtn.click();
+    });
+
+    // Add connected note from focus card inputs
+    addNoteBtn.addEventListener('click', () => {
+      const val = newNoteInput.value.trim();
+      if (!val || !activeFocusId) return;
+      newNoteInput.value = '';
+      scrim.classList.remove('show');
+      sendMessage(`add a note connected to task ${activeFocusId} with content: ${val}`);
+    });
+
+    newNoteInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') addNoteBtn.click();
+    });
+
+    // Interactive action button handlers in focus details card
+    focusActionComplete.addEventListener('click', () => {
+      if (!activeFocusId) return;
       scrim.classList.remove('show');
       if (activeFocusType === 'task') {
-        sendMessage(`delete task ${activeFocusId}`);
+        sendMessage(`complete task ${activeFocusId}`);
       } else {
-        sendMessage(`delete note ${activeFocusId}`);
+        sendMessage(`complete note ${activeFocusId}`);
       }
-    }
-  });
-
-  document.getElementById('focusClose').addEventListener('click', () => scrim.classList.remove('show'));
-  scrim.addEventListener('click', (e) => { if (e.target === scrim) scrim.classList.remove('show'); });
-
-  async function loadTasks() {
-    try {
-      const res = await fetch('/tasks');
-      const data = await res.json();
-      renderTasks(data.tasks || []);
-    } catch (e) {
-      timeboundList.innerHTML = '<div class="empty">Server unreachable</div>';
-    }
-  }
-
-  async function loadNotes(query = '') {
-    try {
-      const url = query ? `/notes?query=${encodeURIComponent(query)}` : '/notes';
-      const res = await fetch(url);
-      const data = await res.json();
-      renderNotes(data.notes || []);
-    } catch (e) {
-      notesList.innerHTML = '<div class="empty">Server unreachable</div>';
-    }
-  }
-
-  // Load Settings from Flask
-  async function loadSettings() {
-    try {
-      const res = await fetch('/settings');
-      const data = await res.json();
-      const s = data.settings;
-      
-      // Apply UI Theme
-      document.body.className = 'theme-' + s.theme;
-      themeSelect.value = s.theme;
-      
-      // Load speeds
-      voiceSpeedSlider.value = s.voice_speed;
-      voiceSpeedVal.textContent = s.voice_speed;
-      
-      thresholdSlider.value = s.wake_word_threshold;
-      thresholdVal.textContent = s.wake_word_threshold.toFixed(2);
-    } catch (e) {
-      console.log("Error loading system settings:", e);
-    }
-  }
-
-  // Save Settings to Flask
-  async function saveSystemSettings() {
-    try {
-      const theme = themeSelect.value;
-      const voice_speed = parseInt(voiceSpeedSlider.value);
-      const wake_word_threshold = parseFloat(thresholdSlider.value);
-
-      const res = await fetch('/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme, voice_speed, wake_word_threshold })
-      });
-      const data = await res.json();
-      
-      // Live reload theme
-      document.body.className = 'theme-' + data.settings.theme;
-    } catch (e) {
-      console.log("Error saving settings:", e);
-    }
-  }
-
-  // Init loaders
-  loadTasks();
-  loadNotes();
-  loadSettings();
-
-  // Periodic polling for tasks & notes browser list
-  setInterval(loadTasks, 8000);
-  setInterval(() => {
-    // Only poll notes if not active searching
-    if (!noteSearch.value.trim()) {
-      loadNotes();
-    }
-  }, 10000);
-
-  // Notes filtering search handler
-  noteSearch.addEventListener('input', (e) => {
-    loadNotes(e.target.value.trim());
-  });
-
-  // Settings triggers
-  settingsBtn.addEventListener('click', () => settingsScrim.classList.add('show'));
-  settingsClose.addEventListener('click', async () => {
-    await saveSystemSettings();
-    settingsScrim.classList.remove('show');
-  });
-  
-  voiceSpeedSlider.addEventListener('input', (e) => voiceSpeedVal.textContent = e.target.value);
-  thresholdSlider.addEventListener('input', (e) => thresholdVal.textContent = parseFloat(e.target.value).toFixed(2));
-  
-  settingsScrim.addEventListener('click', (e) => { if (e.target === settingsScrim) settingsScrim.classList.remove('show'); });
-
-  function detectFocusCommand(text) {
-    const match = text.match(/(?:open|focus)\s+(?:on\s+)?task\s*#?(\d+)/i) || text.match(/task\s*#?(\d+)/i);
-    if (match) focusTask(match[1]);
-  }
-
-  async function sendMessage(text) {
-    if (!text.trim()) return;
-    detectFocusCommand(text);
-    textInput.value = '';
-    setOrbState('thinking');
-    try {
-      await fetch('/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
-      });
-      loadTasks();
-      loadNotes();
-    } catch (e) {
-      setOrbState('idle');
-    }
-  }
-
-  // Polling conversation transcript & visual orb status
-  let lastCount = 0;
-  async function pollState() {
-    try {
-      const res = await fetch('/state');
-      const data = await res.json();
-      
-      // Update transcript
-      if (data.messages.length > lastCount) {
-        for (let i = lastCount; i < data.messages.length; i++) {
-          addMessage(data.messages[i].role, data.messages[i].text);
-        }
-        lastCount = data.messages.length;
-      }
-      setOrbState(data.orb);
-      
-      // Handle speech-driven task focusing/filtering
-      if (data.focus_task_ids && data.focus_task_ids.length > 0) {
-        const ids = data.focus_task_ids;
-        if (ids.length === 1) {
-          focusTask(ids[0]);
-        } else {
-          // Filter tasks lists to show matches & highlight them
-          activeFilterIds = ids;
-          loadTasks();
-        }
-      }
-    } catch (e) {}
-  }
-  setInterval(pollState, 400);
-
-  sendBtn.addEventListener('click', () => sendMessage(textInput.value));
-  textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(textInput.value); });
-
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRecognition) {
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    let listening = false;
-    micBtn.addEventListener('click', () => {
-      if (listening) return;
-      listening = true;
-      micBtn.classList.add('mic-active');
-      try { recognition.start(); } catch (e) {}
     });
-    recognition.onresult = (e) => sendMessage(e.results[0][0].transcript);
-    recognition.onend = () => { listening = false; micBtn.classList.remove('mic-active'); };
-    recognition.onerror = () => { listening = false; micBtn.classList.remove('mic-active'); };
-  } else {
-    micBtn.style.display = 'none';
-  }
-</script>
+
+    focusActionDelete.addEventListener('click', () => {
+      if (!activeFocusId) return;
+      if (confirm(`Are you sure you want to delete this ${activeFocusType}?`)) {
+        scrim.classList.remove('show');
+        if (activeFocusType === 'task') {
+          sendMessage(`delete task ${activeFocusId}`);
+        } else {
+          sendMessage(`delete note ${activeFocusId}`);
+        }
+      }
+    });
+
+    document.getElementById('focusClose').addEventListener('click', () => scrim.classList.remove('show'));
+    scrim.addEventListener('click', (e) => { if (e.target === scrim) scrim.classList.remove('show'); });
+
+    async function loadTasks() {
+      try {
+        const res = await fetch('/tasks');
+        const data = await res.json();
+        renderTasks(data.tasks || []);
+      } catch (e) {
+        timeboundList.innerHTML = '<div class="empty">Server unreachable</div>';
+      }
+    }
+
+    async function loadNotes(query = '') {
+      try {
+        const url = query ? `/notes?query=${encodeURIComponent(query)}` : '/notes';
+        const res = await fetch(url);
+        const data = await res.json();
+        renderNotes(data.notes || []);
+      } catch (e) {
+        notesList.innerHTML = '<div class="empty">Server unreachable</div>';
+      }
+    }
+
+    // Load Settings from Flask
+    async function loadSettings() {
+      try {
+        const res = await fetch('/settings');
+        const data = await res.json();
+        const s = data.settings;
+
+        // Apply UI Theme
+        document.body.className = 'theme-' + s.theme;
+        themeSelect.value = s.theme;
+
+        // Load speeds
+        voiceSpeedSlider.value = s.voice_speed;
+        voiceSpeedVal.textContent = s.voice_speed;
+
+        thresholdSlider.value = s.wake_word_threshold;
+        thresholdVal.textContent = s.wake_word_threshold.toFixed(2);
+      } catch (e) {
+        console.log("Error loading system settings:", e);
+      }
+    }
+
+    // Save Settings to Flask
+    async function saveSystemSettings() {
+      try {
+        const theme = themeSelect.value;
+        const voice_speed = parseInt(voiceSpeedSlider.value);
+        const wake_word_threshold = parseFloat(thresholdSlider.value);
+
+        const res = await fetch('/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ theme, voice_speed, wake_word_threshold })
+        });
+        const data = await res.json();
+
+        // Live reload theme
+        document.body.className = 'theme-' + data.settings.theme;
+      } catch (e) {
+        console.log("Error saving settings:", e);
+      }
+    }
+
+    // Init loaders
+    loadTasks();
+    loadNotes();
+    loadSettings();
+
+    // Periodic polling for tasks & notes browser list
+    setInterval(loadTasks, 8000);
+    setInterval(() => {
+      // Only poll notes if not active searching
+      if (!noteSearch.value.trim()) {
+        loadNotes();
+      }
+    }, 10000);
+
+    // Notes filtering search handler
+    noteSearch.addEventListener('input', (e) => {
+      loadNotes(e.target.value.trim());
+    });
+
+    // Settings triggers
+    settingsBtn.addEventListener('click', () => settingsScrim.classList.add('show'));
+    settingsClose.addEventListener('click', async () => {
+      await saveSystemSettings();
+      settingsScrim.classList.remove('show');
+    });
+
+    voiceSpeedSlider.addEventListener('input', (e) => voiceSpeedVal.textContent = e.target.value);
+    thresholdSlider.addEventListener('input', (e) => thresholdVal.textContent = parseFloat(e.target.value).toFixed(2));
+
+    settingsScrim.addEventListener('click', (e) => { if (e.target === settingsScrim) settingsScrim.classList.remove('show'); });
+
+    function detectFocusCommand(text) {
+      const match = text.match(/(?:open|focus)\s+(?:on\s+)?task\s*#?(\d+)/i) || text.match(/task\s*#?(\d+)/i);
+      if (match) focusTask(match[1]);
+    }
+
+    async function sendMessage(text) {
+      if (!text.trim()) return;
+      detectFocusCommand(text);
+      textInput.value = '';
+      setOrbState('thinking');
+      try {
+        await fetch('/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        loadTasks();
+        loadNotes();
+      } catch (e) {
+        setOrbState('idle');
+      }
+    }
+
+    // Polling conversation transcript & visual orb status
+    let lastCount = 0;
+    async function pollState() {
+      try {
+        const res = await fetch('/state');
+        const data = await res.json();
+
+        // Update transcript
+        if (data.messages.length > lastCount) {
+          for (let i = lastCount; i < data.messages.length; i++) {
+            addMessage(data.messages[i].role, data.messages[i].text);
+          }
+          lastCount = data.messages.length;
+        }
+        setOrbState(data.orb);
+
+        // Handle speech-driven task focusing/filtering
+        if (data.focus_task_ids && data.focus_task_ids.length > 0) {
+          const ids = data.focus_task_ids;
+          if (ids.length === 1) {
+            focusTask(ids[0]);
+          } else {
+            // Filter tasks lists to show matches & highlight them
+            activeFilterIds = ids;
+            loadTasks();
+          }
+        }
+      } catch (e) { }
+    }
+    setInterval(pollState, 400);
+
+    sendBtn.addEventListener('click', () => sendMessage(textInput.value));
+    textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(textInput.value); });
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      let listening = false;
+      micBtn.addEventListener('click', () => {
+        if (listening) return;
+        listening = true;
+        micBtn.classList.add('mic-active');
+        try { recognition.start(); } catch (e) { }
+      });
+      recognition.onresult = (e) => sendMessage(e.results[0][0].transcript);
+      recognition.onend = () => { listening = false; micBtn.classList.remove('mic-active'); };
+      recognition.onerror = () => { listening = false; micBtn.classList.remove('mic-active'); };
+    } else {
+      micBtn.style.display = 'none';
+    }
+  </script>
 
 </body>
+
 </html>

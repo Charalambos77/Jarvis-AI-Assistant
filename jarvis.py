@@ -234,6 +234,11 @@ def command_center():
     return send_from_directory(BASE_DIR, "command_center.html")
 
 
+@app.route("/plan.html")
+def plan_page():
+    return send_from_directory(BASE_DIR, "plan.html")
+
+
 @app.route("/tasks", methods=["GET"])
 def tasks():
     conn = db.get_connection(DB_PATH)
