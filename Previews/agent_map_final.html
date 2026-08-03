@@ -1118,6 +1118,28 @@
 
             appendChatMessage(reply, 'jarvis');
         }
+
+        // 7. PIPELINE TRIGGER — Launch Agent Console button
+        document.getElementById('action-btn').addEventListener('click', () => {
+            const task = prompt("Enter the task for Jarvis to run:");
+            if (!task) return;
+
+            fetch('http://127.0.0.1:5000/pipeline/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    appendChatMessage(`Pipeline started: "${task}"`, 'user');
+                    appendChatMessage("Spawning research agents... Check the pipeline view.", 'jarvis');
+                    // Redirect to pipeline view after 1.5s
+                    setTimeout(() => window.location.href = 'jarvis_plan_preview.html', 1500);
+                })
+                .catch(err => {
+                    appendChatMessage("Error: Could not reach Jarvis server. Is jarvis.py running?", 'jarvis');
+                });
+        });
     </script>
 </body>
 

@@ -286,6 +286,41 @@ TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "search_memory_patterns",
+        "description": (
+            "Query Long-Term Memory for past winning or losing patterns relevant to a task. "
+            "Use this BEFORE starting research or execution to avoid repeating past mistakes "
+            "and to leverage proven strategies."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What pattern to search for"},
+                "task_type": {"type": "string", "description": "Filter by task type: video, code, marketing, etc."},
+                "outcome": {"type": "string", "enum": ["win", "loss"], "description": "Filter by outcome"}
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "save_memory_pattern",
+        "description": (
+            "Save a discovered pattern or insight into Long-Term Memory after a task completes. "
+            "Use this when the Track Agent identifies a high-performing or low-performing pattern."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string"},
+                "task_type": {"type": "string"},
+                "metric_name": {"type": "string"},
+                "metric_value": {"type": "number"},
+                "outcome": {"type": "string", "enum": ["win", "loss"]}
+            },
+            "required": ["pattern"]
+        }
+    },
 ]
 
 
@@ -332,6 +367,8 @@ TOOL_IMPL = {
     "call_external_api": lambda conn, **kw: call_external_api(conn, **kw),
     "call_mcp": lambda conn, **kw: call_mcp(conn, **kw),
     "google_search": lambda conn, query: outsource_google_search(query),
+    "search_memory_patterns": lambda conn, **kw: db.search_memory_patterns(conn, **kw),
+    "save_memory_pattern":    lambda conn, **kw: db.save_memory_pattern(conn, **kw),
 }
 
 def has_gemini() -> bool:

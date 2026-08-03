@@ -719,45 +719,59 @@
             document.getElementById('time-text').innerText = `${minutes}m ${seconds}s ago`;
         }, 1000);
 
-        // Approve / Reject Handlers
-        function approvePlan() {
+        const FLASK_BASE = 'http://127.0.0.1:5000';
+
+        async function approvePlan() {
+            const res = await fetch(`${FLASK_BASE}/gate/approve`, { method: 'POST' });
+            const data = await res.json();
+
             const hitlCard = document.getElementById('hitl-card');
             const execCard = document.getElementById('execute-card');
             const statusText = document.getElementById('status-text');
             const execStatus = document.getElementById('exec-status');
 
-            // Set Human Gate Card to green
             hitlCard.className = "stage-card green-glow";
             statusText.innerHTML = '<span class="status-dot green"></span>APPROVED';
             statusText.style.color = '#4ade80';
-
-            // Activate Stage 06
             execCard.className = "stage-card cyan-glow";
             execStatus.className = "status-dot green";
-
-            // Update Jarvis Toast
-            document.querySelector('.jarvis-toast').innerText = "Plan approved. Spawning execution agents and compiling project metrics...";
+            document.querySelector('.jarvis-toast').innerText =
+                "Plan approved. Spawning execution agents...";
         }
 
-        function rejectPlan() {
-            const hitlCard = document.getElementById('hitl-card');
-            const execCard = document.getElementById('execute-card');
-            const statusText = document.getElementById('status-text');
-            const execStatus = document.getElementById('exec-status');
+        async function rejectPlan() {
+            const note = prompt("Rejection reason / redirect note (optional):") || "";
+            const res = await fetch(`${FLASK_BASE}/gate/reject`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ redirect_note: note })
+            });
 
-            // Set Human Gate Card to red
+            const hitlCard = document.getElementById('hitl-card');
+            const statusText = document.getElementById('status-text');
+
             hitlCard.className = "stage-card";
             hitlCard.style.borderColor = 'rgba(239, 68, 68, 0.5)';
             hitlCard.style.boxShadow = '0 0 30px rgba(239, 68, 68, 0.2)';
-            statusText.innerHTML = '<span class="status-dot orange" style="background-color:#ef4444; box-shadow: 0 0 8px #ef4444;"></span>REJECTED';
+            statusText.innerHTML = '<span class="status-dot orange" style="background:#ef4444;box-shadow:0 0 8px #ef4444;"></span>REJECTED';
             statusText.style.color = '#f87171';
-
-            // Deactivate Stage 06
-            execCard.className = "stage-card";
-            execStatus.className = "status-dot";
-
-            document.querySelector('.jarvis-toast').innerText = "Plan rejected. Sending feedback to the Central Brain to adjust criteria...";
+            document.querySelector('.jarvis-toast').innerText =
+                note ? `Rejected. Note sent to Brain: "${note}"` : "Rejected. Routing back to Brain.";
         }
+
+        // Poll gate status every 3 seconds and update UI accordingly
+        async function pollGateStatus() {
+            try {
+                const res = await fetch(`${FLASK_BASE}/gate/status`);
+                const data = await res.json();
+                // Update stage indicators based on data.phase / data.current_gate
+                const toast = document.querySelector('.jarvis-toast');
+                if (data.phase && data.phase !== 'idle') {
+                    toast.innerText = `Pipeline phase: ${data.phase.toUpperCase()} | Gate ${data.current_gate ?? '—'}: ${data.gate_status}`;
+                }
+            } catch (e) { /* server not running, ignore */ }
+        }
+        setInterval(pollGateStatus, 3000);
 
         // Draw animated connection paths using SVG
         function drawConnectors() {

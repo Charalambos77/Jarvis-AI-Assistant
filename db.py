@@ -35,6 +35,16 @@ CREATE TABLE IF NOT EXISTS notes (
     task_id INTEGER REFERENCES tasks(id),
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS memory_patterns (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern     TEXT NOT NULL,       -- the insight (e.g. "hook under 5 words performs 2x better")
+    task_type   TEXT,                -- e.g. "video", "code", "marketing"
+    metric_name TEXT,                -- e.g. "retention_rate", "ctr", "error_rate"
+    metric_value REAL,               -- e.g. 0.82 (82%)
+    outcome     TEXT NOT NULL DEFAULT 'win',  -- 'win' | 'loss'
+    created_at  TEXT NOT NULL
+);
 """
 
 
@@ -60,6 +70,20 @@ def get_connection(db_path: str) -> sqlite3.Connection:
             conn.commit()
         if 'task_id' not in note_columns:
             conn.execute("ALTER TABLE notes ADD COLUMN task_id INTEGER REFERENCES tasks(id)")
+            conn.commit()
+
+        # Memory patterns table migration
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_patterns'")
+        if not cursor.fetchone():
+            conn.execute("""CREATE TABLE memory_patterns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern TEXT NOT NULL,
+                task_type TEXT,
+                metric_name TEXT,
+                metric_value REAL,
+                outcome TEXT NOT NULL DEFAULT 'win',
+                created_at TEXT NOT NULL
+            )""")
             conn.commit()
     except Exception as e:
         print(f"Migration error: {e}")
@@ -219,3 +243,31 @@ def search_notes(conn: sqlite3.Connection, query: str) -> list[dict]:
         (like, like),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------- memory patterns ----------
+
+def save_memory_pattern(conn: sqlite3.Connection, pattern: str, task_type: str | None = None,
+                        metric_name: str | None = None, metric_value: float | None = None, outcome: str = 'win'):
+    conn.execute(
+        """INSERT INTO memory_patterns
+           (pattern, task_type, metric_name, metric_value, outcome, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (pattern, task_type, metric_name, metric_value, outcome, _now())
+    )
+    conn.commit()
+
+def search_memory_patterns(conn: sqlite3.Connection, query: str, task_type: str | None = None, outcome: str | None = None) -> list[dict]:
+    like = f"%{query}%"
+    sql = "SELECT * FROM memory_patterns WHERE pattern LIKE ?"
+    params = [like]
+    if task_type:
+        sql += " AND task_type = ?"
+        params.append(task_type)
+    if outcome:
+        sql += " AND outcome = ?"
+        params.append(outcome)
+    sql += " ORDER BY COALESCE(metric_value, -1) DESC, created_at DESC LIMIT 20"
+    # [FIX #2] COALESCE handles NULL metric_value — patterns without a metric
+    # (qualitative insights) would otherwise sink to the bottom in DESC sort.
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]

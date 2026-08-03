@@ -109,6 +109,19 @@ CONVO = []            # list of {"role": "user"|"ai"|"system", "text": ...}
 ORB_STATE = "idle"     # "idle" | "thinking" | "speaking"
 FOCUS_TASK_IDS = []   # list of task IDs to highlight/focus on in UI
 
+# --- Pipeline Gate State ---
+PIPELINE_STATE = {
+    "current_gate": None,        # None | 1 | 2 | 3
+    "gate_status": "idle",       # "idle" | "waiting" | "approved" | "rejected"
+    "redirect_note": None,       # human's rejection reason
+    "phase": "idle",             # e.g. "research" | "synthesis" | "execution" | "deployed"
+}
+PIPELINE_LOCK = threading.Lock()
+
+# --- Track Agent Metric Store ---
+TRACKED_METRICS = {}   # e.g. {"youtube_ctr": {"value": 0.025, "threshold": 0.03}}
+TRACKED_METRICS_LOCK = threading.Lock()
+
 
 def push_message(role, text):
     with STATE_LOCK:
@@ -298,6 +311,135 @@ def ask():
     threading.Thread(target=speak, args=(reply,), daemon=True).start()
 
     return jsonify({"reply": reply})
+
+
+@app.route("/gate/status", methods=["GET"])
+def gate_status():
+    with PIPELINE_LOCK:
+        return jsonify(PIPELINE_STATE.copy())
+
+
+@app.route("/gate/approve", methods=["POST"])
+def gate_approve():
+    with PIPELINE_LOCK:
+        gate = PIPELINE_STATE.get("current_gate")
+        if gate is None:
+            return jsonify({"error": "No gate is currently active"}), 400
+        PIPELINE_STATE["gate_status"] = "approved"
+        PIPELINE_STATE["redirect_note"] = None
+    push_message("system", f"Gate {gate} approved. Advancing pipeline.")
+    return jsonify({"status": "approved", "gate": gate})
+
+
+@app.route("/gate/reject", methods=["POST"])
+def gate_reject():
+    data = request.get_json(force=True) or {}
+    note = data.get("redirect_note", "").strip()
+    with PIPELINE_LOCK:
+        gate = PIPELINE_STATE.get("current_gate")
+        if gate is None:
+            return jsonify({"error": "No gate is currently active"}), 400
+        PIPELINE_STATE["gate_status"] = "rejected"
+        PIPELINE_STATE["redirect_note"] = note or None
+    push_message("system", f"Gate {gate} rejected. Note: {note or 'none provided'}")
+    return jsonify({"status": "rejected", "gate": gate, "redirect_note": note})
+
+
+@app.route("/metrics/update", methods=["POST"])
+def update_metric():
+    data = request.get_json(force=True) or {}
+    name = data.get("name")
+    value = data.get("value")
+    threshold = data.get("threshold")
+    if not name or value is None:
+        return jsonify({"error": "name and value required"}), 400
+    with TRACKED_METRICS_LOCK:
+        TRACKED_METRICS[name] = {"value": float(value), "threshold": float(threshold or 0)}
+    return jsonify({"status": "updated", "metric": name, "value": value})
+
+
+def track_agent_loop():
+    """Background thread. Checks metrics every 5 minutes.
+    If any metric is below its threshold, signals the Brain to spawn
+    a corrective sub-task."""
+    print("[Track Agent] Started monitoring.")
+    while True:
+        time.sleep(300)  # 5 minutes
+        with TRACKED_METRICS_LOCK:
+            metrics_snapshot = dict(TRACKED_METRICS)
+
+        for metric_name, data in metrics_snapshot.items():
+            value = data.get("value", 0)
+            threshold = data.get("threshold", 0)
+            if threshold > 0 and value < threshold:
+                msg = (
+                    f"[Track Agent] ALERT: '{metric_name}' is {value:.3f}, "
+                    f"below threshold {threshold:.3f}. Signalling Brain."
+                )
+                print(msg)
+                push_message("system", msg)
+                # Signal Brain via the coordinator
+                corrective_prompt = (
+                    f"Track Agent alert: metric '{metric_name}' is underperforming "
+                    f"(current: {value:.3f}, threshold: {threshold:.3f}). "
+                    f"Spawn a corrective sub-task to address this."
+                )
+                try:
+                    reply = coordinator.handle_request(corrective_prompt)
+                    push_message("ai", reply)
+                except Exception as e:
+                    print(f"[Track Agent] Error signalling Brain: {e}")
+
+
+@app.route("/pipeline/start", methods=["POST"])
+def start_pipeline():
+    """Starts the multi-agent pipeline for a complex task."""
+    data = request.get_json(force=True) or {}
+    task = data.get("task", "").strip()
+    if not task:
+        return jsonify({"error": "task is required"}), 400
+
+    push_message("system", f"Pipeline started: {task[:80]}...")
+
+    async def gate_fn(gate_number: int, data: dict) -> dict:
+        """Polls PIPELINE_STATE until the gate is resolved."""
+        with PIPELINE_LOCK:
+            PIPELINE_STATE["current_gate"] = gate_number
+            PIPELINE_STATE["gate_status"] = "waiting"
+            PIPELINE_STATE["redirect_note"] = None
+
+        push_message("system", f"Gate {gate_number} is open. Waiting for your approval.")
+
+        # Poll every 2 seconds until approved or rejected
+        import asyncio
+        while True:
+            await asyncio.sleep(2)
+            with PIPELINE_LOCK:
+                status = PIPELINE_STATE["gate_status"]
+                note = PIPELINE_STATE["redirect_note"]
+            if status in ("approved", "rejected"):
+                with PIPELINE_LOCK:
+                    PIPELINE_STATE["current_gate"] = None
+                    PIPELINE_STATE["gate_status"] = "idle"
+                return {"approved": status == "approved", "redirect_note": note}
+
+    def run_pipeline():
+        import asyncio
+        from multi_agent_coordinator import run_full_pipeline
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # [FIX #5] Removed the dead lambda: None third argument
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn))
+            push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
+        except Exception as e:
+            push_message("system", f"Pipeline error: {e}")
+        finally:
+            loop.close()
+
+    # Run pipeline in background thread so Flask responds immediately
+    threading.Thread(target=run_pipeline, daemon=True).start()
+    return jsonify({"status": "pipeline_started", "task": task})
 
 
 def run_server():
@@ -506,6 +648,10 @@ if __name__ == "__main__":
     # Start background reminder thread
     reminders = threading.Thread(target=reminder_loop, daemon=True)
     reminders.start()
+
+    # Start background track agent thread
+    track_thread = threading.Thread(target=track_agent_loop, daemon=True)
+    track_thread.start()
 
     # Create the app window hidden - it only appears when "Hey Jarvis" triggers.
     window = webview.create_window("Jarvis", URL, width=1100, height=720, hidden=True, fullscreen=True)
