@@ -872,18 +872,28 @@
             );
         }
 
+        function getNoteOffset(index, total, radius = 0.14) {
+            const phi = Math.acos(-1 + (2 * index) / Math.max(total, 1));
+            const theta = Math.sqrt(Math.max(total, 1) * Math.PI) * phi + Math.PI / 4;
+            return new THREE.Vector3(
+                radius * Math.sin(phi) * Math.cos(theta),
+                radius * Math.sin(phi) * Math.sin(theta),
+                radius * Math.cos(phi)
+            );
+        }
+
         function getTaskColor(priority) {
             if (priority === 'high') return '#F59E0B';
             if (priority === 'medium') return '#A78BFA';
             return '#60A5FA';
         }
 
-        function addNodeToScene(task, position, parentId = null) {
-            const isSubtask = !!parentId;
-            const color = isSubtask ? getTaskColor(task.priority || 'medium') : getTaskColor(task.priority || 'medium');
-            const sizeScale = isSubtask ? 0.7 : 1.2;
-            const particleCount = isSubtask ? 80 : 200;
-            const nodeRadius = isSubtask ? 0.04 : 0.08;
+        function addNodeToScene(task, position, parentId = null, isNote = false) {
+            const isSubtask = !!parentId && !isNote;
+            const color = isNote ? '#F59E0B' : (isSubtask ? getTaskColor(task.priority || 'medium') : getTaskColor(task.priority || 'medium'));
+            const sizeScale = isNote ? 0.4 : (isSubtask ? 0.7 : 1.2);
+            const particleCount = isNote ? 45 : (isSubtask ? 80 : 200);
+            const nodeRadius = isNote ? 0.02 : (isSubtask ? 0.04 : 0.08);
 
             // Visual Node Group
             const nodeGroup = createStardustNode(color, sizeScale, particleCount, nodeRadius);
@@ -902,23 +912,23 @@
             pulsingNodes.push(pulseObj);
 
             // Interactive Hit Mesh
-            const hitGeo = new THREE.SphereGeometry(isSubtask ? 0.07 : 0.12, 8, 8);
+            const hitGeo = new THREE.SphereGeometry(isNote ? 0.04 : (isSubtask ? 0.07 : 0.12), 8, 8);
             const hitMat = new THREE.MeshBasicMaterial({ visible: false });
             const hitMesh = new THREE.Mesh(hitGeo, hitMat);
             hitMesh.position.copy(position);
 
             // Map simple visual schema fields for side-panel detail display compatibility
             const displayData = {
-                id: task.id,
-                title: task.content,
-                type: isSubtask ? 'SUBTASK' : 'TASK',
-                desc: task.content + ` (${task.priority || 'medium'} priority, status: ${task.status || 'open'})`,
-                tags: task.tags ? task.tags.split(',') : [task.priority || 'medium', task.status || 'open'],
-                replaces: isSubtask ? 'Subtask branch execution' : 'Replaces manual workflow steps and checklist items.',
+                id: isNote ? 'note-' + task.id : task.id,
+                title: isNote ? task.content : task.content,
+                type: isNote ? 'NOTE' : (isSubtask ? 'SUBTASK' : 'TASK'),
+                desc: isNote ? task.content + ` (Connected note)` : (task.content + ` (${task.priority || 'medium'} priority, status: ${task.status || 'open'})`),
+                tags: isNote ? (task.tags ? task.tags.split(',') : ['note']) : (task.tags ? task.tags.split(',') : [task.priority || 'medium', task.status || 'open']),
+                replaces: isNote ? 'Note attachment' : (isSubtask ? 'Subtask branch execution' : 'Replaces manual workflow steps and checklist items.'),
                 nodes: {
-                    human: 'Task verification & approvals',
-                    assisted: 'AI execution drafts & status check',
-                    auto: 'Fully autonomous tool pipeline trigger'
+                    human: isNote ? 'Note verification' : 'Task verification & approvals',
+                    assisted: isNote ? 'AI reference search' : 'AI execution drafts & status check',
+                    auto: isNote ? 'Compounding knowledge database' : 'Fully autonomous tool pipeline trigger'
                 },
                 color: color
             };
@@ -926,14 +936,15 @@
             nodesGroup.add(hitMesh);
             interactiveObjects.push(hitMesh);
 
-            // Connection Line to center (Main Task) or Parent (Subtask)
-            const startPos = isSubtask ? liveNodeMap.get(parentId).position : new THREE.Vector3(0, 0, 0);
+            // Connection Line to center (Main Task) or Parent (Subtask/Note)
+            const parentReg = (isSubtask || isNote) && parentId ? liveNodeMap.get(parentId) : null;
+            const startPos = parentReg ? parentReg.position : new THREE.Vector3(0, 0, 0);
             const linePoints = [startPos, position];
             const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
             const lineMat = new THREE.LineBasicMaterial({
                 color: color,
                 transparent: true,
-                opacity: isSubtask ? 0.15 : 0.25,
+                opacity: isNote ? 0.3 : (isSubtask ? 0.15 : 0.25),
                 blending: THREE.AdditiveBlending
             });
             const line = new THREE.Line(lineGeo, lineMat);
@@ -941,17 +952,17 @@
 
             // Beam Pulses
             const nodePulses = [];
-            const pulseCount = isSubtask ? 1 : 2;
+            const pulseCount = isNote ? 1 : (isSubtask ? 1 : 2);
             for (let i = 0; i < pulseCount; i++) {
                 const pSpriteMat = new THREE.SpriteMaterial({
                     map: texture,
                     color: 0xffffff,
                     transparent: true,
-                    opacity: isSubtask ? 0.85 : 0.9,
+                    opacity: isNote ? 0.8 : (isSubtask ? 0.85 : 0.9),
                     blending: THREE.AdditiveBlending
                 });
                 const pulseSprite = new THREE.Sprite(pSpriteMat);
-                pulseSprite.scale.set(isSubtask ? 0.05 : 0.08, isSubtask ? 0.05 : 0.08, 1);
+                pulseSprite.scale.set(isNote ? 0.03 : (isSubtask ? 0.05 : 0.08), isNote ? 0.03 : (isSubtask ? 0.05 : 0.08), 1);
                 nodesGroup.add(pulseSprite);
 
                 const pulseTrack = {
@@ -959,7 +970,7 @@
                     startPos: startPos,
                     endPos: position,
                     progress: (i / pulseCount) + Math.random() * 0.1,
-                    speed: (isSubtask ? 0.006 : 0.004) + Math.random() * 0.003,
+                    speed: (isNote ? 0.007 : (isSubtask ? 0.006 : 0.004)) + Math.random() * 0.003,
                     color: new THREE.Color(color)
                 };
                 pulses.push(pulseTrack);
@@ -967,7 +978,8 @@
             }
 
             // Register in the registry
-            liveNodeMap.set(task.id, {
+            const registryKey = isNote ? 'note-' + task.id : task.id;
+            liveNodeMap.set(registryKey, {
                 group: nodeGroup,
                 hitMesh: hitMesh,
                 line: line,
@@ -1016,11 +1028,28 @@
                 const reg = liveNodeMap.get(id);
                 return reg && !reg.animating;
             });
-            const newKeys = tasks.filter(t => t.status !== 'done').map(t => t.id);
+            const currentTaskKeys = currentKeys.filter(id => typeof id === 'number');
+            const currentNoteKeys = currentKeys.filter(id => typeof id === 'string' && id.startsWith('note-'));
+
+            const openTasks = tasks.filter(t => t.status !== 'done');
+            const newTaskKeys = openTasks.map(t => t.id);
+
+            // Collect all active notes
+            const activeNotes = [];
+            openTasks.forEach(t => {
+                if (t.notes) {
+                    t.notes.forEach(n => {
+                        if (n.status !== 'done') {
+                            activeNotes.push(n);
+                        }
+                    });
+                }
+            });
+            const newNoteKeys = activeNotes.map(n => 'note-' + n.id);
 
             // 1. Remove deleted or finished tasks
-            currentKeys.forEach(id => {
-                if (!newKeys.includes(id)) {
+            currentTaskKeys.forEach(id => {
+                if (!newTaskKeys.includes(id)) {
                     // Check if completed or deleted
                     const completedTask = tasks.find(t => t.id === id);
                     if (completedTask && completedTask.status === 'done') {
@@ -1031,8 +1060,26 @@
                 }
             });
 
+            // 1b. Remove deleted or finished notes
+            currentNoteKeys.forEach(noteKey => {
+                if (!newNoteKeys.includes(noteKey)) {
+                    const noteId = parseInt(noteKey.replace('note-', ''));
+                    let foundNote = null;
+                    for (let t of tasks) {
+                        if (t.notes) {
+                            foundNote = t.notes.find(n => n.id === noteId);
+                            if (foundNote) break;
+                        }
+                    }
+                    if (foundNote && foundNote.status === 'done') {
+                        triggerNoteCompletedAnimation(noteKey);
+                    } else {
+                        triggerNoteDeletedAnimation(noteKey);
+                    }
+                }
+            });
+
             // 2. Separate parents and children for rendering
-            const openTasks = tasks.filter(t => t.status !== 'done');
             const mainTasks = openTasks.filter(t => !t.parent_id);
             const subTasks = openTasks.filter(t => t.parent_id);
 
@@ -1052,6 +1099,20 @@
                         const offset = getSubtaskOffset(index, subTasks.length);
                         const targetPos = parentReg.position.clone().add(offset);
                         triggerSubtaskCreatedAnimation(t, t.parent_id, targetPos);
+                    }
+                }
+            });
+
+            // 5. Add new notes
+            activeNotes.forEach((note, index) => {
+                const noteKey = 'note-' + note.id;
+                if (!liveNodeMap.has(noteKey)) {
+                    const parentReg = liveNodeMap.get(note.task_id);
+                    if (parentReg) {
+                        const siblingNotes = activeNotes.filter(n => n.task_id === note.task_id);
+                        const offset = getNoteOffset(index, siblingNotes.length);
+                        const targetPos = parentReg.position.clone().add(offset);
+                        triggerNoteCreatedAnimationOnTask(note, note.task_id, targetPos);
                     }
                 }
             });
@@ -1080,6 +1141,21 @@
                         const offset = getSubtaskOffset(index, subTasks.length);
                         const pos = parentReg.position.clone().add(offset);
                         addNodeToScene(t, pos, t.parent_id);
+                    }
+                });
+
+                // Render attached notes
+                openTasks.forEach(t => {
+                    if (t.notes) {
+                        const activeNotes = t.notes.filter(n => n.status !== 'done');
+                        activeNotes.forEach((note, index) => {
+                            const parentReg = liveNodeMap.get(t.id);
+                            if (parentReg) {
+                                const offset = getNoteOffset(index, activeNotes.length);
+                                const pos = parentReg.position.clone().add(offset);
+                                addNodeToScene(note, pos, t.id, true);
+                            }
+                        });
                     }
                 });
             } catch (e) {
@@ -1373,14 +1449,21 @@
 
                     // Phase B (2-3s): Parent node flashes and overloads
                     if (elapsed >= 2.0 && elapsed < 3.0) {
-                        const flashElapsed = elapsed - 2.0; // 0 to 1
-                        const flashScale = 1.0 + Math.sin(flashElapsed * Math.PI) * 1.2;
-                        parentReg.group.scale.set(flashScale, flashScale, flashScale);
-                        // Temporarily brighten center
-                        parentReg.group.centerSprite.material.color.set(0xffffff);
+                        if (parentReg.group) {
+                            const flashElapsed = elapsed - 2.0; // 0 to 1
+                            const flashScale = 1.0 + Math.sin(flashElapsed * Math.PI) * 1.2;
+                            parentReg.group.scale.set(flashScale, flashScale, flashScale);
+                            if (parentReg.group.centerSprite) {
+                                parentReg.group.centerSprite.material.color.set(0xffffff);
+                            }
+                        }
                     } else if (elapsed >= 3.0) {
-                        parentReg.group.scale.set(1, 1, 1);
-                        parentReg.group.centerSprite.material.color.set(0xffffff);
+                        if (parentReg.group) {
+                            parentReg.group.scale.set(1, 1, 1);
+                            if (parentReg.group.centerSprite) {
+                                parentReg.group.centerSprite.material.color.set(0xffffff);
+                            }
+                        }
                     }
 
                     // Phase C (3-4s): grow branch beam
@@ -1404,8 +1487,203 @@
                 onComplete: () => {
                     chargeParticles.forEach(p => nodesGroup.remove(p.sprite));
                     if (tempLaser) nodesGroup.remove(tempLaser);
-                    if (parentReg) parentReg.group.scale.set(1, 1, 1);
+                    if (parentReg && parentReg.group) parentReg.group.scale.set(1, 1, 1);
                     addNodeToScene(subtask, position, parentId);
+                }
+            });
+        }
+
+        function triggerNoteCreatedAnimationOnTask(note, taskId, position) {
+            const noteKey = 'note-' + note.id;
+            if (liveNodeMap.has(noteKey)) return;
+            liveNodeMap.set(noteKey, { animating: 'creating', position: position.clone() });
+            const color = '#F59E0B'; // amber/orange note color
+            const parentReg = liveNodeMap.get(taskId);
+            if (!parentReg) {
+                liveNodeMap.delete(noteKey);
+                addNodeToScene(note, position, taskId, true);
+                return;
+            }
+
+            const parentPos = parentReg.position;
+            let chargeParticles = [];
+            let tempLaser = null;
+
+            animationQueue.push({
+                type: 'CREATE_NOTE',
+                duration: 4.0,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    // Phase A (0-2s): charge pulses toward parent node
+                    if (elapsed < 2.0) {
+                        if (chargeParticles.length === 0) {
+                            for (let i = 0; i < 4; i++) {
+                                const pMat = new THREE.SpriteMaterial({
+                                    map: texture,
+                                    color: color,
+                                    transparent: true,
+                                    opacity: 0.9,
+                                    blending: THREE.AdditiveBlending
+                                });
+                                const pSprite = new THREE.Sprite(pMat);
+                                pSprite.scale.set(0.04, 0.04, 1);
+                                nodesGroup.add(pSprite);
+                                chargeParticles.push({
+                                    sprite: pSprite,
+                                    delay: i * 0.3
+                                });
+                            }
+                        }
+
+                        chargeParticles.forEach(p => {
+                            if (elapsed > p.delay) {
+                                const t = Math.min(1.0, (elapsed - p.delay) / 0.7);
+                                p.sprite.position.lerpVectors(new THREE.Vector3(0, 0, 0), parentPos, t);
+                                p.sprite.material.opacity = 0.9 * (1.0 - t);
+                            } else {
+                                p.sprite.position.set(0, 0, 0);
+                                p.sprite.material.opacity = 0;
+                            }
+                        });
+                    } else {
+                        chargeParticles.forEach(p => nodesGroup.remove(p.sprite));
+                    }
+
+                    // Phase B (2-3s): Parent node flashes and overloads
+                    if (elapsed >= 2.0 && elapsed < 3.0) {
+                        if (parentReg.group) {
+                            const flashElapsed = elapsed - 2.0;
+                            const flashScale = 1.0 + Math.sin(flashElapsed * Math.PI) * 1.1;
+                            parentReg.group.scale.set(flashScale, flashScale, flashScale);
+                            if (parentReg.group.centerSprite) {
+                                parentReg.group.centerSprite.material.color.set(0xffffff);
+                            }
+                        }
+                    } else if (elapsed >= 3.0) {
+                        if (parentReg.group) {
+                            parentReg.group.scale.set(1, 1, 1);
+                            if (parentReg.group.centerSprite) {
+                                parentReg.group.centerSprite.material.color.set(0xffffff);
+                            }
+                        }
+                    }
+
+                    // Phase C (3-4s): grow branch beam
+                    if (elapsed >= 3.0 && elapsed < 4.0) {
+                        if (!tempLaser) {
+                            const laserMat = new THREE.LineBasicMaterial({
+                                color: color,
+                                transparent: true,
+                                opacity: 1.0,
+                                blending: THREE.AdditiveBlending
+                            });
+                            const laserGeo = new THREE.BufferGeometry().setFromPoints([parentPos, parentPos]);
+                            tempLaser = new THREE.Line(laserGeo, laserMat);
+                            nodesGroup.add(tempLaser);
+                        }
+                        const t = (elapsed - 3.0) / 1.0;
+                        const currentEnd = new THREE.Vector3().lerpVectors(parentPos, position, t);
+                        tempLaser.geometry.setFromPoints([parentPos, currentEnd]);
+                    }
+                },
+                onComplete: () => {
+                    chargeParticles.forEach(p => nodesGroup.remove(p.sprite));
+                    if (tempLaser) nodesGroup.remove(tempLaser);
+                    if (parentReg && parentReg.group) parentReg.group.scale.set(1, 1, 1);
+                    addNodeToScene(note, position, taskId, true);
+                }
+            });
+        }
+
+        function triggerNoteDeletedAnimation(noteKey) {
+            const registry = liveNodeMap.get(noteKey);
+            if (!registry || registry.animating === 'deleting') return;
+            registry.animating = 'deleting';
+
+            const nodePos = registry.position;
+            const color = '#F59E0B';
+            let explosionParticles = [];
+
+            animationQueue.push({
+                type: 'DELETE_NOTE_3D',
+                duration: 1.5,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    if (explosionParticles.length === 0) {
+                        registry.group.visible = false;
+                        registry.line.visible = false;
+                        registry.pulses.forEach(p => p.sprite.visible = false);
+
+                        for (let i = 0; i < 20; i++) {
+                            const pMat = new THREE.SpriteMaterial({
+                                map: texture,
+                                color: color,
+                                transparent: true,
+                                opacity: 1.0,
+                                blending: THREE.AdditiveBlending
+                            });
+                            const pSprite = new THREE.Sprite(pMat);
+                            pSprite.scale.set(0.03, 0.03, 1);
+                            pSprite.position.copy(nodePos);
+                            nodesGroup.add(pSprite);
+
+                            const angle = Math.random() * Math.PI * 2;
+                            const phi = Math.acos(Math.random() * 2 - 1);
+                            const velocity = new THREE.Vector3(
+                                Math.sin(phi) * Math.cos(angle),
+                                Math.sin(phi) * Math.sin(angle),
+                                Math.cos(phi)
+                            ).multiplyScalar(0.003 + Math.random() * 0.007);
+
+                            explosionParticles.push({
+                                sprite: pSprite,
+                                velocity: velocity
+                            });
+                        }
+                    }
+
+                    explosionParticles.forEach(p => {
+                        p.sprite.position.add(p.velocity);
+                        p.sprite.material.opacity = Math.max(0, 1.0 - elapsed);
+                    });
+                },
+                onComplete: () => {
+                    explosionParticles.forEach(p => nodesGroup.remove(p.sprite));
+                    removeNodeFromScene(noteKey);
+                }
+            });
+        }
+
+        function triggerNoteCompletedAnimation(noteKey) {
+            const registry = liveNodeMap.get(noteKey);
+            if (!registry || registry.animating === 'completing') return;
+            registry.animating = 'completing';
+
+            const nodePos = registry.position;
+            const parentReg = registry.parentId ? liveNodeMap.get(registry.parentId) : null;
+            const parentPos = parentReg ? parentReg.position : new THREE.Vector3(0, 0, 0);
+
+            animationQueue.push({
+                type: 'COMPLETE_NOTE_3D',
+                duration: 1.5,
+                startTime: Date.now(),
+                tick: (elapsed) => {
+                    const t = elapsed / 1.5;
+
+                    registry.group.position.z = nodePos.z + t * (2.2 - nodePos.z);
+                    registry.group.position.x = nodePos.x * (1.0 - t);
+                    registry.group.position.y = nodePos.y * (1.0 - t);
+
+                    const scale = 1.0 - t;
+                    registry.group.scale.set(scale, scale, scale);
+
+                    if (registry.line) {
+                        const lineEnd = new THREE.Vector3().lerpVectors(nodePos, parentPos, t);
+                        registry.line.geometry.setFromPoints([parentPos, lineEnd]);
+                    }
+                },
+                onComplete: () => {
+                    removeNodeFromScene(noteKey);
                 }
             });
         }
@@ -2172,9 +2450,23 @@
                         } else if (act.type === 'task_completed') {
                             triggerCompletedAnimation(act.task_id);
                         } else if (act.type === 'note_created') {
-                            animateNoteCreated();
+                            if (act.task_id) {
+                                const tempNote = { id: act.note_id, content: 'New Note', status: 'open' };
+                                const parentReg = liveNodeMap.get(act.task_id);
+                                if (parentReg) {
+                                    const offset = getNoteOffset(0, 1);
+                                    const targetPos = parentReg.position.clone().add(offset);
+                                    triggerNoteCreatedAnimationOnTask(tempNote, act.task_id, targetPos);
+                                }
+                            } else {
+                                animateNoteCreated();
+                            }
                         } else if (act.type === 'note_deleted') {
-                            animateNoteDeleted();
+                            if (act.note_id && liveNodeMap.has('note-' + act.note_id)) {
+                                triggerNoteDeletedAnimation('note-' + act.note_id);
+                            } else {
+                                animateNoteDeleted();
+                            }
                         } else if (act.type === 'note_search') {
                             animateNoteSearch();
                         } else if (act.type === 'google_search') {

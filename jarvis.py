@@ -110,6 +110,7 @@ ORB_STATE = "idle"     # "idle" | "thinking" | "speaking"
 FOCUS_TASK_IDS = []   # list of task IDs to highlight/focus on in UI
 UI_ACTION = None      # e.g. {"type": "task_created", "task_id": 5, "priority": "high"}
 JARVIS_SLEEPING = False # tracks sleep/wake visual state of UI/nebula
+ELEVENLABS_QUOTA_EXCEEDED = False # temporary runtime flag to skip ElevenLabs if quota exceeded
 
 # --- Pipeline Gate State ---
 PIPELINE_STATE = {
@@ -137,6 +138,7 @@ def set_orb(state):
 
 
 def speak(text: str):
+    global ELEVENLABS_QUOTA_EXCEEDED
     print(f"[Jarvis] {text}")
     set_orb("speaking")
     
@@ -144,7 +146,7 @@ def speak(text: str):
     eleven_voice = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
     
     played_via_eleven = False
-    if eleven_key:
+    if eleven_key and not ELEVENLABS_QUOTA_EXCEEDED:
         try:
             import requests
             import tempfile
@@ -181,6 +183,9 @@ def speak(text: str):
                 played_via_eleven = True
             else:
                 print(f"[ElevenLabs Error] {res.status_code}: {res.text}")
+                if res.status_code in (401, 429) or "quota" in res.text.lower():
+                    ELEVENLABS_QUOTA_EXCEEDED = True
+                    print("[Jarvis] ElevenLabs API quota exceeded. Temporarily falling back to local TTS for this session.")
         except Exception as e:
             print(f"[ElevenLabs Exception] {e}")
 
@@ -245,11 +250,14 @@ def jarvis_tool_listener(name, args, result):
                 }
         elif name == "add_note":
             UI_ACTION = {
-                "type": "note_created"
+                "type": "note_created",
+                "task_id": args.get("task_id"),
+                "note_id": result
             }
         elif name == "delete_note":
             UI_ACTION = {
-                "type": "note_deleted"
+                "type": "note_deleted",
+                "note_id": args.get("note_id")
             }
         elif name == "search_notes":
             UI_ACTION = {

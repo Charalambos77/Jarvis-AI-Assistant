@@ -396,10 +396,9 @@ if has_gemini():
         ),
         tools=[
             {"function_declarations": TOOLS},
-            {"google_search": {}},
         ],
         tool_config=types.ToolConfig(
-            include_server_side_tool_invocations=True,
+            include_server_side_tool_invocations=False,
         ),
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
