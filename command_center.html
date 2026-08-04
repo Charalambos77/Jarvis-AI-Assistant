@@ -485,6 +485,7 @@
             line-height: 1.5;
             transition: all 0.2s;
             border-left: 3px solid transparent;
+            margin-bottom: 12px;
         }
 
         .task-live-item:hover {
@@ -514,10 +515,66 @@
             font-size: 10px;
             color: var(--text-muted);
             display: flex;
-            gap: 8px;
+            gap: 12px;
             align-items: center;
             flex-wrap: wrap;
             margin-top: 6px;
+        }
+
+        .task-live-subtasks {
+            margin-left: 14px;
+            border-left: 1px dashed rgba(255, 255, 255, 0.15);
+            padding-left: 12px;
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .task-live-subtask-item {
+            font-size: 11px;
+            color: #94A3B8;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .task-live-subtask-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #A78BFA;
+        }
+
+        .task-live-subtask-dot.done {
+            background: rgba(255, 255, 255, 0.2);
+            text-decoration: line-through;
+        }
+
+        .task-live-notes {
+            margin-left: 14px;
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding-left: 12px;
+        }
+
+        .task-live-note-item {
+            font-size: 11px;
+            color: #F59E0B;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(245, 158, 11, 0.05);
+            border: 1px solid rgba(245, 158, 11, 0.1);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .task-live-note-bullet {
+            font-size: 12px;
+            color: #F59E0B;
         }
 
         .task-badge {
@@ -644,10 +701,39 @@
 
         <!-- Live Tasks section (shown when Tasks nav is clicked) -->
         <div id="panel-tasks-section"
-            style="display:none; flex: 1; display: none; flex-direction: column; overflow: hidden;">
+            style="display:none; flex: 1; min-height: 0; flex-direction: column; overflow: hidden;">
             <div class="section-title">LIVE TASK DATABASE</div>
-            <div class="tasks-live-list" id="tasks-live-list">
+            <div class="tasks-live-list" id="tasks-live-list"
+                style="flex: 1; min-height: 0; max-height: none; overflow-y: auto;">
                 <div style="color: var(--text-muted); font-size: 12px;">Loading tasks...</div>
+            </div>
+        </div>
+
+        <!-- Specific Task section (shown when a specific task is clicked/focused) -->
+        <div id="panel-specific-task-section"
+            style="display:none; flex-direction: column; gap: 15px; overflow-y: auto; max-height: calc(100vh - 280px); scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.1) transparent; padding-right: 5px;">
+            <div class="section-title">TASK DETAILS</div>
+            <div id="specific-task-meta"
+                style="font-size: 11px; display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                <!-- Populated via Javascript -->
+            </div>
+
+            <div class="section-title">NOTES & SUBTASKS</div>
+            <div id="specific-task-children" style="display: flex; flex-direction: column; gap: 8px;">
+                <!-- Populated via Javascript -->
+            </div>
+
+            <div class="section-title" style="margin-top: 10px;">ACTIONS</div>
+            <div class="specific-task-actions" style="display: flex; flex-direction: column; gap: 8px;">
+                <button class="action-btn"
+                    style="background: rgba(167, 139, 250, 0.15); border-color: #A78BFA; color: #A78BFA; width: 100%;"
+                    onclick="alert('Breaking down task...')">Break task down</button>
+                <button class="action-btn"
+                    style="background: rgba(96, 165, 250, 0.15); border-color: #60A5FA; color: #60A5FA; width: 100%;"
+                    onclick="alert('Creating implementation plan...')">Create implementation plan</button>
+                <button class="action-btn"
+                    style="background: rgba(34, 211, 238, 0.15); border-color: #22D3EE; color: #22D3EE; width: 100%;"
+                    onclick="alert('Letting Jarvis handle it...')">Let Jarvis handle it</button>
             </div>
         </div>
 
@@ -667,6 +753,11 @@
         const pulses = [];
         const interactiveObjects = [];
         const animationQueue = [];
+
+        // Speaking animation: bomb shockwave system
+        let speakingBombs = [];           // Array of active bomb impact objects
+        let speakingBombTimer = null;     // Interval ID for spawning bombs
+        let isSpeakingAnimActive = false; // Whether the bomb system is currently running
 
         // ==========================================
         // 1. THREE.JS SMOKY NEBULA EARTH (BRAIN)
@@ -756,13 +847,23 @@
         const coreGeo = new THREE.BufferGeometry();
         const coreCount = 3500;
         const corePosArray = new Float32Array(coreCount * 3);
-        for (let i = 0; i < coreCount * 3; i += 3) {
+        const coreDirs = [];
+        const coreDistances = [];
+        for (let i = 0; i < coreCount; i++) {
             let r = Math.pow(Math.random(), 1.2) * 0.65;
             let theta = Math.random() * 2 * Math.PI;
             let phi = Math.acos(2 * Math.random() - 1);
-            corePosArray[i] = r * Math.sin(phi) * Math.cos(theta);
-            corePosArray[i + 1] = r * Math.sin(phi) * Math.sin(theta);
-            corePosArray[i + 2] = r * Math.cos(phi);
+            let dx = Math.sin(phi) * Math.cos(theta);
+            let dy = Math.sin(phi) * Math.sin(theta);
+            let dz = Math.cos(phi);
+
+            coreDirs.push({ x: dx, y: dy, z: dz });
+            coreDistances.push(r);
+
+            let idx = i * 3;
+            corePosArray[idx] = dx * r;
+            corePosArray[idx + 1] = dy * r;
+            corePosArray[idx + 2] = dz * r;
         }
         coreGeo.setAttribute('position', new THREE.BufferAttribute(corePosArray, 3));
 
@@ -930,7 +1031,10 @@
                     assisted: isNote ? 'AI reference search' : 'AI execution drafts & status check',
                     auto: isNote ? 'Compounding knowledge database' : 'Fully autonomous tool pipeline trigger'
                 },
-                color: color
+                color: color,
+                taskObj: task,
+                isNote: isNote,
+                isSubtask: isSubtask
             };
             hitMesh.userData = { data: displayData, visualGroup: nodeGroup };
             nodesGroup.add(hitMesh);
@@ -1214,6 +1318,16 @@
             const mouseDist = Math.hypot(mouse.x, mouse.y);
             const hoverScale = Math.max(0, 1.0 - mouseDist / 1.6);
 
+            // Pre-process speaking bombs state updates once per frame
+            const nowTime = Date.now();
+            for (let b = speakingBombs.length - 1; b >= 0; b--) {
+                const bomb = speakingBombs[b];
+                const bombElapsed = (nowTime - bomb.startTime) / 1000;
+                if (bombElapsed >= bomb.duration) {
+                    speakingBombs.splice(b, 1);
+                }
+            }
+
             for (let i = 0; i < smokeCount; i++) {
                 let dist = distances[i] + speeds[i];
                 if (dist > maxDistance) dist = 0;
@@ -1251,23 +1365,134 @@
                     attraction = Math.pow(proximity, 1.8) * 0.42 * radialFactor * hoverScale;
                 }
 
-                // 3. Apply the world-space displacement vector
-                let xWorldAttracted = xWorld + dXWorld * attraction;
-                let yWorldAttracted = yWorld + dYWorld * attraction;
-                let zWorldAttracted = zWorld + dZWorld * attraction;
+                // --- Speaking Bomb Shockwave Displacement ---
+                let bombDisplaceX = 0, bombDisplaceY = 0, bombDisplaceZ = 0;
+                let bombBrightness = 0;
+
+                for (let b = 0; b < speakingBombs.length; b++) {
+                    const bomb = speakingBombs[b];
+                    const bombElapsed = (nowTime - bomb.startTime) / 1000;
+
+                    // Distance from this particle's world-space base position to the bomb impact center
+                    const dxB = xWorld - bomb.x;
+                    const dyB = yWorld - bomb.y;
+                    const dzB = zWorld - bomb.z;
+                    const distToBomb = Math.sqrt(dxB * dxB + dyB * dyB + dzB * dzB);
+
+                    if (distToBomb < bomb.blastRadius) {
+                        // Proximity factor: 1.0 at center, 0.0 at edge
+                        const proximity = 1.0 - (distToBomb / bomb.blastRadius);
+                        const smoothProximity = proximity * proximity; // quadratic falloff
+
+                        // Arc timing: 0→1 normalized
+                        const t = bombElapsed / bomb.duration;
+                        // Parabolic arc: peaks at t=0.5, returns to 0 at t=1.0
+                        const arc = 4 * t * (1 - t); // simple parabola, max=1 at t=0.5
+
+                        // Displacement direction: radially outward from world position center
+                        const particleDist = Math.sqrt(xWorld * xWorld + yWorld * yWorld + zWorld * zWorld) || 0.001;
+                        const normX = xWorld / particleDist;
+                        const normY = yWorld / particleDist;
+                        const normZ = zWorld / particleDist;
+
+                        const jumpAmount = arc * smoothProximity * bomb.jumpHeight;
+                        bombDisplaceX += normX * jumpAmount;
+                        bombDisplaceY += normY * jumpAmount;
+                        bombDisplaceZ += normZ * jumpAmount;
+
+                        // Brightness boost at peak
+                        bombBrightness = Math.max(bombBrightness, arc * smoothProximity * 0.8);
+                    }
+                }
+
+                // 3. Apply the world-space displacement vector + bomb shockwave
+                let xWorldAttracted = xWorld + dXWorld * attraction + bombDisplaceX;
+                let yWorldAttracted = yWorld + dYWorld * attraction + bombDisplaceY;
+                let zWorldAttracted = zWorld + dZWorld * attraction + bombDisplaceZ;
 
                 // 4. Rotate the attracted world position BACK into the local space of the nebula
                 posAttribute.array[idx] = xWorldAttracted * cosVal - zWorldAttracted * sinVal;
                 posAttribute.array[idx + 1] = yWorldAttracted;
-                posAttribute.array[idx + 2] = xWorldAttracted * sinVal + zWorldAttracted * cosVal + attraction * 0.55; // Pull towards mouse + Z-projection bulge
+                posAttribute.array[idx + 2] = xWorldAttracted * sinVal + zWorldAttracted * cosVal;
                 let factor = Math.pow(1.0 - (dist / maxDistance), 1.5);
-                colorAttribute.array[idx] = Math.min(1.0, baseColor.r * factor + attraction * 0.7);
-                colorAttribute.array[idx + 1] = Math.min(1.0, baseColor.g * factor + attraction * 0.85);
-                colorAttribute.array[idx + 2] = Math.min(1.0, baseColor.b * factor + attraction * 1.0);
+                colorAttribute.array[idx] = Math.min(1.0, baseColor.r * factor + attraction * 0.7 + bombBrightness);
+                colorAttribute.array[idx + 1] = Math.min(1.0, baseColor.g * factor + attraction * 0.85 + bombBrightness);
+                colorAttribute.array[idx + 2] = Math.min(1.0, baseColor.b * factor + attraction * 1.0 + bombBrightness);
             }
 
             posAttribute.needsUpdate = true;
             colorAttribute.needsUpdate = true;
+
+            // --- Animate Inner White Core Cloud in Sync ---
+            const corePosAttr = core.geometry.attributes.position;
+            const coreRotY = core.rotation.y;
+            const coreRotX = core.rotation.x;
+            const coreCosY = Math.cos(coreRotY), coreSinY = Math.sin(coreRotY);
+            const coreCosX = Math.cos(coreRotX), coreSinX = Math.sin(coreRotX);
+
+            for (let i = 0; i < coreCount; i++) {
+                const dist = coreDistances[i];
+                const dir = coreDirs[i];
+                const idx = i * 3;
+
+                // Base coordinates
+                const xBase = dir.x * dist;
+                const yBase = dir.y * dist;
+                const zBase = dir.z * dist;
+
+                // 1. Rotate locally by core rotation Y and X
+                // Y rotation
+                let xRot = xBase * coreCosY + zBase * coreSinY;
+                let yRot = yBase;
+                let zRot = -xBase * coreSinY + zBase * coreCosY;
+                // X rotation
+                let yRotX = yRot * coreCosX - zRot * coreSinX;
+                let zRotX = yRot * coreSinX + zRot * coreCosX;
+
+                // 2. Proximity and bomb displacement checking in rotated space
+                let bombDisplaceX = 0, bombDisplaceY = 0, bombDisplaceZ = 0;
+                for (let b = 0; b < speakingBombs.length; b++) {
+                    const bomb = speakingBombs[b];
+                    const bombElapsed = (nowTime - bomb.startTime) / 1000;
+
+                    const dxB = xRot - bomb.x;
+                    const dyB = yRotX - bomb.y;
+                    const dzB = zRotX - bomb.z;
+                    const distToBomb = Math.sqrt(dxB * dxB + dyB * dyB + dzB * dzB);
+
+                    if (distToBomb < (bomb.blastRadius * 1.15)) {
+                        const proximity = 1.0 - (distToBomb / (bomb.blastRadius * 1.15));
+                        const smoothProximity = proximity * proximity;
+                        const t = bombElapsed / bomb.duration;
+                        const arc = 4 * t * (1 - t);
+
+                        const particleDist = Math.sqrt(xRot * xRot + yRotX * yRotX + zRotX * zRotX) || 0.001;
+                        const normX = xRot / particleDist;
+                        const normY = yRotX / particleDist;
+                        const normZ = zRotX / particleDist;
+
+                        const jumpAmount = arc * smoothProximity * bomb.jumpHeight * 1.35; // increased to lead the movement
+                        bombDisplaceX += normX * jumpAmount;
+                        bombDisplaceY += normY * jumpAmount;
+                        bombDisplaceZ += normZ * jumpAmount;
+                    }
+                }
+
+                // Apply displacement
+                const finalX = xRot + bombDisplaceX;
+                const finalY = yRotX + bombDisplaceY;
+                const finalZ = zRotX + bombDisplaceZ;
+
+                // Rotate BACK into local core coordinates
+                // Reverse X rotation
+                const yBackX = finalY * coreCosX + finalZ * coreSinX;
+                const zBackX = -finalY * coreSinX + finalZ * coreCosX;
+                // Reverse Y rotation
+                corePosAttr.array[idx] = finalX * coreCosY - zBackX * coreSinY;
+                corePosAttr.array[idx + 1] = yBackX;
+                corePosAttr.array[idx + 2] = finalX * coreSinY + zBackX * coreCosY;
+            }
+            corePosAttr.needsUpdate = true;
 
             // Animate pulses
             pulses.forEach(p => {
@@ -2023,6 +2248,39 @@
             });
         }
 
+        function triggerSpeakingBomb() {
+            if (speakingBombs.length >= 8) return; // limit active bombs
+
+            // Pick a random point in world space for the bomb impact
+            const theta = Math.random() * 2 * Math.PI;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const impactRadius = 0.45 + Math.random() * 0.4;
+            
+            const impactX = impactRadius * Math.sin(phi) * Math.cos(theta);
+            const impactY = impactRadius * Math.sin(phi) * Math.sin(theta);
+            const impactZ = impactRadius * Math.cos(phi);
+
+            speakingBombs.push({
+                x: impactX,
+                y: impactY,
+                z: impactZ,
+                blastRadius: 0.28 + Math.random() * 0.1,
+                jumpHeight: 0.32 + Math.random() * 0.15,
+                duration: 0.9 + Math.random() * 0.4,
+                startTime: Date.now(),
+                settled: false
+            });
+        }
+
+        function startSpeakingAnimation() {
+            isSpeakingAnimActive = true;
+            triggerSpeakingBomb(); // trigger first instantly
+        }
+
+        function stopSpeakingAnimation() {
+            isSpeakingAnimActive = false;
+        }
+
         function animateCoreCollapse() {
             animationQueue.push({
                 type: 'CORE_COLLAPSE',
@@ -2051,7 +2309,12 @@
             const reg = liveNodeMap.get(taskId);
             if (!reg) return;
             const targetPos = reg.position;
-            targetCameraPos.set(targetPos.x - 0.25, targetPos.y, 1.35);
+
+            let parentPos = targetPos.clone();
+            if (reg.parentId && liveNodeMap.has(reg.parentId)) {
+                parentPos.copy(liveNodeMap.get(reg.parentId).position);
+            }
+            targetCameraPos.set(parentPos.x, parentPos.y, 1.35);
 
             let sonarRings = [];
             animationQueue.push({
@@ -2185,74 +2448,152 @@
             }
         });
 
+        function toggleTaskNotes(event, taskId) {
+            event.stopPropagation();
+            const notesEl = document.getElementById(`task-notes-${taskId}`);
+            if (notesEl) {
+                const isHidden = notesEl.style.display === 'none' || !notesEl.style.display;
+                notesEl.style.display = isHidden ? 'flex' : 'none';
+            }
+        }
+
         function openDetailPanel(data, nodePos) {
             const panel = document.getElementById('side-panel');
-            document.getElementById('panel-title').innerText = data.title || 'Agent task';
-            document.getElementById('panel-type').innerText = data.type || 'TASK';
-            document.getElementById('panel-desc').innerText = data.desc || 'Task details configuration.';
-
-            // Focus camera on node
-            if (nodePos) {
-                if (data.id === 'brain') {
-                    targetCameraPos.set(0, 0, 1.8);
-                } else {
-                    targetCameraPos.set(nodePos.x - 0.25, nodePos.y, 1.35);
-                }
-            }
-
-            // Build Tags
-            const tagsCont = document.getElementById('panel-tags');
-            tagsCont.innerHTML = '';
-            if (data.tags && data.tags.length > 0) {
-                data.tags.forEach(t => {
-                    tagsCont.innerHTML += `<div class="pill">${t}</div>`;
-                });
-            } else {
-                tagsCont.innerHTML = `<div class="pill">internal-task</div>`;
-            }
-
-            // Build Replaces
-            const replEl = document.getElementById('panel-replaces');
-            if (replEl) replEl.innerText = data.replaces || 'Replaces manual workflow checks and legacy processes.';
 
             // Color scheme
             const nodeLabelColor = data.color || data.parentColor || '#60A5FA';
             document.getElementById('panel-type').style.borderColor = nodeLabelColor;
             document.getElementById('panel-type').style.color = nodeLabelColor;
 
-            // 3 Nodes section
-            const nodesGrid = document.getElementById('panel-nodes');
-            if (nodesGrid) {
-                if (data.nodes) {
-                    nodesGrid.innerHTML = `
-                        <div class="node-label">HUMAN-LED</div>
-                        <div class="node-desc">${data.nodes.human}</div>
-                        <div class="node-label">HUMAN-ASSISTED</div>
-                        <div class="node-desc">${data.nodes.assisted}</div>
-                        <div class="node-label">FULLY AUTONOMOUS</div>
-                        <div class="node-desc">${data.nodes.auto}</div>
-                    `;
+            // Focus camera on node (position parent task in middle)
+            if (nodePos) {
+                if (data.id === 'brain') {
+                    targetCameraPos.set(0, 0, 1.8);
                 } else {
-                    nodesGrid.innerHTML = `
-                        <div class="node-label">SUB-TASK</div>
-                        <div class="node-desc">Under parent branch. Fully automated contextual execution.</div>
-                    `;
+                    let parentPos = nodePos.clone();
+                    const reg = liveNodeMap.get(data.id);
+                    if (reg && reg.parentId && liveNodeMap.has(reg.parentId)) {
+                        parentPos.copy(liveNodeMap.get(reg.parentId).position);
+                    }
+                    targetCameraPos.set(parentPos.x, parentPos.y, 1.35);
                 }
             }
 
-            // Show brain section, hide tasks section
-            document.getElementById('panel-brain-section').style.display = '';
-            document.getElementById('panel-tasks-section').style.display = 'none';
+            // Determine if this is a DB Task/Subtask (contains taskObj)
+            if (data.taskObj) {
+                const t = data.taskObj;
+                document.getElementById('panel-title').innerText = `#${t.id} — ${t.content}`;
+                document.getElementById('panel-type').innerText = data.type || 'TASK';
+                document.getElementById('panel-desc').innerText = `Active database task thread.`;
 
-            // Update action button
-            document.getElementById('action-btn').textContent = data.id === 'brain' ? 'Open Full Command Center' : 'Activate This Agent';
-            document.getElementById('action-btn').onclick = () => {
-                if (data.id === 'brain') {
-                    appendChatMessage('Opening neural core context...', 'jarvis');
-                } else {
-                    sendToJarvis(`Tell me about the ${data.title} task`);
+                // Populate Task Details Meta
+                const metaEl = document.getElementById('specific-task-meta');
+                metaEl.innerHTML = `
+                    <div><strong>Priority:</strong> <span style="text-transform: capitalize; color: ${nodeLabelColor}; font-weight: bold;">${t.priority || 'medium'}</span></div>
+                    <div><strong>Status:</strong> <span style="text-transform: capitalize; font-weight: bold;">${t.status || 'open'}</span></div>
+                    ${t.due_date ? `<div><strong>Deadline:</strong> ${t.due_date}</div>` : ''}
+                    ${t.scheduled_at ? `<div><strong>Scheduled At:</strong> ${t.scheduled_at}</div>` : ''}
+                    ${t.effort_estimate ? `<div><strong>Effort Estimate:</strong> ${t.effort_estimate}</div>` : ''}
+                    <div><strong>Created At:</strong> ${t.created_at || 'N/A'}</div>
+                `;
+
+                // Populate Notes and Subtasks
+                const childrenEl = document.getElementById('specific-task-children');
+                childrenEl.innerHTML = '';
+
+                // Subtasks
+                if (t.subtasks && t.subtasks.length > 0) {
+                    let subtasksHTML = `<div style="font-weight: 500; font-size: 11px; margin-bottom: 4px; color: #E2E8F0;">Subtasks:</div>`;
+                    t.subtasks.forEach(sub => {
+                        const doneDecor = sub.status === 'done' ? 'text-decoration: line-through; opacity: 0.5;' : '';
+                        subtasksHTML += `
+                            <div style="font-size: 11px; display: flex; align-items: center; gap: 6px; padding-left: 6px; ${doneDecor}">
+                                <span style="width: 4px; height: 4px; border-radius: 50%; background: #A78BFA;"></span>
+                                <span>#${sub.id} — ${sub.content}</span>
+                            </div>
+                        `;
+                    });
+                    childrenEl.innerHTML += `<div style="background: rgba(255,255,255,0.01); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.03);">${subtasksHTML}</div>`;
                 }
-            };
+
+                // Notes
+                if (t.notes && t.notes.length > 0) {
+                    let notesHTML = `<div style="font-weight: 500; font-size: 11px; margin-bottom: 4px; color: #E2E8F0;">Notes:</div>`;
+                    t.notes.forEach(n => {
+                        notesHTML += `
+                            <div style="font-size: 11px; display: flex; align-items: flex-start; gap: 6px; padding: 4px 6px; background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.1); border-radius: 4px; margin-bottom: 4px; color: #F59E0B;">
+                                <span>✦</span>
+                                <div>${n.content}</div>
+                            </div>
+                        `;
+                    });
+                    childrenEl.innerHTML += `<div>${notesHTML}</div>`;
+                }
+
+                if (childrenEl.innerHTML === '') {
+                    childrenEl.innerHTML = `<div style="color: var(--text-muted); font-size: 11px; font-style: italic;">No subtasks or notes connected.</div>`;
+                }
+
+                // Show/hide sections
+                document.getElementById('panel-brain-section').style.display = 'none';
+                document.getElementById('panel-tasks-section').style.display = 'none';
+                document.getElementById('panel-specific-task-section').style.display = 'flex';
+                document.querySelector('.action-box').style.display = 'none';
+            } else {
+                // FALLBACK/DEFAULT for General Nodes (Brain core, files etc.)
+                document.getElementById('panel-title').innerText = data.title || 'THE BRAIN';
+                document.getElementById('panel-type').innerText = data.type || 'CORE';
+                document.getElementById('panel-desc').innerText = data.desc || 'Central context engine.';
+
+                // Build Tags
+                const tagsCont = document.getElementById('panel-tags');
+                tagsCont.innerHTML = '';
+                if (data.tags && data.tags.length > 0) {
+                    data.tags.forEach(t => {
+                        tagsCont.innerHTML += `<div class="pill">${t}</div>`;
+                    });
+                } else {
+                    tagsCont.innerHTML = `<div class="pill">internal-task</div>`;
+                }
+
+                // Build Replaces
+                const replEl = document.getElementById('panel-replaces');
+                if (replEl) replEl.innerText = data.replaces || 'Replaces manual process.';
+
+                // 3 Nodes section
+                const nodesGrid = document.getElementById('panel-nodes');
+                if (nodesGrid) {
+                    if (data.nodes) {
+                        nodesGrid.innerHTML = `
+                            <div class="node-label">HUMAN-LED</div>
+                            <div class="node-desc">${data.nodes.human}</div>
+                            <div class="node-label">HUMAN-ASSISTED</div>
+                            <div class="node-desc">${data.nodes.assisted}</div>
+                            <div class="node-label">FULLY AUTONOMOUS</div>
+                            <div class="node-desc">${data.nodes.auto}</div>
+                        `;
+                    } else {
+                        nodesGrid.innerHTML = `
+                            <div class="node-label">SUB-TASK</div>
+                            <div class="node-desc">Under parent branch. Fully automated contextual execution.</div>
+                        `;
+                    }
+                }
+
+                // Show/hide sections
+                document.getElementById('panel-brain-section').style.display = '';
+                document.getElementById('panel-tasks-section').style.display = 'none';
+                document.getElementById('panel-specific-task-section').style.display = 'none';
+                document.querySelector('.action-box').style.display = '';
+                document.getElementById('action-btn').textContent = data.id === 'brain' ? 'Open Full Command Center' : 'Activate This Agent';
+                document.getElementById('action-btn').onclick = () => {
+                    if (data.id === 'brain') {
+                        appendChatMessage('Opening neural core context...', 'jarvis');
+                    } else {
+                        sendToJarvis(`Tell me about the ${data.title} task`);
+                    }
+                };
+            }
 
             panel.classList.add('open');
         }
@@ -2306,6 +2647,8 @@
 
             document.getElementById('panel-brain-section').style.display = 'none';
             document.getElementById('panel-tasks-section').style.display = 'flex';
+            document.getElementById('panel-specific-task-section').style.display = 'none';
+            document.querySelector('.action-box').style.display = '';
 
             // Update action button
             document.getElementById('action-btn').textContent = 'Add New Task';
@@ -2336,28 +2679,114 @@
                     return;
                 }
 
-                list.innerHTML = '';
+                // Build mapping by ID for fast lookup and nesting
+                const taskMap = new Map();
                 tasks.forEach(t => {
-                    if (t.status === 'done') return; // only show open tasks
+                    t.subtasks = [];
+                    taskMap.set(t.id, t);
+                });
+
+                // Link children to parents
+                const roots = [];
+                tasks.forEach(t => {
+                    if (t.parent_id && taskMap.has(t.parent_id)) {
+                        taskMap.get(t.parent_id).subtasks.push(t);
+                    } else {
+                        roots.push(t);
+                    }
+                });
+
+                list.innerHTML = '';
+
+                // Helper to render metadata badges, deadlines, schedules
+                const renderMeta = (t) => {
+                    const priorityClass = t.priority === 'high' ? 'badge-high' : t.priority === 'medium' ? 'badge-medium' : 'badge-low';
+                    const statusClass = t.status === 'done' ? 'badge-done' : 'badge-open';
+
+                    let metaHTML = `
+                        <div class="task-live-meta">
+                            <span class="task-badge ${priorityClass}">${t.priority || 'medium'}</span>
+                            <span class="task-badge ${statusClass}">${t.status || 'open'}</span>
+                    `;
+                    if (t.effort_estimate) {
+                        metaHTML += `<span style="color: var(--text-muted); font-size: 9px;">Effort: ${t.effort_estimate}</span>`;
+                    }
+                    if (t.due_date) {
+                        metaHTML += `<span style="color: var(--text-muted); font-size: 9px; font-weight: 500;">Deadline: ${t.due_date}</span>`;
+                    }
+                    if (t.scheduled_at) {
+                        metaHTML += `<span style="color: var(--text-muted); font-size: 9px;">Scheduled: ${t.scheduled_at}</span>`;
+                    }
+                    metaHTML += `</div>`;
+                    return metaHTML;
+                };
+
+                // Helper to render nested notes list
+                const renderNotes = (t) => {
+                    const notes = t.notes || [];
+                    if (notes.length === 0) return '';
+
+                    let notesHTML = `
+                        <button class="view-notes-btn" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); color: #F59E0B; font-size: 10px; padding: 3px 8px; border-radius: 4px; margin-top: 6px; cursor: pointer; transition: all 0.2s;" onclick="toggleTaskNotes(event, ${t.id})">
+                            View Notes (${notes.length})
+                        </button>
+                        <div class="task-live-notes" id="task-notes-${t.id}" style="display: none;">
+                    `;
+                    notes.forEach(n => {
+                        const doneClass = n.status === 'done' ? 'done' : '';
+                        notesHTML += `
+                            <div class="task-live-note-item ${doneClass}">
+                                <span class="task-live-note-bullet">✦</span>
+                                <div>
+                                    <div>${n.content}</div>
+                                    ${n.tags ? `<div style="font-size: 8px; opacity: 0.6; margin-top: 2px;">Tags: ${n.tags}</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    notesHTML += `</div>`;
+                    return notesHTML;
+                };
+
+                // Helper to render nested subtasks list
+                const renderSubtasksList = (t) => {
+                    const subtasks = t.subtasks || [];
+                    if (subtasks.length === 0) return '';
+                    let subtasksHTML = `<div class="task-live-subtasks">`;
+                    subtasks.forEach(sub => {
+                        const doneDotClass = sub.status === 'done' ? 'done' : '';
+                        const textDecor = sub.status === 'done' ? 'text-decoration: line-through; opacity: 0.5;' : '';
+                        subtasksHTML += `
+                            <div class="task-live-subtask-item">
+                                <span class="task-live-subtask-dot ${doneDotClass}"></span>
+                                <div style="flex: 1; ${textDecor}">
+                                    <strong>#${sub.id}</strong> — ${sub.content}
+                                    ${renderMeta(sub)}
+                                    ${renderNotes(sub)}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    subtasksHTML += `</div>`;
+                    return subtasksHTML;
+                };
+
+                roots.forEach(t => {
+                    if (t.status === 'done') return; // only show open tasks at root
                     const div = document.createElement('div');
-                    div.className = `task-live-item priority-${t.priority || 'low'}`;
+                    div.className = `task-live-item priority-${t.priority || 'medium'}`;
                     div.id = `task-live-${t.id}`;
 
-                    const priorityBadgeClass = t.priority === 'high' ? 'badge-high' : t.priority === 'medium' ? 'badge-medium' : 'badge-low';
-                    const statusBadgeClass = t.status === 'done' ? 'badge-done' : 'badge-open';
-
                     div.innerHTML = `
-                        <div class="task-live-title">#${t.id} — ${t.content}</div>
-                        <div class="task-live-meta">
-                            <span class="task-badge ${priorityBadgeClass}">${t.priority || 'low'}</span>
-                            <span class="task-badge ${statusBadgeClass}">${t.status || 'open'}</span>
-                            ${t.due_date ? `<span style="color: var(--text-muted);">Due: ${t.due_date}</span>` : ''}
-                            ${t.effort_estimate ? `<span style="color: var(--text-muted);">${t.effort_estimate}</span>` : ''}
-                        </div>
+                        <div class="task-live-title"><strong>#${t.id}</strong> — ${t.content}</div>
+                        ${renderMeta(t)}
+                        ${renderNotes(t)}
+                        ${renderSubtasksList(t)}
                     `;
                     list.appendChild(div);
                 });
             } catch (err) {
+                console.error(err);
                 list.innerHTML = `<div style="color: #F87171; font-size: 12px;">Could not load tasks. Is Jarvis running?</div>`;
             }
         }
@@ -2372,7 +2801,9 @@
         const orbLabel = document.getElementById('orb-label');
 
         let lastMessageCount = 0;
+        let isFirstPoll = true;
         let orbCurrentState = 'idle';
+        let lastSpokenWord = '';
 
         // Poll /state every 800ms for live updates from voice commands
         let wasSleeping = false;
@@ -2384,9 +2815,20 @@
                     // Update orb state
                     const orb = data.orb || 'idle';
                     if (orb !== orbCurrentState) {
+                        if (orb === 'speaking') {
+                            startSpeakingAnimation();
+                        } else if (orbCurrentState === 'speaking') {
+                            stopSpeakingAnimation();
+                        }
                         orbCurrentState = orb;
                         orbIndicator.className = 'orb-indicator ' + orb;
                         orbLabel.textContent = orb === 'speaking' ? 'SPEAKING' : orb === 'thinking' ? 'THINKING' : 'IDLE';
+                    }
+
+                    // Trigger a bomb instantly for every new word spoken
+                    if (orb === 'speaking' && data.current_word && data.current_word !== lastSpokenWord) {
+                        lastSpokenWord = data.current_word;
+                        triggerSpeakingBomb();
                     }
 
                     // Handle sleep mode visual changes
@@ -2409,12 +2851,15 @@
                             appendChatMessage(msg.text, role);
 
                             // Voice / Text navigation triggers
-                            if (role === 'user') {
+                            if (!isFirstPoll && role === 'user') {
                                 const textLower = msg.text.toLowerCase();
-                                if (textLower.includes('show plan') || textLower.includes('open plan') || textLower.includes('go to plan')) {
+                                if (textLower.includes('show plan') || textLower.includes('open plan') || textLower.includes('go to plan') || textLower.includes('go to the plan')) {
                                     animateWarpExit();
                                 } else if (textLower.includes('close panel') || textLower.includes('exit focus') || textLower.includes('hide panel') || textLower.includes('close focus')) {
                                     closePanel();
+                                } else if (textLower.includes('pan')) {
+                                    targetCameraPos.set(0, 0, 2.5);
+                                    openTasksPanel();
                                 } else if (textLower.includes('show task database') || textLower.includes('open task database') || textLower.includes('show tasks') || textLower.includes('open tasks')) {
                                     targetCameraPos.set(0, 0, 2.5);
                                     openTasksPanel();
@@ -2429,9 +2874,10 @@
                         }
                         lastMessageCount = messages.length;
                     }
+                    isFirstPoll = false;
 
                     // Dispatch custom Three.js UI Action animations
-                    if (data.ui_action) {
+                    if (!isFirstPoll && data.ui_action) {
                         const act = data.ui_action;
                         if (act.type === 'task_created') {
                             const tempTask = { id: act.task_id, content: 'New Task', priority: act.priority || 'medium', status: 'open' };
@@ -2471,12 +2917,61 @@
                             animateNoteSearch();
                         } else if (act.type === 'google_search') {
                             animateGoogleSearch();
+                        } else if (act.type === 'control_interface') {
+                            const action = act.action;
+                            const payload = act.payload || {};
+                            if (action === 'go_to_plan') {
+                                animateWarpExit();
+                            } else if (action === 'go_to_brain') {
+                                targetCameraPos.set(0, 0, 1.8);
+                                const brainData = brainHitMesh.userData.data;
+                                openDetailPanel(brainData);
+                            } else if (action === 'go_to_apis') {
+                                window.location.href = 'provider_comparison.html';
+                            } else if (action === 'open_side_panel') {
+                                targetCameraPos.set(0, 0, 2.5);
+                                openTasksPanel();
+                            } else if (action === 'open_notes_panel') {
+                                openNotesPanel();
+                            } else if (action === 'open_settings_panel') {
+                                openSettingsPanel();
+                            } else if (action === 'focus_task') {
+                                if (payload.task_id) {
+                                    if (liveNodeMap.has(payload.task_id)) {
+                                        animateFocusTask(payload.task_id);
+                                    } else {
+                                        openTasksPanel();
+                                        setTimeout(() => {
+                                            const el = document.getElementById(`task-live-${payload.task_id}`);
+                                            if (el) {
+                                                el.classList.add('focused-task');
+                                                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                                setTimeout(() => el.classList.remove('focused-task'), 4000);
+                                            }
+                                        }, 350);
+                                    }
+                                }
+                            } else if (action === 'open_task_detail') {
+                                if (payload.task_id) openTaskDetailById(payload.task_id);
+                            } else if (action === 'close_side_panel') {
+                                closePanel();
+                            } else if (action === 'exit_completely') {
+                                animateCoreCollapse();
+                            } else if (action === 'wake_up') {
+                                animateSleepMode(false);
+                            } else if (action === 'go_to_sleep') {
+                                animateSleepMode(true);
+                            } else if (action === 'flash_notification') {
+                                showFloatingNotification(payload.message || '');
+                            } else if (action === 'reset_camera') {
+                                targetCameraPos.set(0, 0, 2.5);
+                            }
                         }
                     }
 
                     // Highlight focused tasks
                     const focusIds = data.focus_task_ids || [];
-                    if (focusIds.length > 0) {
+                    if (!isFirstPoll && focusIds.length > 0) {
                         focusIds.forEach(id => {
                             if (liveNodeMap.has(id)) {
                                 animateFocusTask(id);
@@ -2497,7 +2992,8 @@
                 })
                 .catch(() => { })
                 .finally(() => {
-                    setTimeout(pollState, 800);
+                    const delay = (orbCurrentState === 'speaking') ? 80 : 800;
+                    setTimeout(pollState, delay);
                 });
         }
 
@@ -2560,6 +3056,241 @@
 
         // Open the tasks panel by default on load
         openTasksPanel();
+
+        // ==========================================
+        // 7. NEW PANELS: NOTES, SETTINGS, TASK DETAIL, NOTIFICATIONS
+        // ==========================================
+
+        // --- Notes Panel ---
+        async function openNotesPanel() {
+            const panel = document.getElementById('side-panel');
+            document.getElementById('panel-title').innerText = 'NOTES';
+            document.getElementById('panel-type').innerText = 'MEMORY';
+            document.getElementById('panel-type').style.borderColor = '#F59E0B';
+            document.getElementById('panel-type').style.color = '#F59E0B';
+            document.getElementById('panel-desc').innerText = 'All saved notes from the second brain, sorted by date.';
+
+            document.getElementById('panel-brain-section').style.display = 'none';
+            document.getElementById('panel-tasks-section').style.display = 'none';
+            document.getElementById('panel-specific-task-section').style.display = 'none';
+            document.querySelector('.action-box').style.display = '';
+
+            // Hijack the tasks-section div as a notes list container
+            const notesContainer = document.getElementById('panel-tasks-section');
+            notesContainer.style.display = 'flex';
+            const listEl = document.getElementById('tasks-live-list');
+
+            document.getElementById('action-btn').textContent = 'Add a Note';
+            document.getElementById('action-btn').onclick = () => {
+                const input = document.getElementById('chat-input');
+                if (input) { input.value = 'Save a note: '; input.focus(); }
+            };
+
+            listEl.innerHTML = '<div style="color: var(--text-muted); font-size: 12px;">Loading notes...</div>';
+            panel.classList.add('open');
+
+            try {
+                const res = await fetch('/notes');
+                const data = await res.json();
+                const notes = data.notes || [];
+
+                if (notes.length === 0) {
+                    listEl.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; font-style: italic;">No notes yet. Ask Jarvis to save one.</div>';
+                    return;
+                }
+
+                listEl.innerHTML = '';
+                notes.forEach(n => {
+                    const div = document.createElement('div');
+                    div.className = 'task-live-item';
+                    div.style.borderLeftColor = n.status === 'done' ? 'rgba(255,255,255,0.1)' : '#F59E0B';
+                    const dateStr = n.created_at ? new Date(n.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '';
+                    div.innerHTML = `
+                        <div class="task-live-title" style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+                            <span>${n.content}</span>
+                            ${n.status === 'done' ? '<span style="font-size:9px;color:#6B7280;border:1px solid #374151;padding:2px 6px;border-radius:4px;flex-shrink:0;">DONE</span>' : ''}
+                        </div>
+                        <div class="task-live-meta">
+                            ${n.tags ? `<span style="color:#F59E0B;font-size:9px;">🏷 ${n.tags}</span>` : ''}
+                            ${dateStr ? `<span style="color:var(--text-muted);font-size:9px;">${dateStr}</span>` : ''}
+                            ${n.task_id ? `<span style="color:#60A5FA;font-size:9px;">Linked to Task #${n.task_id}</span>` : ''}
+                        </div>
+                    `;
+                    listEl.appendChild(div);
+                });
+            } catch (err) {
+                listEl.innerHTML = `<div style="color:#F87171;font-size:12px;">Could not load notes.</div>`;
+            }
+        }
+
+        // --- Settings Panel ---
+        async function openSettingsPanel() {
+            const panel = document.getElementById('side-panel');
+            document.getElementById('panel-title').innerText = 'SETTINGS';
+            document.getElementById('panel-type').innerText = 'CONFIG';
+            document.getElementById('panel-type').style.borderColor = '#A78BFA';
+            document.getElementById('panel-type').style.color = '#A78BFA';
+            document.getElementById('panel-desc').innerText = 'Adjust Jarvis voice, wake word sensitivity, theme, and AI provider.';
+
+            document.getElementById('panel-brain-section').style.display = 'none';
+            document.getElementById('panel-tasks-section').style.display = 'none';
+            document.getElementById('panel-specific-task-section').style.display = 'none';
+            document.querySelector('.action-box').style.display = 'none';
+
+            // Render settings form inline in the panel
+            // We'll use the panel-brain-section div as a host
+            const host = document.getElementById('panel-brain-section');
+            host.style.display = 'block';
+
+            host.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">Loading settings...</div>';
+            panel.classList.add('open');
+
+            try {
+                const res = await fetch('/settings');
+                const data = await res.json();
+                const s = data.settings || {};
+
+                host.innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:24px;margin-top:8px;">
+
+                    <div>
+                        <div class="section-title">AI PROVIDER</div>
+                        <select id="cfg-provider" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#fff;padding:10px 14px;border-radius:6px;font-size:13px;cursor:pointer;">
+                            <option value="gemini" ${s.provider==='gemini'?'selected':''}>Gemini (Cloud)</option>
+                            <option value="ollama" ${s.provider==='ollama'||!s.provider?'selected':''}>Ollama (Local)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <div class="section-title">VOICE SPEED — <span id="cfg-speed-val">${s.voice_speed||175}</span> WPM</div>
+                        <input type="range" id="cfg-speed" min="100" max="300" step="5" value="${s.voice_speed||175}"
+                            style="width:100%;accent-color:#A78BFA;"
+                            oninput="document.getElementById('cfg-speed-val').textContent=this.value">
+                    </div>
+
+                    <div>
+                        <div class="section-title">WAKE WORD SENSITIVITY — <span id="cfg-thresh-val">${((s.wake_word_threshold||0.5)*100).toFixed(0)}%</span></div>
+                        <input type="range" id="cfg-threshold" min="0.1" max="0.9" step="0.05" value="${s.wake_word_threshold||0.5}"
+                            style="width:100%;accent-color:#A78BFA;"
+                            oninput="document.getElementById('cfg-thresh-val').textContent=Math.round(this.value*100)+'%'">
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Lower = more sensitive. Higher = requires clearer 'Hey Jarvis'.</div>
+                    </div>
+
+                    <div>
+                        <div class="section-title">THEME</div>
+                        <select id="cfg-theme" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#fff;padding:10px 14px;border-radius:6px;font-size:13px;cursor:pointer;">
+                            <option value="cyberpunk" ${s.theme==='cyberpunk'?'selected':''}>Cyberpunk</option>
+                            <option value="dark" ${s.theme==='dark'?'selected':''}>Dark</option>
+                            <option value="light" ${s.theme==='light'?'selected':''}>Light</option>
+                        </select>
+                    </div>
+
+                    <button onclick="saveSettingsFromPanel()" style="background:rgba(167,139,250,0.2);border:1px solid #A78BFA;color:#A78BFA;padding:12px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s;width:100%;" onmouseover="this.style.background='rgba(167,139,250,0.35)'" onmouseout="this.style.background='rgba(167,139,250,0.2)'">
+                        Save Settings
+                    </button>
+
+                    <div id="settings-save-status" style="font-size:11px;text-align:center;min-height:16px;"></div>
+                </div>
+                `;
+            } catch (err) {
+                host.innerHTML = `<div style="color:#F87171;font-size:12px;">Could not load settings.</div>`;
+            }
+        }
+
+        async function saveSettingsFromPanel() {
+            const provider = document.getElementById('cfg-provider')?.value;
+            const voice_speed = parseInt(document.getElementById('cfg-speed')?.value);
+            const wake_word_threshold = parseFloat(document.getElementById('cfg-threshold')?.value);
+            const theme = document.getElementById('cfg-theme')?.value;
+            const status = document.getElementById('settings-save-status');
+
+            try {
+                const res = await fetch('/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider, voice_speed, wake_word_threshold, theme })
+                });
+                if (res.ok) {
+                    if (status) { status.style.color = '#34D399'; status.textContent = '✓ Settings saved'; }
+                    setTimeout(() => { if (status) status.textContent = ''; }, 2500);
+                } else {
+                    if (status) { status.style.color = '#F87171'; status.textContent = 'Failed to save'; }
+                }
+            } catch (err) {
+                if (status) { status.style.color = '#F87171'; status.textContent = 'Error saving settings'; }
+            }
+        }
+
+        // --- Task Detail by ID ---
+        async function openTaskDetailById(taskId) {
+            try {
+                const res = await fetch('/tasks');
+                const data = await res.json();
+                const tasks = data.tasks || [];
+                const task = tasks.find(t => t.id === taskId);
+                if (!task) {
+                    showFloatingNotification(`Task #${taskId} not found.`);
+                    return;
+                }
+                // Build a fake node data object and open the specific-task panel
+                openDetailPanel({
+                    id: `task-${task.id}`,
+                    title: task.content,
+                    type: 'task',
+                    priority: task.priority,
+                    status: task.status,
+                    due_date: task.due_date,
+                    scheduled_at: task.scheduled_at,
+                    effort_estimate: task.effort_estimate,
+                    notes: task.notes || [],
+                    subtasks: tasks.filter(t => t.parent_id === task.id),
+                    rawTask: task
+                });
+            } catch (err) {
+                showFloatingNotification('Could not load task details.');
+            }
+        }
+
+        // --- Floating Notification Toast ---
+        function showFloatingNotification(message) {
+            if (!message) return;
+            let toast = document.getElementById('jarvis-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'jarvis-toast';
+                toast.style.cssText = `
+                    position: fixed;
+                    top: 90px;
+                    left: 50%;
+                    transform: translateX(-50%) translateY(-20px);
+                    background: rgba(15, 17, 28, 0.92);
+                    border: 1px solid rgba(167, 139, 250, 0.4);
+                    backdrop-filter: blur(20px);
+                    -webkit-backdrop-filter: blur(20px);
+                    color: #E2E8F0;
+                    font-size: 13px;
+                    font-weight: 500;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    z-index: 1000;
+                    opacity: 0;
+                    transition: opacity 0.3s ease, transform 0.3s ease;
+                    pointer-events: none;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(167,139,250,0.15);
+                    max-width: 420px;
+                    text-align: center;
+                `;
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateX(-50%) translateY(0)';
+            clearTimeout(toast._hideTimer);
+            toast._hideTimer = setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(-50%) translateY(-20px)';
+            }, 3500);
+        }
     </script>
 </body>
 

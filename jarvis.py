@@ -173,8 +173,24 @@ def speak(text: str):
                 
                 path_str = os.path.abspath(temp_path)
                 ctypes.windll.winmm.mciSendStringW(f'open "{path_str}" type mpegvideo alias jarvis_voice', None, 0, 0)
+                
+                # Start simulated word updater thread for ElevenLabs playback
+                def simulate_words():
+                    global CURRENT_SPOKEN_WORD
+                    words = text.split()
+                    for i, w in enumerate(words):
+                        if not played_via_eleven: # if aborted or cleaned up
+                            break
+                        CURRENT_SPOKEN_WORD = f"{w}_{i}"
+                        # Average speed: 170 WPM -> ~350ms per word
+                        time.sleep(0.35)
+                
+                sim_thread = threading.Thread(target=simulate_words, daemon=True)
+                sim_thread.start()
+
                 ctypes.windll.winmm.mciSendStringW('play jarvis_voice wait', None, 0, 0)
                 ctypes.windll.winmm.mciSendStringW('close jarvis_voice', None, 0, 0)
+                played_via_eleven = False # stops simulation thread
                 
                 try:
                     os.remove(temp_path)
@@ -195,12 +211,29 @@ def speak(text: str):
             with SETTINGS_LOCK:
                 speed = SETTINGS.get("voice_speed", 175)
             engine.setProperty('rate', int(speed))
+            
+            # Update CURRENT_SPOKEN_WORD for every word spoken
+            def on_word(name, location, length):
+                global CURRENT_SPOKEN_WORD
+                words = text.split()
+                # Estimate current word index based on character location
+                char_idx = 0
+                for i, w in enumerate(words):
+                    char_idx += len(w) + 1
+                    if char_idx >= location:
+                        CURRENT_SPOKEN_WORD = f"{w}_{i}"
+                        break
+
+            engine.connect('started-word', on_word)
             engine.say(text)
             engine.runAndWait()
             engine.stop()
         except Exception as e:
             print(f"[Local TTS Error] {e}")
             
+    # Reset spoken word after speech finishes
+    global CURRENT_SPOKEN_WORD
+    CURRENT_SPOKEN_WORD = ""
     set_orb("idle")
 
 
@@ -267,6 +300,12 @@ def jarvis_tool_listener(name, args, result):
             UI_ACTION = {
                 "type": "google_search"
             }
+        elif name == "control_interface":
+            UI_ACTION = {
+                "type": "control_interface",
+                "action": args.get("action"),
+                "payload": args.get("payload") or {}
+            }
 
 coordinator.register_tool_listener(jarvis_tool_listener)
 
@@ -302,6 +341,11 @@ def command_center():
 @app.route("/plan.html")
 def plan_page():
     return send_from_directory(BASE_DIR, "plan.html")
+
+
+@app.route("/provider_comparison.html")
+def provider_comparison_page():
+    return send_from_directory(BASE_DIR, "provider_comparison.html")
 
 
 @app.route("/tasks", methods=["GET"])
@@ -347,16 +391,20 @@ def settings_route():
         return jsonify({"settings": load_settings()})
 
 
+# Global variable to track the currently spoken word
+CURRENT_SPOKEN_WORD = ""
+
 @app.route("/state", methods=["GET"])
 def state():
-    global FOCUS_TASK_IDS, UI_ACTION, JARVIS_SLEEPING
+    global FOCUS_TASK_IDS, UI_ACTION, JARVIS_SLEEPING, CURRENT_SPOKEN_WORD
     with STATE_LOCK:
         res = jsonify({
             "orb": ORB_STATE,
             "messages": CONVO,
             "focus_task_ids": FOCUS_TASK_IDS,
             "ui_action": UI_ACTION,
-            "sleeping": JARVIS_SLEEPING
+            "sleeping": JARVIS_SLEEPING,
+            "current_word": CURRENT_SPOKEN_WORD
         })
         # Clear focused task IDs and UI action after serving so they only trigger once
         FOCUS_TASK_IDS = []
