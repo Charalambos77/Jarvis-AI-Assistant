@@ -667,7 +667,6 @@ def mic_loop(window):
                 while in_conversation:
                     transcript = record_and_transcribe()
                     if not transcript:
-                        speak("Sorry, I didn't catch that.")
                         continue
 
                     transcript_lower = transcript.lower()
