@@ -321,6 +321,68 @@ TOOLS = [
             "required": ["pattern"]
         }
     },
+    {
+        "name": "control_interface",
+        "description": (
+            "Control every part of the app's UI: navigate between pages, open/close panels, "
+            "focus tasks, show notifications, and control sleep mode. "
+            "ALWAYS call this tool when the user asks to go somewhere, open/close something, "
+            "or control the interface. Never just describe navigation — actually invoke this tool. "
+            "Pages: Brain Core (home/3D map), Plan Page, APIs/MCPs Page. "
+            "Side Panels: Tasks list, Notes list, Settings, specific Task Detail. "
+            "Use payload.task_id (int) with focus_task or open_task_detail. "
+            "Use payload.message (str) with flash_notification."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "go_to_plan",
+                        "go_to_brain",
+                        "go_to_apis",
+                        "open_side_panel",
+                        "close_side_panel",
+                        "open_notes_panel",
+                        "open_settings_panel",
+                        "focus_task",
+                        "open_task_detail",
+                        "exit_completely",
+                        "wake_up",
+                        "go_to_sleep",
+                        "flash_notification",
+                        "reset_camera"
+                    ],
+                    "description": (
+                        "go_to_plan: Navigate to the Plan page. "
+                        "go_to_brain: Return to Brain Core (3D map home). "
+                        "go_to_apis: Navigate to the APIs/MCPs comparison page. "
+                        "open_side_panel: Open the left side panel showing tasks. "
+                        "close_side_panel: Close/hide the left side panel. "
+                        "open_notes_panel: Open side panel showing all saved notes. "
+                        "open_settings_panel: Open side panel showing app settings (voice speed, theme, provider). "
+                        "focus_task: Highlight/zoom to a specific task node — requires payload.task_id. "
+                        "open_task_detail: Open task detail view in side panel — requires payload.task_id. "
+                        "exit_completely: Shut down the app with a collapse animation. "
+                        "wake_up: Wake Jarvis from sleep mode. "
+                        "go_to_sleep: Put UI into sleep/dim mode. "
+                        "flash_notification: Show a temporary floating notification — use payload.message. "
+                        "reset_camera: Reset the 3D camera to default position."
+                    )
+                },
+                "payload": {
+                    "type": "object",
+                    "description": "Extra data for the action. task_id (int) for focus/detail actions; message (str) for notifications.",
+                    "properties": {
+                        "task_id": {"type": "integer", "description": "Task ID to focus on or open detail for"},
+                        "message": {"type": "string", "description": "Message text for flash_notification"}
+                    }
+                }
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 
@@ -369,6 +431,7 @@ TOOL_IMPL = {
     "google_search": lambda conn, query: outsource_google_search(query),
     "search_memory_patterns": lambda conn, **kw: db.search_memory_patterns(conn, **kw),
     "save_memory_pattern":    lambda conn, **kw: db.save_memory_pattern(conn, **kw),
+    "control_interface":      lambda conn, action, payload=None: {"status": "success", "action": action, "payload": payload or {}},
 }
 
 def has_gemini() -> bool:
@@ -376,24 +439,60 @@ def has_gemini() -> bool:
 
 client = genai.Client(api_key=GEMINI_API_KEY) if has_gemini() else None
 
+UI_MAP = (
+    "=== APP UI MAP (memorise this) ===\n"
+    "PAGES:\n"
+    "  - Brain Core (default, command_center): 3D nebula showing tasks as glowing nodes. Home screen. "
+    "    Action: go_to_brain\n"
+    "  - Plan Page (plan.html): Project plan with phases and timelines. "
+    "    Action: go_to_plan\n"
+    "  - APIs/MCPs Page (provider_comparison.html): Compare AI providers. "
+    "    Action: go_to_apis\n"
+    "SIDE PANEL (left drawer, slides in/out):\n"
+    "  - Tasks list view: All open tasks. Action: open_side_panel\n"
+    "  - Notes list view: All saved notes sorted by date. Action: open_notes_panel\n"
+    "  - Settings view: Voice speed, theme, wake-word threshold, AI provider. Action: open_settings_panel\n"
+    "  - Task Detail view: Subtasks, notes, actions for one task. Action: open_task_detail + payload.task_id\n"
+    "  - Close panel. Action: close_side_panel\n"
+    "TASK FOCUS:\n"
+    "  - Zoom/highlight a specific 3D task node. Action: focus_task + payload.task_id\n"
+    "  - Open task detail panel for a task. Action: open_task_detail + payload.task_id\n"
+    "SLEEP / WAKE:\n"
+    "  - Dim UI to sleep mode. Action: go_to_sleep\n"
+    "  - Wake from sleep. Action: wake_up\n"
+    "MISC:\n"
+    "  - Show floating toast message. Action: flash_notification + payload.message\n"
+    "  - Reset 3D camera. Action: reset_camera\n"
+    "  - Shut down entirely with collapse animation. Action: exit_completely\n"
+    "VOICE EXAMPLES (always invoke control_interface for these):\n"
+    "  'open settings' → open_settings_panel\n"
+    "  'show the plan' / 'go to plan' → go_to_plan\n"
+    "  'go to APIs' / 'show providers' → go_to_apis\n"
+    "  'open notes' / 'show my notes' → open_notes_panel\n"
+    "  'show task 5' / 'open task 5' → open_task_detail, payload={task_id:5}\n"
+    "  'close the panel' / 'close everything' → close_side_panel\n"
+    "  'reset the view' → reset_camera\n"
+    "  'go home' / 'back to brain' → go_to_brain\n"
+)
+
+SYSTEM_PROMPT = (
+    "You are Jarvis, a helpful personal AI assistant with full control over the user's app. "
+    "You have access to their task and note database, Google Search for real-time info, "
+    "and complete control over the app's user interface.\n\n"
+    + UI_MAP +
+    "\nRULES:\n"
+    "1. For any navigation or UI action, ALWAYS invoke 'control_interface' — never just describe it.\n"
+    "2. When the user mentions a specific task by name or ID, call 'focus_tasks' with its ID.\n"
+    "3. When you take a UI action, briefly confirm it aloud in 1 sentence (e.g. 'Opening settings, Sir.').\n"
+    "4. Use database tools to add/list/complete/delete tasks and notes as requested.\n"
+    "5. Keep all spoken replies extremely brief (1-2 sentences max) since they are read aloud.\n"
+    "6. Never give long explanations — be concise and conversational like a real assistant."
+)
+
 config = None
 if has_gemini():
     config = types.GenerateContentConfig(
-        system_instruction=(
-            "You are a helpful personal assistant with access to the user's task "
-            "and note database, as well as Google Search for real-time information. "
-            "The user interface is a 3D Constellation Map where tasks are represented as nodes connected to a central brain core, and details slide in using a collapsible side panel. "
-            "Use the database tools when the user asks you to add, list, complete, "
-            "delete or search tasks and notes. The interface will automatically play 3D animations (like lasers, explosions, and warps) to reflect these database changes. "
-            "If the user speaks about a specific task, or asks to show/open/focus on it, "
-            "you MUST invoke 'focus_tasks' with its ID. If multiple tasks seem to match, "
-            "invoke 'focus_tasks' with all potential matching IDs. "
-            "For general navigation commands (like 'show plan', 'open plan', 'close panel', 'focus on brain', or 'go to sleep'), you should respond conversationally to confirm the action (e.g. 'Opening your plan page' or 'Closing panel') and the frontend will handle the visual movement automatically. "
-            "CRITICAL: Keep replies extremely brief, concise, and conversational (ideally under 1-2 sentences) "
-            "since they'll be read aloud. Avoid long explanations. "
-            "When the user asks to interact with an external service or connect to a system "
-            "outside the local database, you may use call_external_api or call_mcp, but only if the user explicitly requires it."
-        ),
+        system_instruction=SYSTEM_PROMPT,
         tools=[
             {"function_declarations": TOOLS},
         ],
@@ -570,19 +669,7 @@ def handle_request(transcript: str) -> str:
         if not any(m.get("role") == "system" for m in OLLAMA_CHAT_HISTORY):
             OLLAMA_CHAT_HISTORY.append({
                 "role": "system",
-                "content": (
-                    "You are a helpful personal assistant with access to the user's task "
-                    "and note database, as well as Google Search for real-time information. "
-                    "The user interface is a 3D Constellation Map where tasks are represented as nodes connected to a central brain core, and details slide in using a collapsible side panel. "
-                    "Use the database tools when the user asks you to add, list, complete, "
-                    "delete or search tasks and notes. The interface will automatically play 3D animations (like lasers, explosions, and warps) to reflect these database changes. "
-                    "If the user speaks about a specific task, or asks to show/open/focus on it, "
-                    "you MUST invoke 'focus_tasks' with its ID. If multiple tasks seem to match, "
-                    "invoke 'focus_tasks' with all potential matching IDs. "
-                    "For general navigation commands (like 'show plan', 'open plan', 'close panel', 'focus on brain', or 'go to sleep'), you should respond conversationally to confirm the action (e.g. 'Opening your plan page' or 'Closing panel') and the frontend will handle the visual movement automatically. "
-                    "CRITICAL: Keep replies extremely brief, concise, and conversational (ideally under 1-2 sentences) "
-                    "since they'll be read aloud. Avoid long explanations."
-                )
+                "content": SYSTEM_PROMPT
             })
 
         # Append user message

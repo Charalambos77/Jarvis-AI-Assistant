@@ -500,9 +500,9 @@
     <header>
         <div class="logo">SECOND BRAIN <span>//</span> PIPELINE COORDINATOR</div>
         <div class="nav-group">
-            <button class="nav-btn" onclick="window.location.href='command_center.html'">Brain</button>
+            <button class="nav-btn" onclick="window.location.href='command-center'">Brain</button>
             <button class="nav-btn active">Plan</button>
-            <button class="nav-btn" onclick="alert('Viewing APIs and MCP configurations...')">APIs/MCPs</button>
+            <button class="nav-btn" onclick="window.location.href='provider_comparison.html'">APIs/MCPs</button>
         </div>
     </header>
 
@@ -818,6 +818,62 @@
         window.addEventListener('load', drawConnectors);
         window.addEventListener('resize', drawConnectors);
         document.getElementById('pipeline').addEventListener('scroll', drawConnectors);
+
+        // State polling for voice assistant integrations
+        let lastMessageCount = 0;
+        let isFirstPoll = true;
+
+        function pollState() {
+            fetch('/state')
+                .then(r => r.json())
+                .then(data => {
+                    const messages = data.messages || [];
+
+                    if (isFirstPoll) {
+                        lastMessageCount = messages.length;
+                        isFirstPoll = false;
+                        return;
+                    }
+
+                    if (messages.length > lastMessageCount) {
+                        for (let i = lastMessageCount; i < messages.length; i++) {
+                            const msg = messages[i];
+                            const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : 'user';
+
+                            if (role === 'user') {
+                                const textLower = msg.text.toLowerCase();
+                                if (textLower.includes('go to brain') || textLower.includes('go to the brain') || textLower.includes('go back to brain') || textLower.includes('go back to the brain') || textLower.includes('command center')) {
+                                    window.location.href = 'command-center';
+                                } else if (textLower.includes('go to plan') || textLower.includes('show plan') || textLower.includes('open plan')) {
+                                    // already here
+                                } else if (textLower.includes('go to apis') || textLower.includes('show apis') || textLower.includes('open apis') || textLower.includes('provider')) {
+                                    window.location.href = 'provider_comparison.html';
+                                }
+                            } else if (role === 'jarvis') {
+                                document.querySelector('.jarvis-toast').innerText = msg.text;
+                            }
+                        }
+                        lastMessageCount = messages.length;
+                    }
+
+                    if (data.ui_action) {
+                        const act = data.ui_action;
+                        if (act.type === 'control_interface') {
+                            const action = act.action;
+                            if (action === 'go_to_brain') {
+                                window.location.href = 'command-center';
+                            } else if (action === 'go_to_apis') {
+                                window.location.href = 'provider_comparison.html';
+                            }
+                        }
+                    }
+                })
+                .catch(() => { })
+                .finally(() => {
+                    setTimeout(pollState, 800);
+                });
+        }
+        pollState();
     </script>
 </body>
 

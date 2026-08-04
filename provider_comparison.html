@@ -685,13 +685,18 @@
         <h1>Jarvis // Provider Directory & Comparison</h1>
         <p>Compare, price-calculate, and select alternative APIs and MCPs for the Automated Video Machine stack.</p>
       </div>
+      <div class="nav-group-header" style="display: flex; gap: 8px; align-items: center; margin-left: auto; margin-right: 16px;">
+        <button class="theme-btn" onclick="window.location.href='command-center'" style="border: 1px solid var(--panel-border); font-weight: 500;">Brain</button>
+        <button class="theme-btn" onclick="window.location.href='plan.html'" style="border: 1px solid var(--panel-border); font-weight: 500;">Plan</button>
+        <button class="theme-btn active" style="border: 1px solid var(--cyan); font-weight: 700; color: var(--cyan); background: rgba(0, 242, 254, 0.08);">APIs/MCPs</button>
+      </div>
       <div class="theme-selector">
         <button class="theme-btn" onclick="toggleLightMode(this)"
           style="border: 1px solid var(--panel-border); margin-right: 12px; font-weight: bold;">Toggle
           Light/Dark</button>
-        <button class="theme-btn active" onclick="setTheme('cyberpunk', this)">Cyberpunk</button>
-        <button class="theme-btn" onclick="setTheme('synthwave', this)">Synthwave</button>
-        <button class="theme-btn" onclick="setTheme('minimal', this)">Minimal</button>
+        <button class="theme-btn active" id="btn-theme-cyber" onclick="setTheme('cyberpunk', this)">Cyberpunk</button>
+        <button class="theme-btn" id="btn-theme-synth" onclick="setTheme('synthwave', this)">Synthwave</button>
+        <button class="theme-btn" id="btn-theme-minim" onclick="setTheme('minimal', this)">Minimal</button>
       </div>
     </header>
 
@@ -3474,9 +3479,92 @@
       }
     }
 
+    // State polling for voice assistant integrations
+    let lastMessageCount = 0;
+    let isFirstPoll = true;
+
+    function createJarvisToast() {
+      let toast = document.getElementById('jarvis-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'jarvis-toast';
+        toast.style.cssText = `
+          position: fixed;
+          bottom: 30px;
+          right: 40px;
+          font-size: 11px;
+          color: var(--cyan);
+          font-family: 'Space Mono', monospace;
+          text-shadow: 0 0 8px var(--cyan-glow);
+          z-index: 100;
+          pointer-events: none;
+          background: rgba(10, 15, 30, 0.85);
+          border: 1px solid var(--panel-border);
+          padding: 8px 16px;
+          border-radius: 4px;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+          transition: all 0.3s ease;
+        `;
+        document.body.appendChild(toast);
+      }
+      toast.textContent = "Hello. I am Jarvis. How can I help you compare AI providers today?";
+    }
+
+    function pollState() {
+      fetch('/state')
+        .then(r => r.json())
+        .then(data => {
+          const messages = data.messages || [];
+
+          if (isFirstPoll) {
+            lastMessageCount = messages.length;
+            isFirstPoll = false;
+            return;
+          }
+
+          if (messages.length > lastMessageCount) {
+            for (let i = lastMessageCount; i < messages.length; i++) {
+              const msg = messages[i];
+              const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : 'user';
+
+              if (role === 'user') {
+                const textLower = msg.text.toLowerCase();
+                if (textLower.includes('go to brain') || textLower.includes('go to the brain') || textLower.includes('go back to brain') || textLower.includes('go back to the brain') || textLower.includes('command center')) {
+                  window.location.href = 'command-center';
+                } else if (textLower.includes('go to plan') || textLower.includes('show plan') || textLower.includes('open plan')) {
+                  window.location.href = 'plan.html';
+                }
+              } else if (role === 'jarvis') {
+                const toast = document.getElementById('jarvis-toast');
+                if (toast) toast.textContent = msg.text;
+              }
+            }
+            lastMessageCount = messages.length;
+          }
+
+          if (data.ui_action) {
+            const act = data.ui_action;
+            if (act.type === 'control_interface') {
+              const action = act.action;
+              if (action === 'go_to_brain') {
+                window.location.href = 'command-center';
+              } else if (action === 'go_to_plan') {
+                window.location.href = 'plan.html';
+              }
+            }
+          }
+        })
+        .catch(() => { })
+        .finally(() => {
+          setTimeout(pollState, 800);
+        });
+    }
+
     // Initialize
     initMemory();
     populateDirectory();
+    createJarvisToast();
+    pollState();
   </script>
 </body>
 
