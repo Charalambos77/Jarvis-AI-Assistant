@@ -389,6 +389,156 @@ TOOLS = [
             "type": "object",
             "properties": {}
         }
+    },
+    {
+        "name": "update_task",
+        "description": "Update an existing task. Change its content, priority, effort estimate, scheduled time, due date, or status. Cannot change parent_id.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "The ID of the task to update."},
+                "content": {"type": "string", "description": "New content/title of the task. Only provide this if renaming the task."},
+                "priority": {"type": "string", "enum": ["low", "medium", "high"], "description": "New priority level. Only provide this if changing the task's priority."},
+                "effort_estimate": {"type": "string", "enum": ["small", "medium", "large"], "description": "New effort estimate. Only provide this if changing effort."},
+                "scheduled_at": {"type": "string", "description": "New ISO datetime scheduled commitment. Only provide this if changing schedule."},
+                "due_date": {"type": "string", "description": "New ISO date soft deadline. Only provide this if changing due date."},
+                "status": {"type": "string", "enum": ["open", "in_progress", "done"], "description": "New status. Only provide this if changing task status."}
+            },
+            "required": ["task_id"]
+        }
+    },
+    {
+        "name": "add_subtasks",
+        "description": "Break a task into multiple subtasks at once. Each step becomes a child task.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "parent_id": {"type": "integer"},
+                "steps": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["parent_id", "steps"]
+        }
+    },
+    {
+        "name": "batch_create_tasks",
+        "description": "Create multiple tasks in one call. Each item needs at least 'content'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string"},
+                            "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+                            "effort_estimate": {"type": "string", "enum": ["small", "medium", "large"]},
+                            "scheduled_at": {"type": "string"},
+                            "due_date": {"type": "string"},
+                            "parent_id": {"type": "integer"}
+                        },
+                        "required": ["content"]
+                    }
+                }
+            },
+            "required": ["tasks"]
+        }
+    },
+    {
+        "name": "batch_delete_tasks",
+        "description": "Delete multiple tasks at once by their IDs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_ids": {"type": "array", "items": {"type": "integer"}}
+            },
+            "required": ["task_ids"]
+        }
+    },
+    {
+        "name": "batch_create_notes",
+        "description": "Create multiple notes in one call. Each item needs at least 'content'.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string"},
+                            "tags": {"type": "string"},
+                            "task_id": {"type": "integer"}
+                        },
+                        "required": ["content"]
+                    }
+                }
+            },
+            "required": ["notes"]
+        }
+    },
+    {
+        "name": "batch_delete_notes",
+        "description": "Delete multiple notes at once by their IDs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "note_ids": {"type": "array", "items": {"type": "integer"}}
+            },
+            "required": ["note_ids"]
+        }
+    },
+    {
+        "name": "read_settings",
+        "description": "Read the current app settings: AI provider, voice speed, wake word threshold, and theme.",
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "change_settings",
+        "description": "Change app settings. IMPORTANT: Always confirm with the user before applying. Say what you're about to change and ask 'Shall I proceed?'",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "provider": {"type": "string", "enum": ["gemini", "ollama"]},
+                "voice_speed": {"type": "integer", "description": "WPM (100-300)"},
+                "wake_word_threshold": {"type": "number", "description": "0.1-0.9"},
+                "theme": {"type": "string", "enum": ["cyberpunk", "dark", "light"]}
+            }
+        }
+    },
+    {
+        "name": "start_pipeline",
+        "description": "Launch the multi-agent pipeline for a complex task. The pipeline runs through research, synthesis, human gate review, execution, and deploy phases.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "Task description for the pipeline"}
+            },
+            "required": ["task"]
+        }
+    },
+    {
+        "name": "get_gate_status",
+        "description": "Check the current pipeline gate status: which gate is active, waiting/approved/rejected, and the pipeline phase.",
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "update_metric",
+        "description": "Set or update a tracked KPI metric with a name, current value, and threshold.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Metric name (e.g. youtube_ctr)"},
+                "value": {"type": "number", "description": "Current value"},
+                "threshold": {"type": "number", "description": "Alert threshold"}
+            },
+            "required": ["name", "value"]
+        }
+    },
+    {
+        "name": "read_metrics",
+        "description": "Read all currently tracked metrics and their values/thresholds.",
+        "parameters": {"type": "object", "properties": {}}
     }
 ]
 
@@ -444,6 +594,39 @@ TOOL_IMPL = {
         headers={"X-Jarvis-Token": os.getenv("JARVIS_SESSION_TOKEN", "jarvis-auth-token-xyz-789")},
         timeout=2
     ).json() if requests else {"error": "requests library missing"},
+    "update_task":        lambda conn, **kw: db.update_task(conn, **kw),
+    "add_subtasks":       lambda conn, **kw: db.add_subtasks(conn, **kw),
+    "batch_create_tasks": lambda conn, **kw: db.batch_create_tasks(conn, **kw),
+    "batch_delete_tasks": lambda conn, **kw: db.batch_delete_tasks(conn, **kw),
+    "batch_create_notes": lambda conn, **kw: db.batch_create_notes(conn, **kw),
+    "batch_delete_notes": lambda conn, **kw: db.batch_delete_notes(conn, **kw),
+    "read_settings":      lambda conn, **kw: requests.get(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/settings",
+        timeout=2
+    ).json().get("settings", {}) if requests else {},
+    "change_settings":    lambda conn, **kw: requests.post(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/settings",
+        json=kw,
+        timeout=2
+    ).json().get("settings", {}) if requests else {},
+    "start_pipeline":     lambda conn, **kw: requests.post(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/pipeline/start",
+        json=kw,
+        timeout=2
+    ).json() if requests else {},
+    "get_gate_status":    lambda conn, **kw: requests.get(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/gate/status",
+        timeout=2
+    ).json() if requests else {},
+    "update_metric":      lambda conn, **kw: requests.post(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/metrics/update",
+        json=kw,
+        timeout=2
+    ).json() if requests else {},
+    "read_metrics":       lambda conn, **kw: requests.get(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/metrics/get",
+        timeout=2
+    ).json().get("metrics", {}) if requests else {},
 }
 
 def has_gemini() -> bool:
@@ -485,6 +668,19 @@ UI_MAP = (
     "  'close the panel' / 'close everything' → close_side_panel\n"
     "  'reset the view' → reset_camera\n"
     "  'go home' / 'back to brain' → go_to_brain\n"
+    "  'update task 3 priority to high' → update_task\n"
+    "  'change voice speed to 200' → change_settings (with confirmation)\n"
+    "  'break task 5 down into steps' → add_subtasks\n"
+    "  'add 3 tasks: buy milk, clean house, call mom' → batch_create_tasks\n"
+    "  'delete tasks 4, 5, and 6' → batch_delete_tasks\n"
+    "  'save these 3 notes...' → batch_create_notes\n"
+    "  'delete notes 1, 2, and 3' → batch_delete_notes\n"
+    "  'start a pipeline for X' → start_pipeline\n"
+    "  'check pipeline status' → get_gate_status\n"
+    "  'what are my current settings?' → read_settings\n"
+    "  'track youtube CTR at 0.03' → update_metric\n"
+    "  'show all metrics' → read_metrics\n"
+    "  'switch to gem' → change_settings(provider='gemini')\n"
 )
 
 SYSTEM_PROMPT = (
@@ -499,9 +695,17 @@ SYSTEM_PROMPT = (
     "3. When the user mentions a specific task by name or ID, call 'focus_tasks' with its ID.\n"
     "4. When you take a UI action, briefly confirm it aloud in 1 sentence (e.g. 'Opening settings, Sir.').\n"
     "5. Use database tools to add/list/complete/delete tasks and notes as requested.\n"
-    "6. Keep all spoken replies extremely brief (1-2 sentences max) since they are read aloud.\n"
-    "7. Never give long explanations — be concise and conversational like a real assistant."
+    "6. Keep all spoken replies extremely brief (strictly 1 sentence max, under 15 words) since they are read aloud to the user. Never output more than one sentence.\n"
+    "7. Never give explanations or long introductions. State only what you did or will do immediately and concisely.\n"
+    "8. Before changing any settings (change_settings), ALWAYS tell the user what you're about to change "
+    "and ask 'Shall I proceed, Sir?' — only apply after explicit confirmation.\n"
+    "9. You CANNOT approve or reject pipeline gates. Those are human-only review steps.\n"
+    "10. Never print, output, or speak raw code blocks, JSON, programming functions (such as AnimationFrame, update_task, etc.), or technical code arguments in your replies. Keep your responses strictly conversational, spoken English (e.g. 'I have updated the priority to medium, Sir.').\n"
+    "11. If the user refers to a task by name, alias, or description (e.g. 'delete the beta task'), ALWAYS check `get_tasks` or `read_app_snapshot` first to find its ID. Do not ask the user for the ID unless it is not present in the list.\n"
+    "12. If the user says 'switch to gem' or references 'gem', interpret it as 'switch to gemini' and invoke `change_settings` with provider='gemini' (always ask 'Shall I switch from Ollama to Gemini, Sir?' first to confirm settings change).\n"
+    "13. If the user refers to you as 'Jar' or says 'Jar', understand that they are addressing you as 'Jarvis'.\n"
 )
+
 
 config = None
 if has_gemini():
@@ -679,6 +883,11 @@ def handle_request(transcript: str) -> str:
         client_ollama = OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama")
 
         global OLLAMA_CHAT_HISTORY
+        # Prune history to keep context clean for small local models (keeps system prompt + last 10 messages)
+        if len(OLLAMA_CHAT_HISTORY) > 12:
+            system_msg = OLLAMA_CHAT_HISTORY[0]
+            OLLAMA_CHAT_HISTORY = [system_msg] + OLLAMA_CHAT_HISTORY[-10:]
+
         # If history is empty, add system prompt
         if not any(m.get("role") == "system" for m in OLLAMA_CHAT_HISTORY):
             OLLAMA_CHAT_HISTORY.append({
@@ -689,6 +898,7 @@ def handle_request(transcript: str) -> str:
         # Append user message
         OLLAMA_CHAT_HISTORY.append({"role": "user", "content": transcript})
 
+        tool_called_in_session = False
         for _ in range(5):
             try:
                 response = client_ollama.chat.completions.create(
@@ -725,10 +935,13 @@ def handle_request(transcript: str) -> str:
 
             if not message.tool_calls:
                 # No more tool calls, we have our final text reply
-                reply = message.content or ""
+                reply = (message.content or "").strip()
+                if not reply and tool_called_in_session:
+                    reply = "Done, Sir."
                 return proofread_text(reply)
 
             # We have tool calls, process them
+            tool_called_in_session = True
             for tool_call in message.tool_calls:
                 fname = tool_call.function.name
                 try:

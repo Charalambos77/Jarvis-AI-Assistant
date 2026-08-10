@@ -108,6 +108,8 @@ def add_task(
     parent_id: int | None = None,
 ) -> int:
     actual_priority = priority or 'medium'
+    if parent_id == 0:
+        parent_id = None
     cur = conn.execute(
         """INSERT INTO tasks (content, effort_estimate, priority, scheduled_at, due_date, parent_id, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -182,6 +184,79 @@ def delete_task(conn: sqlite3.Connection, task_id: int) -> bool:
     return cur.rowcount > 0
 
 
+def update_task(
+    conn: sqlite3.Connection,
+    task_id: int,
+    content: str | None = None,
+    priority: str | None = None,
+    effort_estimate: str | None = None,
+    scheduled_at: str | None = None,
+    due_date: str | None = None,
+    status: str | None = None,
+) -> bool:
+    fields = []
+    params = []
+    if content is not None:
+        fields.append("content = ?")
+        params.append(content)
+    if priority is not None:
+        fields.append("priority = ?")
+        params.append(priority)
+    if effort_estimate is not None:
+        fields.append("effort_estimate = ?")
+        params.append(effort_estimate)
+    if scheduled_at is not None:
+        fields.append("scheduled_at = ?")
+        params.append(scheduled_at)
+    if due_date is not None:
+        fields.append("due_date = ?")
+        params.append(due_date)
+    if status is not None:
+        fields.append("status = ?")
+        params.append(status)
+    if not fields:
+        return False
+    params.append(task_id)
+    query = f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?"
+    cur = conn.execute(query, params)
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def batch_create_tasks(conn: sqlite3.Connection, tasks: list[dict]) -> list[int]:
+    created_ids = []
+    with conn:
+        for t in tasks:
+            content = t.get("content")
+            priority = t.get("priority", "medium")
+            effort_estimate = t.get("effort_estimate")
+            scheduled_at = t.get("scheduled_at")
+            due_date = t.get("due_date")
+            parent_id = t.get("parent_id")
+            if parent_id == 0:
+                parent_id = None
+            
+            cur = conn.execute(
+                """INSERT INTO tasks (content, effort_estimate, priority, scheduled_at, due_date, parent_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (content, effort_estimate, priority, scheduled_at, due_date, parent_id, _now()),
+            )
+            created_ids.append(cur.lastrowid)
+    return created_ids
+
+
+def batch_delete_tasks(conn: sqlite3.Connection, task_ids: list[int]) -> int:
+    if not task_ids:
+        return 0
+    placeholders = ",".join("?" * len(task_ids))
+    with conn:
+        conn.execute(f"DELETE FROM task_dependencies WHERE task_id IN ({placeholders}) OR depends_on_id IN ({placeholders})", task_ids + task_ids)
+        cur = conn.execute(f"DELETE FROM tasks WHERE id IN ({placeholders})", task_ids)
+        count = cur.rowcount
+    return count
+
+
+
 # ---------- notes ----------
 
 def add_note(conn: sqlite3.Connection, content: str, tags: str | None = None, task_id: int | None = None) -> int:
@@ -234,6 +309,32 @@ def delete_note(conn: sqlite3.Connection, note_id: int) -> bool:
     cur = conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
     conn.commit()
     return cur.rowcount > 0
+
+
+def batch_create_notes(conn: sqlite3.Connection, notes: list[dict]) -> list[int]:
+    created_ids = []
+    with conn:
+        for n in notes:
+            content = n.get("content")
+            tags = n.get("tags")
+            task_id = n.get("task_id")
+            cur = conn.execute(
+                "INSERT INTO notes (content, tags, task_id, created_at) VALUES (?, ?, ?, ?)",
+                (content, tags, task_id, _now()),
+            )
+            created_ids.append(cur.lastrowid)
+    return created_ids
+
+
+def batch_delete_notes(conn: sqlite3.Connection, note_ids: list[int]) -> int:
+    if not note_ids:
+        return 0
+    placeholders = ",".join("?" * len(note_ids))
+    with conn:
+        cur = conn.execute(f"DELETE FROM notes WHERE id IN ({placeholders})", note_ids)
+        count = cur.rowcount
+    return count
+
 
 
 def search_notes(conn: sqlite3.Connection, query: str) -> list[dict]:

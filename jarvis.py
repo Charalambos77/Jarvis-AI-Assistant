@@ -319,6 +319,23 @@ def jarvis_tool_listener(name, args, result):
                 "action": args.get("action"),
                 "payload": args.get("payload") or {}
             }
+        elif name == "update_task":
+            UI_ACTION = {"type": "task_updated", "task_id": args.get("task_id")}
+        elif name == "add_subtasks":
+            UI_ACTION = {"type": "subtasks_batch_created", "parent_id": args.get("parent_id"),
+                         "count": len(result) if isinstance(result, list) else 0}
+        elif name == "batch_create_tasks":
+            UI_ACTION = {"type": "tasks_batch_created",
+                         "count": len(result) if isinstance(result, list) else 0}
+        elif name == "batch_delete_tasks":
+            UI_ACTION = {"type": "tasks_batch_deleted",
+                         "count": result if isinstance(result, int) else 0}
+        elif name == "batch_create_notes":
+            UI_ACTION = {"type": "notes_batch_created",
+                         "count": len(result) if isinstance(result, list) else 0}
+        elif name == "batch_delete_notes":
+            UI_ACTION = {"type": "notes_batch_deleted",
+                         "count": result if isinstance(result, int) else 0}
 
 coordinator.register_tool_listener(jarvis_tool_listener)
 
@@ -574,6 +591,13 @@ def update_metric():
     return jsonify({"status": "updated", "metric": name, "value": value})
 
 
+@app.route("/metrics/get", methods=["GET"])
+def get_metrics():
+    with TRACKED_METRICS_LOCK:
+        return jsonify({"metrics": dict(TRACKED_METRICS)})
+
+
+
 def track_agent_loop():
     """Background thread. Checks metrics every 5 minutes.
     If any metric is below its threshold, signals the Brain to spawn
@@ -795,7 +819,7 @@ def mic_loop(window):
                     print(f"[wake analysis] {text}")
                     if "hey" in text:
                         greeting = "Hello Sir, how can I help you?"
-                    elif "jarvis" in text:
+                    elif "jarvis" in text or "jar" in text:
                         greeting = "Yes Sir?"
                 except Exception as e:
                     # Default fallback

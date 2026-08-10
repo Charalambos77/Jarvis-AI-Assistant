@@ -727,13 +727,13 @@
             <div class="specific-task-actions" style="display: flex; flex-direction: column; gap: 8px;">
                 <button class="action-btn"
                     style="background: rgba(167, 139, 250, 0.15); border-color: #A78BFA; color: #A78BFA; width: 100%;"
-                    onclick="alert('Breaking down task...')">Break task down</button>
+                    onclick="sendToJarvis('Break task #' + currentDetailTaskId + ' down into subtasks')">Break task down</button>
                 <button class="action-btn"
                     style="background: rgba(96, 165, 250, 0.15); border-color: #60A5FA; color: #60A5FA; width: 100%;"
-                    onclick="alert('Creating implementation plan...')">Create implementation plan</button>
+                    onclick="sendToJarvis('Create an implementation plan for task #' + currentDetailTaskId + ' and save it as a note attached to the task')">Create implementation plan</button>
                 <button class="action-btn"
                     style="background: rgba(34, 211, 238, 0.15); border-color: #22D3EE; color: #22D3EE; width: 100%;"
-                    onclick="alert('Letting Jarvis handle it...')">Let Jarvis handle it</button>
+                    onclick="sendToJarvis('Start a pipeline to handle task #' + currentDetailTaskId + ' autonomously')">Let Jarvis handle it</button>
             </div>
         </div>
 
@@ -748,6 +748,7 @@
         // 0. DATA DEFINITION FOR CONSTELLATION MAP
         // ==========================================
         let tasksData = [];
+        let currentDetailTaskId = null;
         const liveNodeMap = new Map();
         const pulsingNodes = [];
         const pulses = [];
@@ -1128,6 +1129,19 @@
             // Keep a list of all open/active task data for sidebar tasks click access
             tasksData = tasks;
 
+            // Remove any task node whose priority changed so it can be re-rendered with new color
+            const openTasks = tasks.filter(t => t.status !== 'done');
+            openTasks.forEach(t => {
+                const reg = liveNodeMap.get(t.id);
+                if (reg && reg.data && reg.data.taskObj) {
+                    const oldPriority = reg.data.taskObj.priority || 'medium';
+                    const newPriority = t.priority || 'medium';
+                    if (oldPriority !== newPriority) {
+                        removeNodeFromScene(t.id);
+                    }
+                }
+            });
+
             const currentKeys = Array.from(liveNodeMap.keys()).filter(id => {
                 const reg = liveNodeMap.get(id);
                 return reg && !reg.animating;
@@ -1135,7 +1149,6 @@
             const currentTaskKeys = currentKeys.filter(id => typeof id === 'number');
             const currentNoteKeys = currentKeys.filter(id => typeof id === 'string' && id.startsWith('note-'));
 
-            const openTasks = tasks.filter(t => t.status !== 'done');
             const newTaskKeys = openTasks.map(t => t.id);
 
             // Collect all active notes
@@ -2482,6 +2495,7 @@
             // Determine if this is a DB Task/Subtask (contains taskObj)
             if (data.taskObj) {
                 const t = data.taskObj;
+                currentDetailTaskId = t.id;
                 document.getElementById('panel-title').innerText = `#${t.id} — ${t.content}`;
                 document.getElementById('panel-type').innerText = data.type || 'TASK';
                 document.getElementById('panel-desc').innerText = `Active database task thread.`;
@@ -2791,6 +2805,32 @@
                     `;
                     list.appendChild(div);
                 });
+
+                // Re-render the detail panel if the updated task is currently open in detail view
+                if (currentDetailTaskId && document.getElementById('panel-specific-task-section').style.display !== 'none') {
+                    const activeTask = tasks.find(t => t.id === currentDetailTaskId);
+                    if (activeTask) {
+                        const color = getTaskColor(activeTask.priority || 'medium');
+                        const isSubtask = !!activeTask.parent_id;
+                        openDetailPanel({
+                            id: activeTask.id,
+                            title: activeTask.content,
+                            type: isSubtask ? 'SUBTASK' : 'TASK',
+                            desc: activeTask.content + ` (${activeTask.priority || 'medium'} priority, status: ${activeTask.status || 'open'})`,
+                            tags: activeTask.tags ? activeTask.tags.split(',') : [activeTask.priority || 'medium', activeTask.status || 'open'],
+                            replaces: isSubtask ? 'Subtask branch execution' : 'Replaces manual workflow steps and checklist items.',
+                            nodes: {
+                                human: 'Task verification & approvals',
+                                assisted: 'AI execution drafts & status check',
+                                auto: 'Fully autonomous tool pipeline trigger'
+                            },
+                            color: color,
+                            taskObj: activeTask,
+                            isNote: false,
+                            isSubtask: isSubtask
+                        });
+                    }
+                }
             } catch (err) {
                 console.error(err);
                 list.innerHTML = `<div style="color: #F87171; font-size: 12px;">Could not load tasks. Is Jarvis running?</div>`;
@@ -2934,6 +2974,21 @@
                             triggerDeletedAnimation(act.task_id);
                         } else if (act.type === 'task_completed') {
                             triggerCompletedAnimation(act.task_id);
+                        } else if (act.type === 'task_updated') {
+                            fetchAndRenderLiveTasks();
+                        } else if (act.type === 'subtasks_batch_created') {
+                            fetchAndRenderLiveTasks();
+                            showFloatingNotification(`${act.count} subtasks created for Task #${act.parent_id}`);
+                        } else if (act.type === 'tasks_batch_created') {
+                            fetchAndRenderLiveTasks();
+                            showFloatingNotification(`${act.count} tasks created`);
+                        } else if (act.type === 'tasks_batch_deleted') {
+                            fetchAndRenderLiveTasks();
+                            showFloatingNotification(`${act.count} tasks deleted`);
+                        } else if (act.type === 'notes_batch_created') {
+                            showFloatingNotification(`${act.count} notes created`);
+                        } else if (act.type === 'notes_batch_deleted') {
+                            showFloatingNotification(`${act.count} notes deleted`);
                         } else if (act.type === 'note_created') {
                             if (act.task_id) {
                                 const tempNote = { id: act.note_id, content: 'New Note', status: 'open' };
