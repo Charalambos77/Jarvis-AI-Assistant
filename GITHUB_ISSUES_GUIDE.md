@@ -94,7 +94,8 @@ When the task is complete and verified:
 ---
 
 ## 4. MCP Tools Reference for Agents
-You must use the following `github-mcp-server` tools to manage this workflow:
+You must use the following `github-mcp-server` tools targeting the repository **`Charalambos77/second-brain`** to manage this workflow:
+* **Target Repository**: Always pass `owner: "Charalambos77"` and `repo: "second-brain"` (or `Charalambos77/second-brain`) for all GitHub MCP tool calls.
 * **Creation**: `create_issue` or `issue_write` (to open issues).
 * **Updates**: `add_issue_comment` (to provide progress updates or blockages).
 * **Lifecycle changes**: `update_issue` (to change status labels, assignees, or close the issue).
