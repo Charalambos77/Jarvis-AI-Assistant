@@ -380,9 +380,16 @@ TOOLS = [
                     }
                 }
             },
-            "required": ["action"]
         }
     },
+    {
+        "name": "read_app_snapshot",
+        "description": "Read the live state of the app UI: which page is open, which panel is open, the orb state, sleeping state, and the last 10 conversation messages. Call this BEFORE any control_interface action.",
+        "parameters": {
+            "type": "object",
+            "properties": {}
+        }
+    }
 ]
 
 
@@ -432,6 +439,11 @@ TOOL_IMPL = {
     "search_memory_patterns": lambda conn, **kw: db.search_memory_patterns(conn, **kw),
     "save_memory_pattern":    lambda conn, **kw: db.save_memory_pattern(conn, **kw),
     "control_interface":      lambda conn, action, payload=None: {"status": "success", "action": action, "payload": payload or {}},
+    "read_app_snapshot":      lambda conn, **kw: requests.get(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/jarvis/snapshot",
+        headers={"X-Jarvis-Token": os.getenv("JARVIS_SESSION_TOKEN", "jarvis-auth-token-xyz-789")},
+        timeout=2
+    ).json() if requests else {"error": "requests library missing"},
 }
 
 def has_gemini() -> bool:
@@ -481,12 +493,14 @@ SYSTEM_PROMPT = (
     "and complete control over the app's user interface.\n\n"
     + UI_MAP +
     "\nRULES:\n"
-    "1. For any navigation or UI action, ALWAYS invoke 'control_interface' — never just describe it.\n"
-    "2. When the user mentions a specific task by name or ID, call 'focus_tasks' with its ID.\n"
-    "3. When you take a UI action, briefly confirm it aloud in 1 sentence (e.g. 'Opening settings, Sir.').\n"
-    "4. Use database tools to add/list/complete/delete tasks and notes as requested.\n"
-    "5. Keep all spoken replies extremely brief (1-2 sentences max) since they are read aloud.\n"
-    "6. Never give long explanations — be concise and conversational like a real assistant."
+    "1. Before performing any navigation or UI action, ALWAYS call `read_app_snapshot` first to see what page and panel is currently open. "
+    "Never navigate somewhere that is already open (e.g. do not open settings if the snapshot shows settings panel is open).\n"
+    "2. For any navigation or UI action, ALWAYS invoke 'control_interface' — never just describe it.\n"
+    "3. When the user mentions a specific task by name or ID, call 'focus_tasks' with its ID.\n"
+    "4. When you take a UI action, briefly confirm it aloud in 1 sentence (e.g. 'Opening settings, Sir.').\n"
+    "5. Use database tools to add/list/complete/delete tasks and notes as requested.\n"
+    "6. Keep all spoken replies extremely brief (1-2 sentences max) since they are read aloud.\n"
+    "7. Never give long explanations — be concise and conversational like a real assistant."
 )
 
 config = None

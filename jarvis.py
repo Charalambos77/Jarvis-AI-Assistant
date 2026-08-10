@@ -125,6 +125,19 @@ PIPELINE_LOCK = threading.Lock()
 TRACKED_METRICS = {}   # e.g. {"youtube_ctr": {"value": 0.025, "threshold": 0.03}}
 TRACKED_METRICS_LOCK = threading.Lock()
 
+# --- Jarvis User & Identity Layer ---
+import collections
+JARVIS_SESSION_TOKEN = os.getenv("JARVIS_SESSION_TOKEN", "jarvis-auth-token-xyz-789")
+JARVIS_UI_SNAPSHOT = {
+    "current_page": "Brain Core",
+    "panel_open": None,
+    "orb": "idle",
+    "sleeping": False
+}
+JARVIS_ACK_QUEUE = collections.deque(maxlen=20)
+JARVIS_STATE_LOCK = threading.Lock()
+
+
 
 def push_message(role, text):
     with STATE_LOCK:
@@ -432,6 +445,88 @@ def ask():
     threading.Thread(target=speak, args=(reply,), daemon=True).start()
 
     return jsonify({"reply": reply})
+
+
+@app.route("/jarvis/state-update", methods=["POST"])
+def jarvis_state_update():
+    """Endpoint for frontend to report UI page, panel, or orb state changes."""
+    data = request.get_json(force=True) or {}
+    with JARVIS_STATE_LOCK:
+        if "current_page" in data:
+            JARVIS_UI_SNAPSHOT["current_page"] = str(data["current_page"])
+        if "panel_open" in data:
+            JARVIS_UI_SNAPSHOT["panel_open"] = data["panel_open"]
+        if "orb" in data:
+            JARVIS_UI_SNAPSHOT["orb"] = str(data["orb"])
+        if "sleeping" in data:
+            JARVIS_UI_SNAPSHOT["sleeping"] = bool(data["sleeping"])
+    return jsonify({"status": "updated"})
+
+
+@app.route("/jarvis/snapshot", methods=["GET"])
+def jarvis_snapshot():
+    """Returns the full UI state and active task/note database snapshot."""
+    token = request.headers.get("X-Jarvis-Token")
+    if token != JARVIS_SESSION_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    conn = db.get_connection(DB_PATH)
+    try:
+        tasks_list = db.get_tasks(conn)
+        notes_rows = conn.execute("SELECT * FROM notes WHERE status = 'open'").fetchall()
+        notes_list = [dict(r) for r in notes_rows]
+    finally:
+        conn.close()
+
+    with JARVIS_STATE_LOCK:
+        snapshot = JARVIS_UI_SNAPSHOT.copy()
+
+    with STATE_LOCK:
+        snapshot["messages"] = CONVO[-10:]
+
+    snapshot["tasks"] = tasks_list
+    snapshot["notes"] = notes_list
+    snapshot["acks"] = list(JARVIS_ACK_QUEUE)
+    return jsonify(snapshot)
+
+
+@app.route("/jarvis/command", methods=["POST"])
+def jarvis_command():
+    """Receives structured Jarvis instructions, simulating Jarvis acting as a user."""
+    token = request.headers.get("X-Jarvis-Token")
+    if token != JARVIS_SESSION_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(force=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "no text provided"}), 400
+
+    push_message("jarvis", text)
+    set_orb("thinking")
+    try:
+        reply = handle_request(text)
+    except Exception as e:
+        reply = f"Something went wrong: {e}"
+    push_message("ai", reply)
+
+    # Speak it on a background thread
+    threading.Thread(target=speak, args=(reply,), daemon=True).start()
+
+    return jsonify({"reply": reply})
+
+
+@app.route("/jarvis/ack", methods=["POST"])
+def jarvis_ack():
+    """Let the UI acknowledge to Jarvis that a control_interface command succeeded or failed."""
+    data = request.get_json(force=True) or {}
+    action = data.get("action")
+    status = data.get("status", "ok")
+    if not action:
+        return jsonify({"error": "action required"}), 400
+
+    JARVIS_ACK_QUEUE.append({"action": action, "status": status, "timestamp": time.time()})
+    return jsonify({"status": "acknowledged"})
 
 
 @app.route("/gate/status", methods=["GET"])

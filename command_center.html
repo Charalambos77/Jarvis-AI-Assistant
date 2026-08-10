@@ -2596,11 +2596,13 @@
             }
 
             panel.classList.add('open');
+            syncUiState({ panel_open: data.taskObj ? `task_${data.taskObj.id}` : data.id });
         }
 
         function closePanel() {
             document.getElementById('side-panel').classList.remove('open');
             targetCameraPos.set(0, 0, 2.5);
+            syncUiState({ panel_open: null });
         }
 
         // ==========================================
@@ -2627,13 +2629,16 @@
             targetCameraPos.set(0, 0, 1.8);
             const brainData = brainHitMesh.userData.data;
             openDetailPanel(brainData);
+            syncUiState({ current_page: "Brain Core" });
         });
 
         buttons.plan.addEventListener('click', () => {
+            syncUiState({ current_page: "Plan Page" });
             window.location.href = 'plan.html';
         });
 
         buttons.apis.addEventListener('click', () => {
+            syncUiState({ current_page: "APIs/MCPs Page" });
             window.location.href = 'provider_comparison.html';
         });
 
@@ -2662,6 +2667,7 @@
 
             fetchAndRenderLiveTasks();
             panel.classList.add('open');
+            syncUiState({ panel_open: "tasks" });
         }
 
         async function fetchAndRenderLiveTasks() {
@@ -2805,6 +2811,37 @@
         let orbCurrentState = 'idle';
         let lastSpokenWord = '';
 
+        // Tracker for frontend state
+        let currentUiState = {
+            current_page: "Brain Core",
+            panel_open: "tasks", // openTasksPanel is triggered on load
+            orb: "idle",
+            sleeping: false
+        };
+
+        // Report frontend state changes to backend
+        async function syncUiState(updates) {
+            Object.assign(currentUiState, updates);
+            try {
+                await fetch('/jarvis/state-update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentUiState)
+                });
+            } catch(e) {}
+        }
+
+        // Report action acknowledgement back to backend
+        async function sendAck(action, status = "ok") {
+            try {
+                await fetch('/jarvis/ack', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, status })
+                });
+            } catch(e) {}
+        }
+
         // Poll /state every 800ms for live updates from voice commands
         let wasSleeping = false;
 
@@ -2823,6 +2860,7 @@
                         orbCurrentState = orb;
                         orbIndicator.className = 'orb-indicator ' + orb;
                         orbLabel.textContent = orb === 'speaking' ? 'SPEAKING' : orb === 'thinking' ? 'THINKING' : 'IDLE';
+                        syncUiState({ orb });
                     }
 
                     // Trigger a bomb instantly for every new word spoken
@@ -2840,6 +2878,7 @@
                             orbIndicator.className = 'orb-indicator sleep';
                             orbLabel.textContent = 'SLEEPING';
                         }
+                        syncUiState({ sleeping: isSleeping });
                     }
 
                     // Render any new messages from voice interaction
@@ -2847,7 +2886,7 @@
                     if (messages.length > lastMessageCount) {
                         for (let i = lastMessageCount; i < messages.length; i++) {
                             const msg = messages[i];
-                            const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : 'user';
+                            const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : msg.role === 'jarvis' ? 'jarvis' : 'user';
                             appendChatMessage(msg.text, role);
 
                             // Voice / Text navigation triggers
@@ -2920,52 +2959,58 @@
                         } else if (act.type === 'control_interface') {
                             const action = act.action;
                             const payload = act.payload || {};
-                            if (action === 'go_to_plan') {
-                                animateWarpExit();
-                            } else if (action === 'go_to_brain') {
-                                targetCameraPos.set(0, 0, 1.8);
-                                const brainData = brainHitMesh.userData.data;
-                                openDetailPanel(brainData);
-                            } else if (action === 'go_to_apis') {
-                                window.location.href = 'provider_comparison.html';
-                            } else if (action === 'open_side_panel') {
-                                targetCameraPos.set(0, 0, 2.5);
-                                openTasksPanel();
-                            } else if (action === 'open_notes_panel') {
-                                openNotesPanel();
-                            } else if (action === 'open_settings_panel') {
-                                openSettingsPanel();
-                            } else if (action === 'focus_task') {
-                                if (payload.task_id) {
-                                    if (liveNodeMap.has(payload.task_id)) {
-                                        animateFocusTask(payload.task_id);
-                                    } else {
-                                        openTasksPanel();
-                                        setTimeout(() => {
-                                            const el = document.getElementById(`task-live-${payload.task_id}`);
-                                            if (el) {
-                                                el.classList.add('focused-task');
-                                                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                                                setTimeout(() => el.classList.remove('focused-task'), 4000);
-                                            }
-                                        }, 350);
+                            let ackedStatus = "ok";
+                            try {
+                                if (action === 'go_to_plan') {
+                                    animateWarpExit();
+                                } else if (action === 'go_to_brain') {
+                                    targetCameraPos.set(0, 0, 1.8);
+                                    const brainData = brainHitMesh.userData.data;
+                                    openDetailPanel(brainData);
+                                } else if (action === 'go_to_apis') {
+                                    window.location.href = 'provider_comparison.html';
+                                } else if (action === 'open_side_panel') {
+                                    targetCameraPos.set(0, 0, 2.5);
+                                    openTasksPanel();
+                                } else if (action === 'open_notes_panel') {
+                                    openNotesPanel();
+                                } else if (action === 'open_settings_panel') {
+                                    openSettingsPanel();
+                                } else if (action === 'focus_task') {
+                                    if (payload.task_id) {
+                                        if (liveNodeMap.has(payload.task_id)) {
+                                            animateFocusTask(payload.task_id);
+                                        } else {
+                                            openTasksPanel();
+                                            setTimeout(() => {
+                                                const el = document.getElementById(`task-live-${payload.task_id}`);
+                                                if (el) {
+                                                    el.classList.add('focused-task');
+                                                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                                    setTimeout(() => el.classList.remove('focused-task'), 4000);
+                                                }
+                                            }, 350);
+                                        }
                                     }
+                                } else if (action === 'open_task_detail') {
+                                    if (payload.task_id) openTaskDetailById(payload.task_id);
+                                } else if (action === 'close_side_panel') {
+                                    closePanel();
+                                } else if (action === 'exit_completely') {
+                                    animateCoreCollapse();
+                                } else if (action === 'wake_up') {
+                                    animateSleepMode(false);
+                                } else if (action === 'go_to_sleep') {
+                                    animateSleepMode(true);
+                                } else if (action === 'flash_notification') {
+                                    showFloatingNotification(payload.message || '');
+                                } else if (action === 'reset_camera') {
+                                    targetCameraPos.set(0, 0, 2.5);
                                 }
-                            } else if (action === 'open_task_detail') {
-                                if (payload.task_id) openTaskDetailById(payload.task_id);
-                            } else if (action === 'close_side_panel') {
-                                closePanel();
-                            } else if (action === 'exit_completely') {
-                                animateCoreCollapse();
-                            } else if (action === 'wake_up') {
-                                animateSleepMode(false);
-                            } else if (action === 'go_to_sleep') {
-                                animateSleepMode(true);
-                            } else if (action === 'flash_notification') {
-                                showFloatingNotification(payload.message || '');
-                            } else if (action === 'reset_camera') {
-                                targetCameraPos.set(0, 0, 2.5);
+                            } catch (e) {
+                                ackedStatus = "failed";
                             }
+                            sendAck(action, ackedStatus);
                         }
                     }
 
@@ -3002,7 +3047,11 @@
         function appendChatMessage(text, sender) {
             const msg = document.createElement('div');
             msg.className = `chat-message ${sender}`;
-            msg.innerText = text;
+            if (sender === 'jarvis') {
+                msg.innerHTML = `<span style="color:#22D3EE; font-weight:bold; text-shadow: 0 0 4px rgba(34,211,238,0.5);">⚡ JARVIS:</span> ` + text;
+            } else {
+                msg.innerText = text;
+            }
             chatMessages.appendChild(msg);
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
@@ -3081,13 +3130,9 @@
             const listEl = document.getElementById('tasks-live-list');
 
             document.getElementById('action-btn').textContent = 'Add a Note';
-            document.getElementById('action-btn').onclick = () => {
-                const input = document.getElementById('chat-input');
-                if (input) { input.value = 'Save a note: '; input.focus(); }
-            };
-
             listEl.innerHTML = '<div style="color: var(--text-muted); font-size: 12px;">Loading notes...</div>';
             panel.classList.add('open');
+            syncUiState({ panel_open: "notes" });
 
             try {
                 const res = await fetch('/notes');
@@ -3144,6 +3189,7 @@
 
             host.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">Loading settings...</div>';
             panel.classList.add('open');
+            syncUiState({ panel_open: "settings" });
 
             try {
                 const res = await fetch('/settings');
