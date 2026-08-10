@@ -1,58 +1,72 @@
-# Second Brain Voice Assistant
+# Jarvis: AI-Powered Second Brain & Voice Assistant
 
-A background voice assistant for your second brain. Say **"Hey Jarvis"**, then
-speak a request like "add a task: call the dentist tomorrow" or "what's on my
-list?" - it transcribes your speech, sends it to Gemini (free API), Gemini
-calls the right tool against your local `second_brain.db`, and the reply is
-spoken back to you.
+An advanced, local-first personal AI assistant and cognitive engine built directly into your desktop workspace. By combining a 3D WebGL Constellation Map, an active local SQLite database, and voice/chat commands processed via Google Gemini or Ollama, Jarvis acts as a first-class app user with complete control over your productivity interface.
 
-This runs completely independently of Claude Desktop. It's a separate script
-using the free Gemini API instead.
+---
 
-## Setup (Windows)
+## 🚀 Key Architectural Features
 
-**1. Get a free Gemini API key**
-Go to https://aistudio.google.com/apikey, sign in, click "Create API key".
+### 1. First-Class Identity & Autonomous Commands
+Jarvis is not just a passive listener; he is a session-level authenticated app user.
+- **Dedicated Communications**: Features a secure command bus (`POST /jarvis/command`) authenticated via a custom `JARVIS_SESSION_TOKEN`.
+- **Teal Identity UI**: Autonomous actions and thoughts from Jarvis are displayed in the chat log with a distinct teal glow and a `⚡ JARVIS:` prefix.
 
-**2. Extract this folder** on your PC.
+### 2. Live UI Snapshot Feed (Jarvis "Eyes")
+Through the `read_app_snapshot` tool, Jarvis obtains real-time context of your desktop UI before deciding on any actions.
+- **Visual Grounding**: Queries `GET /jarvis/snapshot` to discover which page, side panel, task drawer, and orb states are currently visible.
+- **Contextual Execution**: Avoids redundant navigation commands (e.g. will not try to open settings if the snapshot indicates settings are already open).
 
-**3. Run the automated installer**
-Double-click `install.bat` inside the folder. This will automatically check for Python, set up the virtual environment, and install all required dependencies.
+### 3. Command Confirmation Bus (ACK Loop)
+A bidirectional acknowledgement loop guarantees action delivery.
+- When Jarvis triggers a UI action (such as focusing a 3D task node or opening notes), the frontend immediately posts back a `POST /jarvis/ack`.
+- Jarvis monitors this queue to confirm success or pivot to a retry strategy if the action was blocked.
 
-*(Alternatively, you can manually open PowerShell, run `python -m venv venv`, activate it via `venv\Scripts\activate`, and run `pip install -r requirements.txt`.)*
+### 4. Interactive 3D WebGL Constellation Map
+Your tasks, subtasks, and notes are rendered as a glowing 3D particle nebula in real-time.
+- **Dynamic Animations**: Changes to tasks/notes trigger vector-driven WebGL animations:
+  - *Task Creation*: Particle assembly stream and growing priority-colored laser lines.
+  - *Subtask Decomposition*: Parent node overcharge pulse branching out children.
+  - *Deletion*: A supernova flare collapse leading to a dispersing particle explosion.
+  - *Completion*: Rapid Z-axis camera screen-suck warp.
 
-> **Note on PyAudio:** this is the package most likely to give trouble on
-> Windows. If `pip install -r requirements.txt` fails specifically on
-> `pyaudio`, run this instead:
-> ```
-> pip install pipwin
-> pipwin install pyaudio
-> ```
+### 5. Multi-Agent Pipeline & Metric Monitoring
+- **Automated Pipelines**: Launch autonomous multi-agent sprint pipelines (`start_pipeline`) containing research, synthesis, and execution phases, complete with human-in-the-loop gate approvals.
+- **Telemetry Alerts**: Instruct Jarvis to track KPI metrics (`update_metric`). A background thread monitors these values every 5 minutes and commands the coordinator to spawn corrective tasks if thresholds are breached.
 
-**6. Set your API key**
-Copy `.env.example` to a new file named `.env` in the same folder, then open
-`.env` and replace `your_key_here` with your actual Gemini API key. This file
-stays on your PC only - it's never sent anywhere except directly to Google's
-API when making requests.
+---
 
-**7. Run it**
+## 🛠️ Setup & Installation (Windows)
+
+### 1. Get a Free Gemini API Key
+Go to [Google AI Studio](https://aistudio.google.com/apikey) and create a free API key.
+
+### 2. Configure Environment
+Copy `.env.example` to `.env` and fill in your details:
+```env
+GEMINI_API_KEY=your_gemini_key_here
+JARVIS_PORT=5000
+MODEL_PROVIDER=ollama  # or 'gemini'
 ```
-python voice_assistant.py
+
+### 3. Install Dependencies
+Double-click `install.bat` inside the folder. This sets up a virtual environment (`venv`) and installs the required speech-to-text, text-to-speech, openwakeword, and rendering libraries.
+
+---
+
+## 🏃 Running Jarvis
+
+Launch the assistant by running:
+```bash
+python jarvis.py
 ```
+Or double-click the `run_jarvis.bat` shortcut.
+Once you see `Jarvis is running`, say **"Hey Jarvis"** or **"Jar"** to wake him, and tell him what you need!
 
-First run downloads the wake-word model (small, one-time). Once you see
-`Second Brain voice assistant running.`, say **"Hey Jarvis"** out loud, wait
-for "Wake word detected!" in the console, then speak your request.
+---
 
-## Notes
-
-- This creates its **own** `second_brain.db` in this folder - separate from
-  any database used by the Claude Desktop MCP version. Copy the file over
-  manually if you want them to share data.
-- Speech-to-text uses Google's free web speech API (via the
-  `SpeechRecognition` library) - this sends short audio clips to Google's
-  servers to transcribe, same as most other free options.
-- If "Hey Jarvis" triggers too often by accident, raise
-  `WAKE_WORD_THRESHOLD` in `voice_assistant.py` (default `0.5`, try `0.6-0.7`).
-- To run this automatically in the background on startup, you can later set
-  it up as a Windows Scheduled Task - ask if you want help with that.
+## 🎙️ Sample Voice Commands
+- *"Hey Jarvis, add three tasks: write unit tests, complete implementation plan, buy milk"* (Batch Creation)
+- *"focus on task 3"* (3D Zoom & Detail Drawer)
+- *"change voice speed to 200"* (Settings change with verification confirmation prompt)
+- *"track youtube CTR at 0.045 with threshold 0.05"* (Metric Tracking)
+- *"switch to gem"* (Prompts confirmation to swap model provider from Ollama to Gemini)
