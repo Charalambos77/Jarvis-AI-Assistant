@@ -320,22 +320,48 @@ def jarvis_tool_listener(name, args, result):
                 "payload": args.get("payload") or {}
             }
         elif name == "update_task":
-            UI_ACTION = {"type": "task_updated", "task_id": args.get("task_id")}
+            changed_fields = {k: v for k, v in args.items() if k != "task_id"}
+            UI_ACTION = {
+                "type": "task_updated",
+                "task_id": args.get("task_id"),
+                "changed_fields": changed_fields
+            }
         elif name == "add_subtasks":
             UI_ACTION = {"type": "subtasks_batch_created", "parent_id": args.get("parent_id"),
                          "count": len(result) if isinstance(result, list) else 0}
         elif name == "batch_create_tasks":
-            UI_ACTION = {"type": "tasks_batch_created",
-                         "count": len(result) if isinstance(result, list) else 0}
+            tasks_list = args.get("tasks", [])
+            priorities = [t.get("priority", "medium") for t in tasks_list]
+            UI_ACTION = {
+                "type": "tasks_batch_created",
+                "task_ids": result if isinstance(result, list) else [],
+                "priorities": priorities,
+                "count": len(result) if isinstance(result, list) else 0
+            }
         elif name == "batch_delete_tasks":
-            UI_ACTION = {"type": "tasks_batch_deleted",
-                         "count": result if isinstance(result, int) else 0}
+            UI_ACTION = {
+                "type": "tasks_batch_deleted",
+                "task_ids": args.get("task_ids", []),
+                "count": result if isinstance(result, int) else 0
+            }
         elif name == "batch_create_notes":
-            UI_ACTION = {"type": "notes_batch_created",
-                         "count": len(result) if isinstance(result, list) else 0}
+            notes_in = args.get("notes", [])
+            notes_payload = []
+            if isinstance(result, list):
+                for i, nid in enumerate(result):
+                    task_id = notes_in[i].get("task_id") if i < len(notes_in) else None
+                    notes_payload.append({"note_id": nid, "task_id": task_id})
+            UI_ACTION = {
+                "type": "notes_batch_created",
+                "notes": notes_payload,
+                "count": len(result) if isinstance(result, list) else 0
+            }
         elif name == "batch_delete_notes":
-            UI_ACTION = {"type": "notes_batch_deleted",
-                         "count": result if isinstance(result, int) else 0}
+            UI_ACTION = {
+                "type": "notes_batch_deleted",
+                "note_ids": args.get("note_ids", []),
+                "count": result if isinstance(result, int) else 0
+            }
 
 coordinator.register_tool_listener(jarvis_tool_listener)
 
