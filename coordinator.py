@@ -133,6 +133,11 @@ def ensure_ollama_running(url, model, force_cpu):
 
 threading.Thread(target=lambda: ensure_ollama_running(*get_ollama_config()), daemon=True).start()
 
+_state_providers = {}
+
+def register_state_provider(name, func):
+    _state_providers[name] = func
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 TOOLS = [
@@ -589,44 +594,44 @@ TOOL_IMPL = {
     "search_memory_patterns": lambda conn, **kw: db.search_memory_patterns(conn, **kw),
     "save_memory_pattern":    lambda conn, **kw: db.save_memory_pattern(conn, **kw),
     "control_interface":      lambda conn, action, payload=None: {"status": "success", "action": action, "payload": payload or {}},
-    "read_app_snapshot":      lambda conn, **kw: requests.get(
+    "read_app_snapshot":      lambda conn, **kw: _state_providers["read_app_snapshot"]() if "read_app_snapshot" in _state_providers else (requests.get(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/jarvis/snapshot",
         headers={"X-Jarvis-Token": os.getenv("JARVIS_SESSION_TOKEN", "jarvis-auth-token-xyz-789")},
         timeout=2
-    ).json() if requests else {"error": "requests library missing"},
+    ).json() if requests else {"error": "requests library missing"}),
     "update_task":        lambda conn, **kw: db.update_task(conn, **kw),
     "add_subtasks":       lambda conn, **kw: db.add_subtasks(conn, **kw),
     "batch_create_tasks": lambda conn, **kw: db.batch_create_tasks(conn, **kw),
     "batch_delete_tasks": lambda conn, **kw: db.batch_delete_tasks(conn, **kw),
     "batch_create_notes": lambda conn, **kw: db.batch_create_notes(conn, **kw),
     "batch_delete_notes": lambda conn, **kw: db.batch_delete_notes(conn, **kw),
-    "read_settings":      lambda conn, **kw: requests.get(
+    "read_settings":      lambda conn, **kw: _state_providers["read_settings"]() if "read_settings" in _state_providers else (requests.get(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/settings",
         timeout=2
-    ).json().get("settings", {}) if requests else {},
-    "change_settings":    lambda conn, **kw: requests.post(
+    ).json().get("settings", {}) if requests else {}),
+    "change_settings":    lambda conn, **kw: _state_providers["change_settings"](kw) if "change_settings" in _state_providers else (requests.post(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/settings",
         json=kw,
         timeout=2
-    ).json().get("settings", {}) if requests else {},
-    "start_pipeline":     lambda conn, **kw: requests.post(
+    ).json().get("settings", {}) if requests else {}),
+    "start_pipeline":     lambda conn, **kw: _state_providers["start_pipeline"](kw) if "start_pipeline" in _state_providers else (requests.post(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/pipeline/start",
         json=kw,
         timeout=2
-    ).json() if requests else {},
-    "get_gate_status":    lambda conn, **kw: requests.get(
+    ).json() if requests else {}),
+    "get_gate_status":    lambda conn, **kw: _state_providers["get_gate_status"]() if "get_gate_status" in _state_providers else (requests.get(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/gate/status",
         timeout=2
-    ).json() if requests else {},
-    "update_metric":      lambda conn, **kw: requests.post(
+    ).json() if requests else {}),
+    "update_metric":      lambda conn, **kw: _state_providers["update_metric"](kw) if "update_metric" in _state_providers else (requests.post(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/metrics/update",
         json=kw,
         timeout=2
-    ).json() if requests else {},
-    "read_metrics":       lambda conn, **kw: requests.get(
+    ).json() if requests else {}),
+    "read_metrics":       lambda conn, **kw: _state_providers["read_metrics"]() if "read_metrics" in _state_providers else (requests.get(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/metrics/get",
         timeout=2
-    ).json().get("metrics", {}) if requests else {},
+    ).json().get("metrics", {}) if requests else {}),
 }
 
 def has_gemini() -> bool:
@@ -942,6 +947,7 @@ def handle_request(transcript: str) -> str:
 
             # We have tool calls, process them
             tool_called_in_session = True
+            instant_reply = None
             for tool_call in message.tool_calls:
                 fname = tool_call.function.name
                 try:
@@ -966,6 +972,62 @@ def handle_request(transcript: str) -> str:
                     "name": fname,
                     "content": json.dumps(result, default=str)
                 })
+
+                # Instant confirmation mappings to avoid slow second LLM turn under local Ollama CPU inference
+                if fname == "control_interface":
+                    action = fargs.get("action")
+                    if action not in ("focus_task", "flash_notification"):
+                        action_map = {
+                            "go_to_plan": "Navigating to the Plan page, Sir.",
+                            "go_to_brain": "Returning to the Brain Core, Sir.",
+                            "go_to_apis": "Going to the APIs page, Sir.",
+                            "open_side_panel": "Opening the side panel, Sir.",
+                            "close_side_panel": "Closing the side panel, Sir.",
+                            "open_notes_panel": "Opening notes panel, Sir.",
+                            "open_settings_panel": "Opening settings, Sir.",
+                            "open_task_detail": "Opening task details, Sir.",
+                            "exit_completely": "Shutting down completely, goodbye.",
+                            "wake_up": "I am awake, Sir.",
+                            "go_to_sleep": "Going to sleep, Sir.",
+                            "reset_camera": "Camera view reset, Sir."
+                        }
+                        if action in action_map:
+                            instant_reply = action_map[action]
+                elif fname == "complete_task":
+                    instant_reply = "Task marked as completed, Sir."
+                elif fname == "delete_task":
+                    instant_reply = "Task deleted, Sir."
+                elif fname == "update_task":
+                    instant_reply = "Task updated, Sir."
+                elif fname == "add_subtasks":
+                    instant_reply = "Subtasks added, Sir."
+                elif fname == "batch_create_tasks":
+                    instant_reply = "Tasks created, Sir."
+                elif fname == "batch_delete_tasks":
+                    instant_reply = "Tasks deleted, Sir."
+                elif fname == "complete_note":
+                    instant_reply = "Note marked as completed, Sir."
+                elif fname == "delete_note":
+                    instant_reply = "Note deleted, Sir."
+                elif fname == "add_task":
+                    instant_reply = "Task added, Sir."
+                elif fname == "add_note":
+                    instant_reply = "Note saved, Sir."
+                elif fname == "update_note":
+                    instant_reply = "Note updated, Sir."
+                elif fname == "batch_create_notes":
+                    instant_reply = "Notes saved, Sir."
+                elif fname == "batch_delete_notes":
+                    instant_reply = "Notes deleted, Sir."
+                elif fname == "save_memory_pattern":
+                    instant_reply = "Pattern saved, Sir."
+
+            if instant_reply and len(message.tool_calls) == 1:
+                OLLAMA_CHAT_HISTORY.append({
+                    "role": "assistant",
+                    "content": instant_reply
+                })
+                return instant_reply
 
         # Fallback if loop exceeded
         return "I processed your request but took too many steps."

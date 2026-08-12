@@ -161,41 +161,55 @@ def speak(text: str):
     played_via_eleven = False
     if eleven_key and not ELEVENLABS_QUOTA_EXCEEDED:
         try:
+            import hashlib
             import requests
-            import tempfile
             import ctypes
             
-            url = f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice}"
-            headers = {
-                "xi-api-key": eleven_key,
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "text": text,
-                "model_id": "eleven_turbo_v2",
-                "voice_settings": {
-                    "stability": 0.5,
-                    "similarity_boost": 0.75
+            cache_dir = os.path.join(BASE_DIR, "data", "tts_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            text_hash = hashlib.md5((text + "_" + eleven_voice).encode("utf-8")).hexdigest()
+            cache_path = os.path.join(cache_dir, f"{text_hash}.mp3")
+            
+            use_cached = os.path.exists(cache_path)
+            success = True
+            
+            if not use_cached:
+                url = f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice}"
+                headers = {
+                    "xi-api-key": eleven_key,
+                    "Content-Type": "application/json"
                 }
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=10)
-            if res.status_code == 200:
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                    f.write(res.content)
-                    temp_path = f.name
-                
-                path_str = os.path.abspath(temp_path)
+                payload = {
+                    "text": text,
+                    "model_id": "eleven_turbo_v2",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75
+                    }
+                }
+                res = requests.post(url, json=payload, headers=headers, timeout=10)
+                if res.status_code == 200:
+                    with open(cache_path, "wb") as f:
+                        f.write(res.content)
+                else:
+                    print(f"[ElevenLabs Error] {res.status_code}: {res.text}")
+                    if res.status_code in (401, 429) or "quota" in res.text.lower():
+                        ELEVENLABS_QUOTA_EXCEEDED = True
+                        print("[Jarvis] ElevenLabs API quota exceeded. Temporarily falling back to local TTS for this session.")
+                    success = False
+            
+            if success and os.path.exists(cache_path):
+                path_str = os.path.abspath(cache_path)
                 ctypes.windll.winmm.mciSendStringW(f'open "{path_str}" type mpegvideo alias jarvis_voice', None, 0, 0)
                 
-                # Start simulated word updater thread for ElevenLabs playback
+                updater_active = [True]
                 def simulate_words():
                     global CURRENT_SPOKEN_WORD
                     words = text.split()
                     for i, w in enumerate(words):
-                        if not played_via_eleven: # if aborted or cleaned up
+                        if not updater_active[0]:
                             break
                         CURRENT_SPOKEN_WORD = f"{w}_{i}"
-                        # Average speed: 170 WPM -> ~350ms per word
                         time.sleep(0.35)
                 
                 sim_thread = threading.Thread(target=simulate_words, daemon=True)
@@ -203,18 +217,8 @@ def speak(text: str):
 
                 ctypes.windll.winmm.mciSendStringW('play jarvis_voice wait', None, 0, 0)
                 ctypes.windll.winmm.mciSendStringW('close jarvis_voice', None, 0, 0)
-                played_via_eleven = False # stops simulation thread
-                
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
+                updater_active[0] = False
                 played_via_eleven = True
-            else:
-                print(f"[ElevenLabs Error] {res.status_code}: {res.text}")
-                if res.status_code in (401, 429) or "quota" in res.text.lower():
-                    ELEVENLABS_QUOTA_EXCEEDED = True
-                    print("[Jarvis] ElevenLabs API quota exceeded. Temporarily falling back to local TTS for this session.")
         except Exception as e:
             print(f"[ElevenLabs Exception] {e}")
 
@@ -225,11 +229,9 @@ def speak(text: str):
                 speed = SETTINGS.get("voice_speed", 175)
             engine.setProperty('rate', int(speed))
             
-            # Update CURRENT_SPOKEN_WORD for every word spoken
             def on_word(name, location, length):
                 global CURRENT_SPOKEN_WORD
                 words = text.split()
-                # Estimate current word index based on character location
                 char_idx = 0
                 for i, w in enumerate(words):
                     char_idx += len(w) + 1
@@ -244,7 +246,6 @@ def speak(text: str):
         except Exception as e:
             print(f"[Local TTS Error] {e}")
             
-    # Reset spoken word after speech finishes
     global CURRENT_SPOKEN_WORD
     CURRENT_SPOKEN_WORD = ""
     set_orb("idle")
@@ -363,6 +364,102 @@ def jarvis_tool_listener(name, args, result):
                 "count": result if isinstance(result, int) else 0
             }
 
+def get_snapshot_local():
+    conn = db.get_connection(DB_PATH)
+    try:
+        tasks_list = db.get_tasks(conn)
+        notes_rows = conn.execute("SELECT * FROM notes WHERE status = 'open'").fetchall()
+        notes_list = [dict(r) for r in notes_rows]
+    finally:
+        conn.close()
+
+    with JARVIS_STATE_LOCK:
+        snapshot = JARVIS_UI_SNAPSHOT.copy()
+
+    with STATE_LOCK:
+        snapshot["messages"] = CONVO[-10:]
+
+    snapshot["tasks"] = tasks_list
+    snapshot["notes"] = notes_list
+    snapshot["acks"] = list(JARVIS_ACK_QUEUE)
+    return snapshot
+
+def change_settings_local(settings_dict):
+    current = load_settings()
+    for k in ["theme", "voice_speed", "wake_word_threshold", "provider", "ollama_model", "ollama_url"]:
+        if k in settings_dict:
+            if k == "voice_speed":
+                current[k] = int(settings_dict[k])
+            elif k == "wake_word_threshold":
+                current[k] = float(settings_dict[k])
+            else:
+                current[k] = str(settings_dict[k])
+    save_settings(current)
+    return current
+
+def start_pipeline_local(settings_dict):
+    task = settings_dict.get("task", "").strip()
+    if not task:
+        return {"error": "task is required"}
+    push_message("system", f"Pipeline started: {task[:80]}...")
+    async def gate_fn(gate_number: int, data: dict) -> dict:
+        with PIPELINE_LOCK:
+            PIPELINE_STATE["current_gate"] = gate_number
+            PIPELINE_STATE["gate_status"] = "waiting"
+            PIPELINE_STATE["redirect_note"] = None
+        push_message("system", f"Gate {gate_number} is open. Waiting for your approval.")
+        import asyncio
+        while True:
+            await asyncio.sleep(2)
+            with PIPELINE_LOCK:
+                status = PIPELINE_STATE["gate_status"]
+                note = PIPELINE_STATE["redirect_note"]
+            if status in ("approved", "rejected"):
+                with PIPELINE_LOCK:
+                    PIPELINE_STATE["current_gate"] = None
+                    PIPELINE_STATE["gate_status"] = "idle"
+                return {"approved": status == "approved", "redirect_note": note}
+    def run_pipeline():
+        import asyncio
+        from multi_agent_coordinator import run_full_pipeline
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn))
+            push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
+        except Exception as e:
+            push_message("system", f"Pipeline error: {e}")
+        finally:
+            loop.close()
+    threading.Thread(target=run_pipeline, daemon=True).start()
+    return {"status": "pipeline_started", "task": task}
+
+def get_gate_status_local():
+    with PIPELINE_LOCK:
+        return PIPELINE_STATE.copy()
+
+def update_metric_local(settings_dict):
+    name = settings_dict.get("name")
+    value = settings_dict.get("value")
+    threshold = settings_dict.get("threshold")
+    if not name or value is None:
+        return {"error": "name and value required"}
+    with TRACKED_METRICS_LOCK:
+        TRACKED_METRICS[name] = {"value": float(value), "threshold": float(threshold or 0)}
+    return {"status": "updated", "metric": name, "value": value}
+
+def read_metrics_local():
+    with TRACKED_METRICS_LOCK:
+        return dict(TRACKED_METRICS)
+
+coordinator.register_state_provider("read_app_snapshot", get_snapshot_local)
+coordinator.register_state_provider("read_settings", load_settings)
+coordinator.register_state_provider("change_settings", change_settings_local)
+coordinator.register_state_provider("start_pipeline", start_pipeline_local)
+coordinator.register_state_provider("get_gate_status", get_gate_status_local)
+coordinator.register_state_provider("update_metric", update_metric_local)
+coordinator.register_state_provider("read_metrics", read_metrics_local)
+
 coordinator.register_tool_listener(jarvis_tool_listener)
 
 def handle_request(transcript: str) -> str:
@@ -378,7 +475,7 @@ recognizer.energy_threshold = 300
 recognizer.dynamic_energy_threshold = True
 recognizer.dynamic_energy_adjustment_damping = 0.15
 recognizer.dynamic_energy_ratio = 1.5
-recognizer.pause_threshold = 0.8
+recognizer.pause_threshold = 1.0
 
 # ---------------------------------------------------------------------------
 # Local-only web server (127.0.0.1 - not reachable from your network)
@@ -839,9 +936,10 @@ def mic_loop(window):
                 # Determine whether they said "Hey Jarvis" or just "Jarvis"
                 greeting = "Hello Sir, how can I help you?"
                 try:
-                    wake_audio = bytes(buffer)
+                    # Crop to last 1.2 seconds of buffer to speed up API upload/processing
+                    wake_audio = bytes(buffer[-38400:])
                     sr_audio = sr.AudioData(wake_audio, 16000, 2)
-                    text = recognizer.recognize_google(sr_audio).lower()
+                    text = recognizer.recognize_google(sr_audio, language="en-US").lower()
                     print(f"[wake analysis] {text}")
                     if "hey" in text:
                         greeting = "Hello Sir, how can I help you?"

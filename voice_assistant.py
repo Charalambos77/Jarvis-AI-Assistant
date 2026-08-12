@@ -57,7 +57,7 @@ recognizer.energy_threshold = 300
 recognizer.dynamic_energy_threshold = True
 recognizer.dynamic_energy_adjustment_damping = 0.15
 recognizer.dynamic_energy_ratio = 1.5
-recognizer.pause_threshold = 0.8
+recognizer.pause_threshold = 1.0
 
 def speak(text: str):
     print(f"[Jarvis] {text}")
@@ -68,41 +68,47 @@ def speak(text: str):
     played_via_eleven = False
     if eleven_key:
         try:
+            import hashlib
             import requests
-            import tempfile
             import ctypes
             
-            url = f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice}"
-            headers = {
-                "xi-api-key": eleven_key,
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "text": text,
-                "model_id": "eleven_turbo_v2",
-                "voice_settings": {
-                    "stability": 0.5,
-                    "similarity_boost": 0.75
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            cache_dir = os.path.join(script_dir, "data", "tts_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            text_hash = hashlib.md5((text + "_" + eleven_voice).encode("utf-8")).hexdigest()
+            cache_path = os.path.join(cache_dir, f"{text_hash}.mp3")
+            
+            use_cached = os.path.exists(cache_path)
+            success = True
+            
+            if not use_cached:
+                url = f"https://api.elevenlabs.io/v1/text-to-speech/{eleven_voice}"
+                headers = {
+                    "xi-api-key": eleven_key,
+                    "Content-Type": "application/json"
                 }
-            }
-            res = requests.post(url, json=payload, headers=headers, timeout=10)
-            if res.status_code == 200:
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                    f.write(res.content)
-                    temp_path = f.name
-                
-                path_str = os.path.abspath(temp_path)
+                payload = {
+                    "text": text,
+                    "model_id": "eleven_turbo_v2",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75
+                    }
+                }
+                res = requests.post(url, json=payload, headers=headers, timeout=10)
+                if res.status_code == 200:
+                    with open(cache_path, "wb") as f:
+                        f.write(res.content)
+                else:
+                    print(f"[ElevenLabs Error] {res.status_code}: {res.text}")
+                    success = False
+            
+            if success and os.path.exists(cache_path):
+                path_str = os.path.abspath(cache_path)
                 ctypes.windll.winmm.mciSendStringW(f'open "{path_str}" type mpegvideo alias jarvis_voice', None, 0, 0)
                 ctypes.windll.winmm.mciSendStringW('play jarvis_voice wait', None, 0, 0)
                 ctypes.windll.winmm.mciSendStringW('close jarvis_voice', None, 0, 0)
-                
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
                 played_via_eleven = True
-            else:
-                print(f"[ElevenLabs Error] {res.status_code}: {res.text}")
         except Exception as e:
             print(f"[ElevenLabs Exception] {e}")
 
