@@ -3,7 +3,7 @@
 This document outlines the core operational architecture for Jarvis. It is designed to handle **any complex task** (marketing, coding, content creation, research) through a dynamic, multi-agent orchestration process.
 
 ## 1. Goal Description
-To build a closed-loop, autonomous system where a Central Brain delegates tasks to highly specialized, dynamically spawned micro-agents. The system features two-stage planning (Research Plan -> Execution Plan), strict Human-in-the-Loop (HITL) approval gates with **rejection re-routing**, a conflict-resolving Synthesis Agent, a Quality Checker Agent, bidirectional Long-Term Memory, and a closed-loop performance feedback system.
+To build a closed-loop, autonomous system where a Central Brain delegates tasks to highly specialized, dynamically spawned micro-agents. The system features **ordered, multi-cycle research** (each cycle covers a different domain — e.g., branding → video production → virality — and each cycle has its own synthesis + approval gate), strict Human-in-the-Loop (HITL) approval gates with **rejection re-routing**, a conflict-resolving Synthesis Agent, a Quality Checker Agent, bidirectional Long-Term Memory, and a closed-loop performance feedback system. The Brain and agents dynamically decide how many research cycles are needed (minimum 3), with each cycle building on the approved outputs of the previous ones.
 
 ---
 
@@ -20,6 +20,7 @@ To build a closed-loop, autonomous system where a Central Brain delegates tasks 
 > 6. **[FIX #5] Bidirectional Long-Term Memory:** Research Agents can now query the Long-Term Memory mid-task, not just at initiation. This means a Hook Researcher can see that "punchy opening lines under 5 words historically perform 80% better" before writing, not after.
 > 7. **[FIX #6] Closed-Loop Performance Feedback:** If the Track Agent detects performance below a defined threshold (e.g., video CTR < 3%), it sends a signal back to the Brain to re-initiate a corrective sub-task. The loop never ends at deployment.
 > 8. **Max Retry / Loop Guard:** Configurable safeguards (`MAX_RETRIES = 3`) are applied to the conflict resolution loop, gate rejection re-routings, and Quality Checker re-runs. If retries exceed this limit, the system gracefully escalates to the user with a detailed error report containing the exact issues that caused the retries, preventing infinite loops and runaway LLM costs.
+> 9. **[FIX #7] Ordered Multi-Cycle Research:** Research is NOT a single parallel blast. The Brain plans an ordered sequence of research cycles (minimum 3), where each cycle targets a specific domain (e.g., Cycle 1: brand identity & positioning, Cycle 2: content format & production, Cycle 3: distribution & virality). Each cycle spawns its own parallel agents, runs synthesis, and pauses at its own approval gate. Later cycles receive the approved blueprints from earlier cycles as input context — so the video production research already knows the brand voice, and the virality research already knows the content format. The Brain and agents decide the cycle count dynamically based on task complexity.
 
 ---
 
@@ -32,15 +33,17 @@ graph TD
     Memory[(Long-Term Memory)] -.-|Past Successes & Patterns| Brain
     Dashboard[(API/Provider Dashboard)] -.-|Available Tools| Brain
 
-    Brain --> InitialPlan[Builds Initial Research Plan]
-    InitialPlan --> SpawnRes[Spawns Specialized Research Agents]
+    Brain --> CyclePlan["Plans Ordered Research Cycles (min 3)"]
+    CyclePlan --> CycleStart{Start Next Research Cycle}
 
-    %% Phase 2: Parallel Micro-Research + Bidirectional Memory [FIX #5]
-    SpawnRes --> R1[Micro-Agent 1: Subject A]
-    SpawnRes --> R2[Micro-Agent 2: Subject B]
+    %% Phase 2: Ordered Multi-Cycle Research [FIX #7]
+    CycleStart --> SpawnRes["Spawns Cycle N Research Agents"]
+    SpawnRes --> R1["Micro-Agent 1: Domain-Specific"]
+    SpawnRes --> R2["Micro-Agent 2: Domain-Specific"]
     SpawnRes --> R_Dots[...]
-    SpawnRes --> RN[Micro-Agent N: Subject N]
+    SpawnRes --> RN["Micro-Agent N: Domain-Specific"]
 
+    PrevBlueprints[("Approved Blueprints from Prior Cycles")] -.-|"Context from cycles 1..N-1"| SpawnRes
     Memory -.-|Mid-task pattern lookup| R1
     Memory -.-|Mid-task pattern lookup| R2
     Memory -.-|Mid-task pattern lookup| RN
@@ -49,15 +52,17 @@ graph TD
     R1 & R2 & R_Dots & RN --> Synth[Synthesis Agent]
     Synth -->|Conflict Detected| Brain
     Brain -->|Adjudicate & Rebrief| SpawnRes
-    Synth -->|No Conflicts - Blueprint Ready| Gate1
+    Synth -->|No Conflicts - Cycle Blueprint Ready| CycleGate
 
-    %% Phase 4: Gate 1 with Rejection Path [FIX #2]
-    Gate1{HUMAN GATE 1: Review Research}
-    Gate1 -->|Rejected + Redirect Note| Brain
-    Gate1 -->|Approved| SecondPlan[Brain builds Final Execution Plan]
+    %% Phase 4: Per-Cycle Gate [FIX #2 + FIX #7]
+    CycleGate{"HUMAN GATE: Review Cycle N Research"}
+    CycleGate -->|Rejected + Redirect Note| Brain
+    CycleGate -->|Approved| CycleCheck{More Cycles Remaining?}
+    CycleCheck -->|"Yes — save blueprint, advance"| CycleStart
+    CycleCheck -->|"No — all research complete"| SecondPlan[Brain builds Final Execution Plan]
 
     %% Phase 5: Gate 2 with Rejection Path [FIX #2]
-    SecondPlan --> Gate2{HUMAN GATE 2: Review Blueprint}
+    SecondPlan --> Gate2{HUMAN GATE: Review Execution Blueprint}
     Gate2 -->|Rejected + Redirect Note| SecondPlan
     Gate2 -->|Approved| SpawnExec[Spawns Specific Execution Agents]
 
@@ -72,7 +77,7 @@ graph TD
     QA -->|All Outputs Pass| Gate3
 
     %% Phase 7: Gate 3 with Rejection Path [FIX #2]
-    Gate3{HUMAN GATE 3: Final Product QA}
+    Gate3{HUMAN GATE: Final Product QA}
     Gate3 -->|Rejected + Redirect Note| SpawnExec
     Gate3 -->|Approved| Deploy[Deployment / Upload Agent]
 
@@ -89,65 +94,127 @@ graph TD
 
 ### Phase 1: The Central Brain (Orchestrator)
 - **Action**: Receives the task, assesses difficulty, and determines the initial requirements.
-- **Planning**: Creates an **Initial Implementation Plan** that strictly defines the research flow. It doesn't assume it knows how to execute yet.
+- **[FIX #7] Cycle Planning**: The Brain's first job is to plan an **ordered sequence of research cycles** (minimum 3). Each cycle targets a distinct domain or layer of the task. The cycle plan is itself a structured JSON output from the Brain:
+  ```json
+  {
+    "cycles": [
+      {"cycle_id": 1, "domain": "Brand & Identity", "goal": "Understand company positioning, voice, and competitive landscape"},
+      {"cycle_id": 2, "domain": "Content Production", "goal": "Determine optimal video format, structure, and production approach"},
+      {"cycle_id": 3, "domain": "Distribution & Virality", "goal": "Research SEO, platform algorithms, hook patterns, and CTR optimization"},
+      {"cycle_id": 4, "domain": "Monetization", "goal": "Research CTA placement, affiliate strategies, and conversion funnels"}
+    ]
+  }
+  ```
+- **Ordering matters**: Each cycle's agents receive the approved blueprints from ALL prior cycles as input context. The video production cycle already knows the brand voice. The virality cycle already knows the content format.
 - **Provisioning**: Reads the API/Provider configuration registry (mapping services to their API keys, endpoints, and status: up/down/rate-limited) and grants the necessary tools to the agents.
 - **Memory Read**: Queries Long-Term Memory for any relevant past patterns *before* spawning agents.
 
-### Phase 2: Parallel Micro-Research Agents
-- **Action**: The Brain spawns highly specialized micro-agents to understand *how* to do the task perfectly.
-- **Example (Video)**: `Hook Researcher`, `Body Researcher`, `CTA Researcher`, `SEO Researcher`, `Comment Researcher`.
-- **Example (Coding)**: `Architecture Researcher`, `Dependency Researcher`, `Security Researcher`.
-- **[FIX #5] Bidirectional Memory**: Each Research Agent can issue a memory query mid-task (e.g., "What hook formats worked above 70% retention?") and get back relevant patterns from past successful runs.
+### Phase 2: Ordered Multi-Cycle Research [FIX #7 + FIX #8]
+
+The research phase is a **loop** — not a single parallel blast. For each cycle in the Brain's plan:
+
+#### 2a. Spawn Cycle Research Agents (Lead Specialist + Advisory Agents)
+
+Each cycle has **one Lead Specialist agent** and **multiple Advisory agents**. The Lead Specialist owns the cycle's domain and has the **final word** on the cycle's output.
+
+- **Lead Specialist**: A single agent who is deeply specialized in the current cycle's domain. This agent has authority over the final cycle blueprint. After reviewing all advisory input, the Lead decides what to keep, modify, or discard.
+- **Advisory Agents**: Supporting agents that contribute research from adjacent angles. They provide opinions, data, and alternative perspectives — but the Lead Specialist is not obligated to accept their input.
+
+**Example (Video Task)**:
+  - **Cycle 1 (Brand)**:
+    - 🎯 **Lead**: `Brand Strategist` — owns brand positioning, voice, and identity decisions
+    - 📎 Advisory: `Competitor Analyst` — researches competitor branding for the Lead to consider
+    - 📎 Advisory: `Target Audience Researcher` — profiles the ideal customer for the Lead to factor in
+  - **Cycle 2 (Production)**:
+    - 🎯 **Lead**: `Content Director` — owns format, structure, and production decisions
+    - 📎 Advisory: `Hook Format Researcher` — researches hook patterns for the Lead to evaluate
+    - 📎 Advisory: `Visual Style Researcher` — researches visual trends for the Lead to review
+  - **Cycle 3 (Virality)**:
+    - 🎯 **Lead**: `Growth Strategist` — owns distribution, SEO, and algorithm strategy
+    - 📎 Advisory: `Platform Algorithm Researcher` — provides platform-specific data
+    - 📎 Advisory: `Trend Researcher` — identifies current viral patterns
+
+**Two-Pass Research Flow**:
+  1. **Pass 1 — Parallel Research**: All agents (Lead + Advisory) run in parallel. Each produces their own findings independently.
+  2. **Pass 2 — Lead Specialist Review**: The Lead Specialist receives ALL advisory agents' findings. The Lead reviews each one and produces the **authoritative cycle output** — a final JSON that incorporates, modifies, or explicitly rejects each advisory finding with a reason.
+
+  The Lead's review prompt includes:
+  ```
+  You are the Lead Specialist for this research cycle. You have FINAL AUTHORITY.
+  Below are findings from your advisory agents. For each advisory finding:
+  - ACCEPT: incorporate it into your output (with or without modifications)
+  - REJECT: explain why you are discarding it
+  You must produce the definitive cycle research output.
+  ```
+
+  > **⚠️ ANTI-PATTERN WARNING:** The Lead Specialist review must NOT be a simple merge or majority vote. The Lead is a separate LLM call that reads its own initial findings PLUS all advisory findings and produces a new, authoritative output. The Lead's domain expertise means their judgment overrides advisory agents when there is disagreement — this is by design. If implemented as `{**lead_findings, **advisory_1, **advisory_2}` (dict merge), the Lead's expertise is silently overwritten by generalist advisory agents.
+
+- **Context Injection**: Agents in Cycle N automatically receive the **approved blueprints from Cycles 1 through N-1** as part of their system prompt. This means the Content Director in Cycle 2 already knows the brand voice and target audience from Cycle 1's Lead Specialist output.
+- **[FIX #5] Bidirectional Memory**: Each Research Agent (Lead and Advisory) can issue a memory query mid-task (e.g., "What hook formats worked above 70% retention?") and get back relevant patterns from past successful runs.
 - **API Selection & Dynamic Tools**: Agents do NOT hardcode their tools list (e.g., in `research_agent.py`'s `tools_list`). Instead, they dynamically construct their tools list by reading the `tools_needed` provided in their configuration from the registry.
 - **API Fallback Loop**: If an agent hits an API failure (e.g., rate limits or service down), it signals the Central Brain, which reads the registry status and reassigns a backup tool/connector to allow the agent to finish the task without crashing the pipeline.
 
-### Phase 3: Synthesis Agent + Conflict Resolution [FIX #3]
-- **Compression**: Synthesis Agent compresses all N parallel research reports into one hyper-dense blueprint.
-  > **⚠️ ANTI-PATTERN WARNING:** "Compress" must NOT be implemented as naive dict-merging or picking one agent's value per key. The Synthesis Agent must use a structured LLM call that reads ALL N agent reports in full and produces a single unified blueprint that incorporates the best insights from each agent. Any implementation that flattens results into `{key: entries[0]["value"]}` silently discards all but one agent's findings and defeats the purpose of parallel research.
-- **[FIX #3] Conflict Detection & Choice Resolution**: Before generating the blueprint, the Synthesis Agent checks for contradictions across agent reports (e.g., one agent says "use TikTok API", another says "TikTok API is down"), as well as competing tool/API recommendations. 
+#### 2b. Synthesis + Conflict Resolution (Per-Cycle) [FIX #3]
+- **Input**: The Lead Specialist's authoritative cycle output (which already incorporates/rejects advisory input).
+- **Compression**: The Synthesis Agent takes the Lead's final output and compresses it into a hyper-dense **cycle blueprint**, formatted for downstream consumption.
+  > **⚠️ ANTI-PATTERN WARNING:** "Compress" must NOT be implemented as naive dict-merging or picking one agent's value per key. The Synthesis Agent must use a structured LLM call that reads the Lead's full output and produces a single unified blueprint. Any implementation that flattens results into `{key: entries[0]["value"]}` silently discards critical nuance.
+- **[FIX #3] Conflict Detection**: Even after the Lead's review pass, the Synthesis Agent checks for internal contradictions within the Lead's output (e.g., the Lead accepted two advisory findings that contradict each other).
   - If a conflict or multiple competing options (APIs/MCPs) are detected:
     - They are formatted into a structured list of options.
     - Each option must explicitly show **"Why use it (Pros)"** and **"Why not use it (Cons)"**.
-    - The signal and options route back to the Brain and are presented directly to the user at Gate 1.
+    - The signal and options route back to the Brain and are presented directly to the user at the cycle gate.
     - **User Resolution**: The user is presented with a checkbox interface where they can see the comparison and select one or *multiple* APIs/MCPs/options to be used simultaneously.
   - Conflicts are flagged with the specific contradiction described.
   - The signal routes back to the Brain, not to the gate.
-  - Brain adjudicates (either resolves it or re-spawns only the conflicting agents with corrected briefings).
+  - Brain adjudicates (either resolves it or asks the Lead Specialist to re-review with the conflict highlighted).
   > **⚠️ ANTI-PATTERN WARNING:** Conflict detection must NOT compare stringified dict values across agents for matching keys. Research agents produce unique `findings` dicts with different keys — they will almost never share keys, so real semantic contradictions (e.g., Agent A says "use React" while Agent B says "React is not suitable for this use case") will be silently missed. Conflict detection must be performed by an LLM that reads all findings and identifies logical/semantic contradictions.
-- **Gate 1**: The system pauses. The user reviews the aggregated research, the compiled blueprint, and any unresolved options/conflicts (allowing them to multi-select tools/APIs with pros/cons), and approves or redirects.
 
-### Phase 4: HUMAN GATE 1 [FIX #2]
-- **Approved**: Brain proceeds to build the Final Execution Plan.
-- **[FIX #2] Rejected**: The user attaches a redirect note (e.g., "Focus more on competitor SEO analysis, not just ours"). This note is passed back to the Brain as additional context. The Brain **does not restart from scratch** — it re-briefs only the relevant research agents and re-synthesises.
+#### 2c. Per-Cycle Approval Gate [FIX #2 + FIX #7]
+- The system pauses at a **per-cycle approval gate**. The user reviews:
+  - The current cycle's domain and goal
+  - The aggregated research from this cycle's agents
+  - The compiled cycle blueprint
+  - Any unresolved conflicts/options
+  - How this cycle's findings build on prior approved cycles
+- **Approved**: The cycle blueprint is saved to the `approved_blueprints` stack. The loop advances to the next cycle.
+- **[FIX #2] Rejected**: The user attaches a redirect note (e.g., "Focus more on competitor SEO analysis, not just ours"). This note is passed back to the Brain as additional context. The Brain **does not restart from scratch** — it re-briefs only the relevant research agents for THIS cycle and re-synthesises.
   > **⚠️ ANTI-PATTERN WARNING:** "Re-briefs only the relevant research agents" must NOT be implemented as re-running ALL agents. The Brain must parse the redirect note to identify which specific agent(s) need re-briefing, then spawn only those. After they return, the Synthesis Agent must re-run using the mix of old (unchanged) + new (re-run) agent results — not discard the old results.
 
-### Phase 5: Second Implementation Plan (Execution Blueprint)
-- **Action**: Using the approved research, the Brain creates the **Final Implementation Plan**.
-- **Dynamic Spawning**: The system spawns execution agents based *strictly* on what the research dictated was necessary.
+#### 2d. Cycle Completion
+- When all cycles are approved, the Brain has a **stack of approved blueprints** — one per cycle. These are merged by the Synthesis Agent into a **Master Research Blueprint** that combines all cycles' findings.
+- This master blueprint is what feeds into the Execution Plan.
 
-### Phase 6: HUMAN GATE 2 [FIX #2]
+### Phase 3: Master Blueprint Compilation
+- **Action**: The Synthesis Agent takes all N approved cycle blueprints and produces one unified **Master Research Blueprint**.
+- This is the document that the Execution Plan is built from. It contains the full knowledge from all research cycles.
+
+### Phase 4: Execution Plan (Final Implementation Plan)
+- **Action**: Using the master blueprint, the Brain creates the **Final Implementation Plan**.
+- **Dynamic Spawning**: The system spawns execution agents based *strictly* on what the combined research dictated was necessary.
+
+### Phase 5: HUMAN GATE — Review Execution Blueprint [FIX #2]
 - **Approved**: Execution agents are spawned and begin building.
-- **[FIX #2] Rejected**: The redirect note routes back to the Second Implementation Plan stage. The Brain adjusts the blueprint (e.g., "swap out the Python backend for Node.js") without restarting research.
+- **[FIX #2] Rejected**: The redirect note routes back to the Execution Plan stage. The Brain adjusts the blueprint (e.g., "swap out the Python backend for Node.js") without restarting research.
 
-### Phase 7: Execution + Quality Checker [FIX #4]
+### Phase 6: Execution + Quality Checker [FIX #4]
 - **Execution**: Spawned agents build the final product using their designated APIs.
 - **[FIX #4] Quality Checker Agent**: Once all execution agents return their outputs, the Quality Checker Agent executes a **two-tiered verification**:
   1. **Individual Verification**: Runs schema checks (correct JSON keys, word count metrics) and executes a lightweight LLM call to verify that each agent's output semantically adheres to its individual brief, spec, and tone.
   2. **Global Integration Verification**: Executes a final LLM-powered check to ensure that all generated outputs align and integrate seamlessly with each other (and with any untouched components during partial re-runs).
-- **Pass**: All outputs proceed to Gate 3.
+- **Pass**: All outputs proceed to the final gate.
 - **Fail**: The specific failed agent(s) are flagged and re-spawned, not the entire execution batch.
 
-### Phase 8: HUMAN GATE 3 [FIX #2]
+### Phase 7: HUMAN GATE — Final Product QA [FIX #2]
 - **Approved**: Deployment Agent authenticates and pushes the product live.
 - **[FIX #2] Rejected**: The redirect note routes back to SpawnExec. Only the specific component the user rejected needs to be rebuilt, not the entire execution batch.
   > **⚠️ ANTI-PATTERN WARNING:** "Only the specific component" must NOT be implemented as re-running `run_execution_phase()` with the full agent plan (which re-spawns ALL agents). The redirect note must be parsed (by the Brain via LLM) to identify which specific agent ID(s) produced the rejected component, then only those agents are re-spawned. The final result set must merge the re-run outputs with the previously-approved outputs.
 
-### Phase 9: Deployment Agent
-- **Action**: An `agents/deployment_agent.py` is called by the pipeline coordinator once Gate 3 passes.
+### Phase 8: Deployment Agent
+- **Action**: An `agents/deployment_agent.py` is called by the pipeline coordinator once the final gate passes.
 - **Mechanism**: The agent takes the final compiled execution results + a target platform configuration, authenticates with the external API/service (YouTube, GitHub, Stripe, etc.), and performs the actual upload/deployment.
 - > **⚠️ ANTI-PATTERN WARNING:** The pipeline must NOT end prematurely by simply returning a dictionary with `"ready_for_deploy": True` (as currently done in `multi_agent_coordinator.py`). The coordinator must await the actual execution of the Deployment Agent and record the deployment status/logs in the pipeline state before passing control to the Track Agent.
 
-### Phase 10: Closed-Loop Tracking [FIX #6]
+### Phase 9: Closed-Loop Tracking [FIX #6]
 - **Action**: An active `agents/track_agent.py` runs as a background process (or cron loop) to monitor live stats post-deployment.
 - **Mechanism**: The agent actively polls external APIs (such as YouTube Analytics, Google Analytics, GitHub API, etc.) for performance data rather than relying on passive REST endpoints. It reads performance targets and thresholds directly from the task/pipeline metadata.
 - **[FIX #6] Memory Save (Wins)**: If performance is ABOVE threshold — extracts the *why* (e.g., "This intro hooked 80% of viewers") and saves the pattern into Long-Term Memory.
@@ -155,7 +222,7 @@ graph TD
 - **[FIX #6] Corrective Loop (Losses)**: If performance is BELOW a defined threshold (e.g., CTR < 3%, error rate > 5%):
   - Track Agent sends a failure signal back to the Brain.
   - Brain spawns a **corrective sub-task** (e.g., "Re-cut the hook", "Patch the failing endpoint").
-  - This sub-task re-enters the pipeline at Phase 7 (Execution), bypassing the research phase.
+  - This sub-task re-enters the pipeline at Phase 6 (Execution), bypassing the research phase.
   - The loop is genuinely closed — deployment is not the end state.
 
 ---
@@ -176,9 +243,16 @@ graph TD
 
 ### 🔧 What Needs to Be Built
 
-**Priority 1 — Core Multi-Agent Engine** (`multi_agent_coordinator.py`)
-- Spawns N sub-agents as parallel async tasks (using `asyncio` + Gemini/Claude calls)
-- Each sub-agent gets a scoped system prompt, specific tools, and a memory query hook
+**Priority 1 — Core Multi-Agent Engine + Research Cycle Loop** (`multi_agent_coordinator.py`)
+- **[FIX #7] Cycle Planning**: The Brain's `build_agent_plan` now returns a `cycles` list. Each cycle has a `domain`, `goal`, and its own `research_agents` list.
+- **Cycle Loop**: `run_full_pipeline` iterates through cycles sequentially. For each cycle:
+  1. Spawn the cycle's research agents in parallel (using `asyncio` + Gemini/Claude calls)
+  2. Run synthesis on cycle results
+  3. Pause at a per-cycle approval gate
+  4. On approval, save the cycle blueprint to `approved_blueprints` stack
+  5. Pass `approved_blueprints` as context to the next cycle's agents
+- **Minimum 3 cycles**: The Brain's system prompt enforces a minimum of 3 research cycles. The Brain and agents decide the actual count dynamically.
+- Each sub-agent gets a scoped system prompt, specific tools, a memory query hook, and (for cycles 2+) the approved blueprints from prior cycles
 - Returns structured JSON results back to Brain
 
 **Priority 2 — Synthesis Agent** (rewrite of `agents/synthesis.py`)
@@ -340,9 +414,61 @@ The following data structures and endpoints are needed to power the dashboard:
 ---
 
 
-## 6. What is Missing From This Plan
+## 6. Implementation Steps
 
-> [!IMPORTANT]
-> **Audit methodology:** Every claim below was cross-referenced against the actual codebase files. Items previously listed as "missing" that already exist in code have been corrected.
+This section details the ordered steps required to build this multi-agent architecture, mapped to the relevant priorities and line numbers in this plan.
 
----
+### Step 1: Core Multi-Agent Engine + Research Cycle Loop
+- **Files**: [multi_agent_coordinator.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/multi_agent_coordinator.py), [agents/brain.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/agents/brain.py)
+- **Description**: Implements the ordered research cycle loop. The Brain plans a sequence of research cycles (min 3). For each cycle: spawn domain-specific agents in parallel, synthesize, pause at a per-cycle approval gate, save the approved blueprint, and pass it as context to the next cycle. After all cycles complete, compile the Master Research Blueprint.
+- **Reference**: Priority 1 and Phase 1 + Phase 2 (Cycle Planning, 2a-2d, Master Blueprint Compilation)
+
+### Step 2: Synthesis Agent Refactor
+- **Files**: [agents/synthesis.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/agents/synthesis.py)
+- **Description**: Implements LLM-powered conflict detection and blueprint compression. Must also support per-cycle synthesis and final master blueprint compilation from the stack of approved cycle blueprints.
+- **Reference**: Priority 2 and Phase 2b + Phase 3
+
+### Step 3: Two-Tiered Quality Checker Agent
+- **Files**: [agents/quality_checker.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/agents/quality_checker.py)
+- **Description**: Validates schema compliance (individual verification) and semantic/alignment compliance (global integration check).
+- **Reference**: Priority 3 and Phase 6
+
+### Step 4: Memory Pattern Table Integration
+- **Files**: [db.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/db.py)
+- **Description**: Adds schema columns and queries table mid-task.
+- **Reference**: Priority 4
+
+### Step 5: HITL Gate API Endpoints & UI Integration
+- **Files**: [jarvis.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/jarvis.py), [plan.html](file:///d:/Charalambos/Desktop/AI/second-brain-voice/plan.html)
+- **Description**: Exposes `/gate/approve` and `/gate/reject` with step-level rejection support. The Plan page shows an approval modal card (popup) with checkboxes per step, a reason textarea, and approve/reject buttons. Must handle per-cycle gates (multiple sequential gates during research) and execution gates. See [implementation_plan_to_show_plans.md](file:///d:/Charalambos/Desktop/AI/second-brain-voice/Implementation%20Plans/ToDo/implementation_plan_to_show_plans.md).
+- **Reference**: Priority 5 & 6 and Phase 2c + Phase 5 + Phase 7
+
+### Step 6: API Provider Config Registry
+- **Files**: [connectors/api_connector.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/connectors/api_connector.py), [connectors/mcp_connector.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/connectors/mcp_connector.py)
+- **Description**: Defines service maps, status, dynamic tool configuration, and API fallback loops.
+- **Reference**: Priority 10 and Phase 1 + Phase 2a
+
+### Step 7: Partial Re-Execution Logic
+- **Files**: [multi_agent_coordinator.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/multi_agent_coordinator.py)
+- **Description**: Parses redirect notes and re-runs only the target rejected agents, merging results. Applies to both per-cycle research rejections and execution gate rejections.
+- **Reference**: Priority 11 and Phase 2c + Phase 7
+
+### Step 8: Max Retry & Loop Guards
+- **Files**: [multi_agent_coordinator.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/multi_agent_coordinator.py)
+- **Description**: Tracks loop/rejection counters and enforces `MAX_RETRIES = 3` limits per cycle gate and per execution gate.
+- **Reference**: Priority 12 and Safeguard 8
+
+### Step 9: Deployment Agent
+- **Files**: [agents/deployment_agent.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/agents/deployment_agent.py)
+- **Description**: Executes final API/service upload and posts deployment logs.
+- **Reference**: Priority 9 and Phase 8
+
+### Step 10: Track Agent & Closed-Loop Feedback
+- **Files**: [agents/track_agent.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/agents/track_agent.py)
+- **Description**: Background loops polling external performance metrics, triggering corrective sub-tasks.
+- **Reference**: Priority 7 and Phase 9
+
+### Step 11: Real-time Observability Dashboard
+- **Files**: [jarvis.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/jarvis.py), UI templates (e.g. `command_center.html`)
+- **Description**: Sets up event log, agent registry endpoints, and UI dashboard widgets. Must show cycle progression and per-cycle agent activity.
+- **Reference**: Priority 8 and Observability Section
