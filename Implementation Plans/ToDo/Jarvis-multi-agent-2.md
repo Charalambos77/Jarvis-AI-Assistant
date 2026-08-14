@@ -19,6 +19,7 @@ To build a closed-loop, autonomous system where a Central Brain delegates tasks 
 > 5. **[FIX #4] Quality Checker Agent:** After execution agents finish but before Gate 3 human review, a lightweight Quality Checker Agent validates each agent's output. Failed agents are re-spawned automatically rather than blocking the gate with bad output.
 > 6. **[FIX #5] Bidirectional Long-Term Memory:** Research Agents can now query the Long-Term Memory mid-task, not just at initiation. This means a Hook Researcher can see that "punchy opening lines under 5 words historically perform 80% better" before writing, not after.
 > 7. **[FIX #6] Closed-Loop Performance Feedback:** If the Track Agent detects performance below a defined threshold (e.g., video CTR < 3%), it sends a signal back to the Brain to re-initiate a corrective sub-task. The loop never ends at deployment.
+> 8. **Max Retry / Loop Guard:** Configurable safeguards (`MAX_RETRIES = 3`) are applied to the conflict resolution loop, gate rejection re-routings, and Quality Checker re-runs. If retries exceed this limit, the system gracefully escalates to the user with a detailed error report containing the exact issues that caused the retries, preventing infinite loops and runaway LLM costs.
 
 ---
 
@@ -89,7 +90,7 @@ graph TD
 ### Phase 1: The Central Brain (Orchestrator)
 - **Action**: Receives the task, assesses difficulty, and determines the initial requirements.
 - **Planning**: Creates an **Initial Implementation Plan** that strictly defines the research flow. It doesn't assume it knows how to execute yet.
-- **Provisioning**: Reads the global API/MCP dashboard and grants the necessary tools to the agents.
+- **Provisioning**: Reads the API/Provider configuration registry (mapping services to their API keys, endpoints, and status: up/down/rate-limited) and grants the necessary tools to the agents.
 - **Memory Read**: Queries Long-Term Memory for any relevant past patterns *before* spawning agents.
 
 ### Phase 2: Parallel Micro-Research Agents
@@ -97,7 +98,8 @@ graph TD
 - **Example (Video)**: `Hook Researcher`, `Body Researcher`, `CTA Researcher`, `SEO Researcher`, `Comment Researcher`.
 - **Example (Coding)**: `Architecture Researcher`, `Dependency Researcher`, `Security Researcher`.
 - **[FIX #5] Bidirectional Memory**: Each Research Agent can issue a memory query mid-task (e.g., "What hook formats worked above 70% retention?") and get back relevant patterns from past successful runs.
-- **API Selection**: Agents review available APIs/MCPs and tell the Brain which ones they need. (Fallback loop engages if an API fails).
+- **API Selection & Dynamic Tools**: Agents do NOT hardcode their tools list (e.g., in `research_agent.py`'s `tools_list`). Instead, they dynamically construct their tools list by reading the `tools_needed` provided in their configuration from the registry.
+- **API Fallback Loop**: If an agent hits an API failure (e.g., rate limits or service down), it signals the Central Brain, which reads the registry status and reassigns a backup tool/connector to allow the agent to finish the task without crashing the pipeline.
 
 ### Phase 3: Synthesis Agent + Conflict Resolution [FIX #3]
 - **Compression**: Synthesis Agent compresses all N parallel research reports into one hyper-dense blueprint.
@@ -129,12 +131,11 @@ graph TD
 
 ### Phase 7: Execution + Quality Checker [FIX #4]
 - **Execution**: Spawned agents build the final product using their designated APIs.
-- **[FIX #4] Quality Checker Agent**: After all execution agents return their outputs, a Quality Checker Agent runs lightweight validation:
-  - For code: Does it compile? Are there obvious runtime errors?
-  - For content: Is the word count / format correct? Does it match the brief spec?
-  - For video: Did the render complete? Is the file uncorrupted?
-  - **Pass**: All outputs proceed to Gate 3.
-  - **Fail**: The specific failed agent(s) are flagged and re-spawned, not the entire execution batch.
+- **[FIX #4] Quality Checker Agent**: Once all execution agents return their outputs, the Quality Checker Agent executes a **two-tiered verification**:
+  1. **Individual Verification**: Runs schema checks (correct JSON keys, word count metrics) and executes a lightweight LLM call to verify that each agent's output semantically adheres to its individual brief, spec, and tone.
+  2. **Global Integration Verification**: Executes a final LLM-powered check to ensure that all generated outputs align and integrate seamlessly with each other (and with any untouched components during partial re-runs).
+- **Pass**: All outputs proceed to Gate 3.
+- **Fail**: The specific failed agent(s) are flagged and re-spawned, not the entire execution batch.
 
 ### Phase 8: HUMAN GATE 3 [FIX #2]
 - **Approved**: Deployment Agent authenticates and pushes the product live.
@@ -142,10 +143,13 @@ graph TD
   > **⚠️ ANTI-PATTERN WARNING:** "Only the specific component" must NOT be implemented as re-running `run_execution_phase()` with the full agent plan (which re-spawns ALL agents). The redirect note must be parsed (by the Brain via LLM) to identify which specific agent ID(s) produced the rejected component, then only those agents are re-spawned. The final result set must merge the re-run outputs with the previously-approved outputs.
 
 ### Phase 9: Deployment Agent
-- Authenticates with the relevant platform (YouTube API, GitHub, Stripe, etc.) and pushes the product live.
+- **Action**: An `agents/deployment_agent.py` is called by the pipeline coordinator once Gate 3 passes.
+- **Mechanism**: The agent takes the final compiled execution results + a target platform configuration, authenticates with the external API/service (YouTube, GitHub, Stripe, etc.), and performs the actual upload/deployment.
+- > **⚠️ ANTI-PATTERN WARNING:** The pipeline must NOT end prematurely by simply returning a dictionary with `"ready_for_deploy": True` (as currently done in `multi_agent_coordinator.py`). The coordinator must await the actual execution of the Deployment Agent and record the deployment status/logs in the pipeline state before passing control to the Track Agent.
 
 ### Phase 10: Closed-Loop Tracking [FIX #6]
-- **Action**: The `Track Agent` monitors live stats post-deployment (views, CTR, error rates, conversion rates).
+- **Action**: An active `agents/track_agent.py` runs as a background process (or cron loop) to monitor live stats post-deployment.
+- **Mechanism**: The agent actively polls external APIs (such as YouTube Analytics, Google Analytics, GitHub API, etc.) for performance data rather than relying on passive REST endpoints. It reads performance targets and thresholds directly from the task/pipeline metadata.
 - **[FIX #6] Memory Save (Wins)**: If performance is ABOVE threshold — extracts the *why* (e.g., "This intro hooked 80% of viewers") and saves the pattern into Long-Term Memory.
   > **⚠️ ANTI-PATTERN WARNING:** "Extracts the *why*" must NOT be a simple copy of the metric value into the `memory_patterns` table (e.g., just saving `{"pattern": "ctr was 8%"}`). The Track Agent must use an LLM call that receives the full execution blueprint + the performance data and produces an actionable insight (e.g., "Opening with a question under 5 words correlated with 80% 30-second retention"). Raw metrics without causal analysis are useless as memory patterns.
 - **[FIX #6] Corrective Loop (Losses)**: If performance is BELOW a defined threshold (e.g., CTR < 3%, error rate > 5%):
@@ -177,14 +181,22 @@ graph TD
 - Each sub-agent gets a scoped system prompt, specific tools, and a memory query hook
 - Returns structured JSON results back to Brain
 
-**Priority 2 — Synthesis Agent** (new function in coordinator)
-- Takes N agent result dicts
-- Runs conflict detection via a structured LLM call that identifies semantic contradictions across findings (NOT naive key-comparison)
-- Produces a single compressed blueprint dict via a second LLM call that reads ALL agent reports and synthesises the best insights into one unified blueprint (NOT by picking one agent's value per key)
+**Priority 2 — Synthesis Agent** (rewrite of `agents/synthesis.py`)
+- **Action**: Converts the naive dictionary key merging to a structured Gemini model execution.
+- **LLM Conflict Detection**:
+  - Input: Raw list of findings from all N research agents.
+  - Call: A Gemini call (with `response_mime_type="application/json"`) prompting the model to identify semantic and logical contradictions across reports (e.g., conflicting API recommendations, tool availability mismatches).
+  - Output: Returns a JSON object with schema `{"has_conflicts": boolean, "conflicts": [{"description": "...", "agents_involved": [...], "options": [{"name": "...", "pros": "...", "cons": "..."}]}]}`.
+- **LLM Blueprint Compression**:
+  - Input: Raw findings from all N research agents.
+  - Call: A Gemini call instructing the model to synthesize the N reports, resolving overlapping concepts and keeping only unique, complementary, high-value strategy details.
+  - Output: Returns a single, hyper-dense JSON dictionary mapping the synthesized blueprint keys (without arbitrarily discarding any agent's unique contributions).
 
 **Priority 3 — Quality Checker Agent** (new function in coordinator)
-- Validates execution agent outputs against a spec passed in from the blueprint
-- Returns pass/fail per agent with a reason string
+- Implements two-tiered check:
+  1. Individual validation: Schema checks + a lightweight LLM call to verify that each agent's output semantically adheres to its individual brief, spec, and tone.
+  2. Integration validation: An LLM-powered check to ensure that all generated outputs align and integrate seamlessly with each other (and with untouched components during partial re-runs).
+- Returns pass/fail per agent with a reason string.
 
 **Priority 4 — Memory Pattern Table** (add to `db.py`)
 - New `memory_patterns` table: `pattern_text`, `outcome_metric`, `metric_value`, `task_type`, `created_at`
@@ -201,12 +213,34 @@ graph TD
 - Wire them to the Flask `/gate/approve` and `/gate/reject` endpoints via `fetch()`
 - The pipeline status columns should poll `/gate/status` to show which stage is active
 
-**Priority 7 — Track Agent + Feedback Loop**
+**Priority 7 — Track Agent + Feedback Loop** (new `agents/track_agent.py`)
 - A background thread (or cron) that polls deployment metrics (YouTube API, GA, etc.)
 - Compares against threshold stored in task metadata
-- Calls Brain's `handle_corrective_request()` if below threshold
+- Calls Brain's `handle_corrective_request()` if below threshold and saves winning patterns to `memory_patterns`.
 
 **Priority 8 — Agent Monitor Dashboard** (new UI panel in `command_center.html` or dedicated page)
+- Real-time observability layer with Agent Inspector, View Actions, and View Interactions.
+
+**Priority 9 — Deployment Agent** (new `agents/deployment_agent.py`)
+- Take final execution results + target platform config and perform actual deployment (API uploads, Git push, etc.).
+
+**Priority 10 — API/Provider Dashboard & Connectors**
+- Create configuration registry for service APIs (keys, endpoints, status).
+- Enable dynamic tool construction in agents based on the Brain's plan rather than hardcoded lists.
+- Implement API Fallback loop triggers.
+
+**Priority 11 — Partial Re-Execution Logic** (in `multi_agent_coordinator.py`)
+- Modify `run_execution_phase` to accept an optional `agent_ids_to_run: list[str] = None` list. If provided, the coordinator filters the tasks and spawns only the matching execution agent configurations.
+- In the Gate 3 rejection branch of `run_full_pipeline`:
+  1. Call a lightweight LLM checker to analyze the `redirect_note` against the active execution agent list and output the IDs of the agents that need to be re-run.
+  2. Invoke `run_execution_phase`, passing the target `agent_ids_to_run` and the `redirect_note`.
+  3. Merge the new outputs with the previously approved outputs from other agents (by replacing old items in `exec_results` that match `agent_id`).
+  4. Run both individual validation and global integration validation (Quality Checker) on the newly merged results before returning to the Gate 3 state.
+
+**Priority 12 — Max Retry & Loop Guards** (in `multi_agent_coordinator.py`)
+- Implement a configurable `MAX_RETRIES` (default `3`) limit trackable state counters in the pipeline loops.
+- Track retry numbers for conflict resolution loops, gate rejections, and QA re-runs.
+- If the limit is reached, break the loop and return an error escalation structure (e.g. `{"status": "escalated_to_human", "message": "Failed after 3 retries. Error details: ..."}`) instead of continuing to loop.
 
 The pipeline needs a real-time observability layer so you can see exactly what every agent is doing, what they're saying to the Brain, and inspect any individual agent's plan/output at any time. This consists of three views accessible from a shared toolbar:
 
@@ -312,54 +346,3 @@ The following data structures and endpoints are needed to power the dashboard:
 > **Audit methodology:** Every claim below was cross-referenced against the actual codebase files. Items previously listed as "missing" that already exist in code have been corrected.
 
 ---
-
-### ✅ Items Previously Listed as Missing That Actually Already Exist
-
-**1. Priority 4 — Memory Pattern Table:** The plan says to create a new `memory_patterns` table, but `db.py` (lines 40–48) already has this table with columns `pattern`, `task_type`, `metric_name`, `metric_value`, `outcome`, `created_at`. The functions `save_memory_pattern()` and `search_memory_patterns()` are also already implemented (lines 388–410). **The plan's column names (`pattern_text`, `outcome_metric`) don't match the existing schema (`pattern`, `metric_name`) — this inconsistency should be resolved by using the existing schema.**
-
-**2. Priority 5 — HITL Gate API Endpoints:** The plan says to build `/gate/approve`, `/gate/reject`, and `/gate/status`. All three already exist in `jarvis.py` (lines 754–783). The gate synchronization mechanism (polling `PIPELINE_STATE` via `asyncio.sleep(2)` in `start_pipeline_local`) is also already implemented (lines 450–485). **These are done.**
-
-**3. Priority 1 — Core Multi-Agent Engine:** `multi_agent_coordinator.py` already exists with `run_research_phase()`, `run_execution_phase()`, and `run_full_pipeline()` fully wired. It spawns N agents in parallel via `asyncio.gather`, handles `return_exceptions=True`, and connects to all three gates. **The engine is built.**
-
----
-
-### 🔴 Items That Are Genuinely Missing
-
-**1. Synthesis Agent Uses Naive String Comparison — No LLM-Powered Conflict Detection**
-- `agents/synthesis.py` detects "conflicts" by flattening all agent results into a dict and checking if `str(value)` differs across agents for the same key (line 29). This is fundamentally broken for real use because:
-  - Research agents return nested `findings` dicts with different keys (e.g., one agent returns `{"seo_strategy": "..."}`, another returns `{"hook_analysis": "..."}`). They will almost never share the same key, so real contradictions will be silently missed.
-  - Conversely, meta-fields like `findings` itself will ALWAYS differ (it's a dict unique to each agent), triggering false positives.
-- **What's needed:** Replace the naive key-comparison with a structured LLM call (Gemini `response_mime_type="application/json"`) that reads all agent findings and identifies logical/semantic contradictions. The current `SKIP_KEYS` band-aid is insufficient.
-
-**2. No Deployment Agent Exists**
-- The plan describes a "Deployment Agent" (Phase 9) that authenticates with YouTube, GitHub, Stripe, etc. and pushes products live. No such agent exists in `agents/`. The pipeline in `multi_agent_coordinator.py` ends at line 212 with `"ready_for_deploy": True` — it just returns a dict saying "ready" but never actually deploys anything.
-- **What's needed:** An `agents/deployment_agent.py` that takes the final execution results + a target platform config and performs the actual deployment (API upload, git push, etc.).
-
-**3. No Track Agent Exists**
-- The plan describes a "Track & Analytics Agent" (Phase 10) that monitors live metrics post-deployment and triggers corrective loops. No such agent exists. `jarvis.py` has a `TRACKED_METRICS` dict and `/metrics/update` + `/metrics/get` endpoints, but these are passive — nothing actively polls external APIs, compares against thresholds, or triggers `Brain.handle_corrective_request()`.
-- **What's needed:** An `agents/track_agent.py` that runs as a background thread/cron, polls deployment metrics from external APIs (YouTube Analytics, Google Analytics, etc.), compares against thresholds stored in task metadata, saves winning patterns to `memory_patterns`, and signals the Brain to spawn corrective sub-tasks when below threshold.
-
-**4. No API/Provider Dashboard Exists**
-- The plan's Phase 1 says the Brain "reads the global API/MCP dashboard" to provision agents with the right tools. No such dashboard exists in code. The `connectors/` directory has only placeholder stubs (`api_connector.py` and `mcp_connector.py`) that return `{"status": "not_configured"}` for every call.
-- Research agents in `research_agent.py` hardcode `tools_list = [{"google_search": {}}]` regardless of what `tools_needed` the Brain specified in its plan.
-- **What's needed:**
-  1. A registry/config file mapping service names to their API keys, endpoints, and status (up/down/rate-limited).
-  2. Logic in the research/execution agents to actually read `tools_needed` from their config and dynamically construct the tools list.
-  3. The API Fallback Loop described in Technical Safeguard #2 — currently if an API fails, the agent just returns an error. Nothing signals the Brain to reassign a backup API.
-
-**5. No Partial Re-Execution on Gate 3 Rejection**
-- The plan (Phase 8 / FIX #2) says Gate 3 rejection should re-build "only the specific component the user rejected, not the entire execution batch." But `multi_agent_coordinator.py` lines 200–203 just re-runs `run_execution_phase()` with the full `agent_plan`, which re-spawns ALL execution agents — not just the rejected one.
-- **What's needed:** Parse the `redirect_note` from Gate 3 to identify which specific agent(s) need re-execution, then spawn only those agents. The current implementation is a full re-run disguised as partial.
-
-**6. Quality Checker Is Schema-Only — No Semantic Validation**
-- `agents/quality_checker.py` only checks: (a) required JSON keys present, (b) word count meets minimum, (c) agent self-reported error. It does not verify whether the content actually matches the brief, tone, or spec — e.g., if the Brain asked for a "professional blog post" and the agent returned a casual tweet-length response that happened to have the right keys, it would pass QA.
-- **What's needed:** A hybrid approach: keep the fast schema checks, then add a lightweight LLM call to evaluate semantic adherence to the brief/spec (e.g., "Does this output match the tone and requirements described in the blueprint?").
-
-**7. No Max Retry / Infinite Loop Guard**
-- The conflict resolution loop (lines 130–136 in `multi_agent_coordinator.py`) can loop infinitely: if synthesis detects a conflict, it re-plans and re-runs research, then re-synthesises — but if the conflict persists, it will loop forever. Same issue with Gate rejections — there's no cap on how many times a human can reject and re-route.
-- The QA re-spawn (lines 180–191) does exactly one retry, which is good, but the same pattern isn't applied elsewhere.
-- **What's needed:** A configurable `MAX_RETRIES` (e.g., 3) for conflict resolution, gate rejection loops, and QA re-spawns. After exceeding the limit, escalate to the human with a clear "I've tried N times, here's what keeps failing" message instead of looping or silently giving up.
-
-**8. Blueprint Compression Is Not Actually Compression**
-- The Synthesis Agent's "compression" (line 47 of `synthesis.py`) just takes the first entry's value for each key: `{key: entries[0]["value"] for key, entries in merged.items()}`. This discards all but one agent's findings rather than actually synthesizing/compressing them into a unified blueprint.
-- **What's needed:** An LLM-powered synthesis step that reads all N agent reports and produces a single dense blueprint that incorporates the best insights from each agent — not just picks one arbitrarily.
