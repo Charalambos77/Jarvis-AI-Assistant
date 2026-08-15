@@ -1,53 +1,184 @@
-def run_synthesis_agent(agent_results: list[dict]) -> dict:
+"""
+Synthesis Agent — LLM-powered conflict detection and blueprint compression.
+Replaces the naive dict-merge approach with structured Gemini calls.
+"""
+import json
+import os
+import asyncio
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
+
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+
+async def run_synthesis_agent(authoritative_output: dict | list) -> dict:
     """
-    Takes N research agent result dicts.
-    1. Detects conflicts between any two agents on the same key.
-    2. If conflicts found, returns {"status": "conflict", "conflicts": [...]}
-       for the Brain to adjudicate.
-    3. If no conflicts, returns {"status": "ok", "blueprint": {...}}
+    Takes the Lead Specialist's authoritative cycle output.
+    1. Runs LLM conflict detection for internal contradictions.
+    2. If no conflicts, compresses into a hyper-dense cycle blueprint.
+    
+    Returns: {"status": "ok"|"conflict", "blueprint": {...}, "has_conflicts": bool, "conflicts": [...]}
     """
-    if not agent_results:
-        return {"status": "error", "message": "No agent results to synthesise."}
-
-    # Step 1: Merge all results into one flat dict, tracking sources
-    merged = {}
-    for result in agent_results:
-        for key, value in result.items():
-            if key not in merged:
-                merged[key] = [{"agent": result.get("agent_id", "unknown"), "value": value}]
-            else:
-                merged[key].append({"agent": result.get("agent_id", "unknown"), "value": value})
-
-    # Step 2: Conflict detection — multiple agents disagreeing on the same key.
-    # [FIX #1] Skip meta-keys that are EXPECTED to differ per agent.
-    # Without this, agent_id, confidence, and status would ALWAYS be flagged as conflicts.
-    SKIP_KEYS = {"agent_id", "status", "confidence", "sources", "recommendation", "role"}
-    conflicts = []
-    for key, entries in merged.items():
-        if key in SKIP_KEYS:
-            continue
-        unique_values = set(str(e["value"]) for e in entries)
-        if len(unique_values) > 1:
-            conflicts.append({
-                "key": key,
-                "disagreements": entries
-            })
-
-    if conflicts:
-        return {
-            "status": "conflict",
-            "conflicts": conflicts,
-            "message": (
-                f"{len(conflicts)} conflict(s) detected. "
-                "Brain must adjudicate before proceeding to Gate 1."
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    loop = asyncio.get_running_loop()
+    
+    findings_json = json.dumps(authoritative_output, indent=2)
+    
+    # 1. Conflict detection
+    conflict_prompt = _detect_conflicts_prompt(findings_json)
+    conflict_config = types.GenerateContentConfig(
+        system_instruction="You are a Conflict Detector. Output valid JSON only.",
+        response_mime_type="application/json",
+    )
+    
+    try:
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=conflict_prompt,
+                config=conflict_config
             )
+        )
+        conflict_res = json.loads(response.text)
+        if conflict_res.get("has_conflicts", False):
+            return {
+                "status": "conflict",
+                "has_conflicts": True,
+                "conflicts": conflict_res.get("conflicts", []),
+                "message": "Conflicts detected in research."
+            }
+    except Exception as e:
+        print(f"[Synthesis] Error in conflict detection: {e}")
+    
+    # 2. Compression
+    compress_prompt = _compress_blueprint_prompt(findings_json)
+    compress_config = types.GenerateContentConfig(
+        system_instruction="You are a Synthesis Agent. Output valid JSON only.",
+        response_mime_type="application/json",
+    )
+    
+    try:
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=compress_prompt,
+                config=compress_config
+            )
+        )
+        blueprint = json.loads(response.text)
+        return {
+            "status": "ok",
+            "has_conflicts": False,
+            "blueprint": blueprint
+        }
+    except Exception as e:
+        print(f"[Synthesis] Error in blueprint compression: {e}")
+        # Fallback: if it's a list, merge all dicts, otherwise return as-is
+        fallback_blueprint = {}
+        if isinstance(authoritative_output, list):
+            for item in authoritative_output:
+                fallback_blueprint.update(item.get("findings", item))
+        else:
+            fallback_blueprint = authoritative_output.get("findings", authoritative_output)
+        return {
+            "status": "ok",
+            "has_conflicts": False,
+            "blueprint": fallback_blueprint,
+            "error": str(e)
         }
 
-    # Step 3: No conflicts — compress into blueprint
-    blueprint = {key: entries[0]["value"] for key, entries in merged.items()}
-    return {
-        "status": "ok",
-        "blueprint": blueprint,
-        "agent_count": len(agent_results),
-        "key_count": len(blueprint)
-    }
+
+async def run_master_synthesis(approved_blueprints: list[dict]) -> dict:
+    """
+    Takes N approved cycle blueprints and produces one unified Master Research Blueprint.
+    This is the document that feeds into the Execution Plan.
+    """
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    loop = asyncio.get_running_loop()
+    
+    blueprints_json = json.dumps(approved_blueprints, indent=2)
+    prompt = f"""You are the Synthesis Agent. Compress the following approved research blueprints 
+into a single unified Master Research Blueprint JSON. Resolve overlapping concepts.
+Keep unique, complementary, high-value strategy details from every source.
+Do NOT arbitrarily discard any agent's unique contributions.
+
+Additionally, aggregate all 'recommended_tools' from every cycle blueprint.
+Merge recommendations from multiple agents for the same service.
+Include the tool aggregation at the top-level "tool_recommendations" key.
+Each tool in "tool_recommendations" must have these exact keys:
+  - "service": the exact name of the tool/service/API
+  - "agent_consensus": consensus strength (must be one of: "strong", "mixed", "weak")
+  - "recommended_by": list of agent IDs recommending it
+  - "purpose": description of why it is needed
+  - "pros": list of advantages
+  - "cons": list of disadvantages
+  - "alternatives": list of alternative options
+
+BLUEPRINTS:
+{blueprints_json}
+
+Return a single flat JSON blueprint containing "tool_recommendations" and the unified findings."""
+
+    config = types.GenerateContentConfig(
+        system_instruction="You are a Master Synthesis Orchestrator. Output valid JSON only.",
+        response_mime_type="application/json",
+    )
+    
+    try:
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=config
+            )
+        )
+        return json.loads(response.text)
+    except Exception as e:
+        print(f"[Master Synthesis] Error compiling blueprint: {e}")
+        merged = {}
+        for bp in approved_blueprints:
+            merged.update(bp)
+        return merged
+
+
+def _detect_conflicts_prompt(findings_json: str) -> str:
+    """System prompt for conflict detection."""
+    return f"""Analyze the following research output for internal contradictions.
+    
+    FINDINGS:
+    {findings_json}
+    
+    Return a JSON object:
+    {{
+        "has_conflicts": true/false,
+        "conflicts": [
+            {{
+                "description": "what contradicts what",
+                "agents_involved": ["agent_id_1", "agent_id_2"],
+                "options": [
+                    {{"name": "Option A", "pros": "...", "cons": "..."}},
+                    {{"name": "Option B", "pros": "...", "cons": "..."}}
+                ]
+            }}
+        ]
+    }}
+    
+    If no contradictions, return {{"has_conflicts": false, "conflicts": []}}"""
+
+
+def _compress_blueprint_prompt(findings_json: str) -> str:
+    """System prompt for blueprint compression."""
+    return f"""You are the Synthesis Agent. Compress the following research findings 
+    into a single hyper-dense blueprint JSON. Resolve overlapping concepts.
+    Keep unique, complementary, high-value strategy details from every source.
+    Do NOT arbitrarily discard any agent's unique contributions.
+    
+    FINDINGS:
+    {findings_json}
+    
+    Return a single flat JSON blueprint."""

@@ -564,7 +564,7 @@ def outsource_google_search(query: str) -> str:
     try:
         print(f"[Gemini Search Outsource] Searching: '{query}'")
         search_config = types.GenerateContentConfig(
-            tools=[{"google_search": {}}],
+            tools=[types.Tool(google_search=types.GoogleSearch())],
             system_instruction="You are a search grounding assistant. Search the web for the user's query and provide a factual, concise summary of the results with references if appropriate."
         )
         res = client.models.generate_content(

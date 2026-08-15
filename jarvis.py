@@ -114,16 +114,28 @@ ELEVENLABS_QUOTA_EXCEEDED = False # temporary runtime flag to skip ElevenLabs if
 
 # --- Pipeline Gate State ---
 PIPELINE_STATE = {
-    "current_gate": None,        # None | 1 | 2 | 3
+    "current_gate": None,        # None | "cycle_1_research" | "execution_blueprint" | "final_qa"
     "gate_status": "idle",       # "idle" | "waiting" | "approved" | "rejected"
     "redirect_note": None,       # human's rejection reason
     "phase": "idle",             # e.g. "research" | "synthesis" | "execution" | "deployed"
+    "cycle_data": None,          # dict with cycle info when gate is cycle-level
+    "gate_data": None,           # the full data payload passed to the gate
+    "rejected_steps": None,      # step IDs or indices that were rejected by the user
 }
 PIPELINE_LOCK = threading.Lock()
 
 # --- Track Agent Metric Store ---
 TRACKED_METRICS = {}   # e.g. {"youtube_ctr": {"value": 0.025, "threshold": 0.03}}
 TRACKED_METRICS_LOCK = threading.Lock()
+
+# --- Agent Observability State ---
+AGENT_EVENT_LOG: list[dict] = []       # append-only log of all agent lifecycle events
+AGENT_REGISTRY: dict[str, dict] = {}   # maps agent_id -> full config + status + output
+AGENT_OBS_LOCK = threading.Lock()
+
+# --- Pipeline Plan Storage ---
+PLAN_STORE: list[dict] = []            # list of all active/past plans
+PLAN_STORE_LOCK = threading.Lock()
 
 # --- Jarvis User & Identity Layer ---
 import collections
@@ -397,42 +409,166 @@ def change_settings_local(settings_dict):
     save_settings(current)
     return current
 
-def start_pipeline_local(settings_dict):
-    task = settings_dict.get("task", "").strip()
-    if not task:
-        return {"error": "task is required"}
-    push_message("system", f"Pipeline started: {task[:80]}...")
-    async def gate_fn(gate_number: int, data: dict) -> dict:
+def create_initial_task_log(plan_id: str, task: str):
+    import time
+    log_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Task Logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"pipeline_{plan_id}.md")
+    
+    content = f"# Pipeline Task Log - Plan ID: {plan_id}\n"
+    content += f"- **Task:** {task}\n"
+    content += f"- **Start Time:** {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    content += f"- **Status:** Running\n\n"
+    content += "## Execution Progress\n\n"
+    content += "- [ ] Central Brain generating agent plan...\n"
+    
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write(content)
+        
+    try:
+        os.startfile(log_file)
+    except Exception as e:
+        print(f"Failed to automatically open log file: {e}")
+
+def update_task_log_file(plan_id: str, event: dict):
+    if not plan_id:
+        return
+    import time
+    log_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Task Logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"pipeline_{plan_id}.md")
+    
+    plan_data = None
+    with PLAN_STORE_LOCK:
+        for p in PLAN_STORE:
+            if p["id"] == plan_id:
+                plan_data = p.copy()
+                break
+                
+    if not plan_data:
+        return
+
+    plan_events = []
+    with AGENT_OBS_LOCK:
+        for e in AGENT_EVENT_LOG:
+            if e.get("plan_id") == plan_id:
+                plan_events.append(e)
+
+    content = f"# Pipeline Task Log - Plan ID: {plan_id}\n"
+    content += f"- **Task:** {plan_data.get('task')}\n"
+    content += f"- **Phase:** {plan_data.get('phase', 'N/A').upper()}\n"
+    content += f"- **Status:** {plan_data.get('status', 'running').upper()}\n\n"
+    
+    content += "## Current Execution Flow\n"
+    phase = plan_data.get('phase', 'research')
+    status = plan_data.get('status')
+    
+    def get_chk(cond):
+        return "[x]" if cond else "[ ]"
+        
+    content += f"- {get_chk(phase in ('execution', 'qa', 'deploy', 'complete'))} central brain planned and research cycles executed\n"
+    content += f"- {get_chk(phase in ('execution', 'qa', 'deploy', 'complete') and plan_data.get('current_gate') != 'execution_blueprint')} master blueprint compiled and approved\n"
+    content += f"- {get_chk(phase in ('qa', 'deploy', 'complete'))} execution agents completed\n"
+    content += f"- {get_chk(status == 'complete')} quality checker passed and deployed\n\n"
+    
+    content += "## Detailed Process Logs\n"
+    for e in plan_events:
+        ts = time.strftime('%H:%M:%S', time.localtime(e.get('timestamp', time.time())))
+        etype = e.get('event_type')
+        src = e.get('source') or e.get('agent_id') or 'System'
+        
+        if etype == "spawned":
+            content += f"- `{ts}` 🚀 **{src}** spawned\n"
+        elif etype == "running":
+            content += f"- `{ts}` ⏳ **{src}** is running...\n"
+        elif etype == "completed":
+            content += f"- `{ts}` ✅ **{src}** completed\n"
+        elif etype == "error":
+            content += f"- `{ts}` ❌ **{src}** failed: {e.get('data')}\n"
+        elif etype == "gate_waiting":
+            content += f"- `{ts}` 🚧 **Gate waiting** on: `{src}`\n"
+        elif etype == "gate_resolved":
+            gate_status = "Approved" if e.get('data', {}).get('approved') else "Rejected"
+            content += f"- `{ts}` ⚖️ **Gate resolved** (`{src}`): **{gate_status}**\n"
+        elif etype == "conflict":
+            content += f"- `{ts}` ⚠️ **Conflict** in Synthesis\n"
+        else:
+            content += f"- `{ts}` ➡️ **{etype}** ({src})\n"
+
+    try:
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write(content)
+    except Exception as e:
+        print(f"Failed to update task log file: {e}")
+
+def initiate_pipeline(task: str) -> str:
+    import uuid
+    import time
+    plan_id = str(uuid.uuid4())[:8]
+
+    with PLAN_STORE_LOCK:
+        PLAN_STORE.append({
+            "id": plan_id,
+            "task": task,
+            "status": "running",
+            "current_gate": None,
+            "gate_status": "idle",
+            "phase": "research",
+            "timestamp": time.time(),
+            "cycles": [],
+            "master_blueprint": {},
+            "exec_results": [],
+            "deploy_result": {}
+        })
+
+    push_message("system", f"Pipeline started [Plan ID: {plan_id}]: {task[:80]}...")
+    create_initial_task_log(plan_id, task)
+
+    async def gate_fn(gate_id: str, data: dict) -> dict:
         with PIPELINE_LOCK:
-            PIPELINE_STATE["current_gate"] = gate_number
+            PIPELINE_STATE["current_gate"] = gate_id
             PIPELINE_STATE["gate_status"] = "waiting"
             PIPELINE_STATE["redirect_note"] = None
-        push_message("system", f"Gate {gate_number} is open. Waiting for your approval.")
+            PIPELINE_STATE["gate_data"] = data
+            PIPELINE_STATE["rejected_steps"] = None
+        push_message("system", f"Gate {gate_id} is open. Waiting for your approval.")
         import asyncio
         while True:
             await asyncio.sleep(2)
             with PIPELINE_LOCK:
                 status = PIPELINE_STATE["gate_status"]
                 note = PIPELINE_STATE["redirect_note"]
+                rejected = PIPELINE_STATE["rejected_steps"]
             if status in ("approved", "rejected"):
                 with PIPELINE_LOCK:
                     PIPELINE_STATE["current_gate"] = None
                     PIPELINE_STATE["gate_status"] = "idle"
-                return {"approved": status == "approved", "redirect_note": note}
+                    PIPELINE_STATE["gate_data"] = None
+                    PIPELINE_STATE["rejected_steps"] = None
+                return {"approved": status == "approved", "redirect_note": note, "rejected_steps": rejected}
+
     def run_pipeline():
         import asyncio
         from multi_agent_coordinator import run_full_pipeline
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn))
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id))
             push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
         except Exception as e:
             push_message("system", f"Pipeline error: {e}")
         finally:
             loop.close()
+
     threading.Thread(target=run_pipeline, daemon=True).start()
-    return {"status": "pipeline_started", "task": task}
+    return plan_id
+
+def start_pipeline_local(settings_dict):
+    task = settings_dict.get("task", "").strip()
+    if not task:
+        return {"error": "task is required"}
+    plan_id = initiate_pipeline(task)
+    return {"status": "pipeline_started", "task": task, "plan_id": plan_id}
 
 def get_gate_status_local():
     with PIPELINE_LOCK:
@@ -677,13 +813,16 @@ def gate_status():
 
 @app.route("/gate/approve", methods=["POST"])
 def gate_approve():
+    data = request.get_json(force=True) or {}
     with PIPELINE_LOCK:
         gate = PIPELINE_STATE.get("current_gate")
         if gate is None:
             return jsonify({"error": "No gate is currently active"}), 400
         PIPELINE_STATE["gate_status"] = "approved"
         PIPELINE_STATE["redirect_note"] = None
-    push_message("system", f"Gate {gate} approved. Advancing pipeline.")
+        # accept per-step approvals
+        approved_steps = data.get("approved_steps")  # optional list of step IDs
+    push_message("system", f"Gate '{gate}' approved. Advancing pipeline.")
     return jsonify({"status": "approved", "gate": gate})
 
 
@@ -691,14 +830,160 @@ def gate_approve():
 def gate_reject():
     data = request.get_json(force=True) or {}
     note = data.get("redirect_note", "").strip()
+    rejected = data.get("rejected_steps") or []
     with PIPELINE_LOCK:
         gate = PIPELINE_STATE.get("current_gate")
         if gate is None:
             return jsonify({"error": "No gate is currently active"}), 400
         PIPELINE_STATE["gate_status"] = "rejected"
         PIPELINE_STATE["redirect_note"] = note or None
-    push_message("system", f"Gate {gate} rejected. Note: {note or 'none provided'}")
-    return jsonify({"status": "rejected", "gate": gate, "redirect_note": note})
+        PIPELINE_STATE["rejected_steps"] = rejected
+    push_message("system", f"Gate '{gate}' rejected. Note: {note or 'none provided'}, steps: {rejected}")
+    return jsonify({"status": "rejected", "gate": gate, "redirect_note": note, "rejected_steps": rejected})
+
+
+@app.route("/gate/data", methods=["GET"])
+def gate_data():
+    """Returns the full data payload for the currently active gate."""
+    with PIPELINE_LOCK:
+        return jsonify({
+            "gate": PIPELINE_STATE.get("current_gate"),
+            "status": PIPELINE_STATE.get("gate_status"),
+            "data": PIPELINE_STATE.get("gate_data"),
+        })
+
+
+@app.route("/registry", methods=["GET"])
+def get_registry():
+    """Returns the full API/MCP registry."""
+    from connectors.api_connector import load_registry
+    return jsonify({"registry": load_registry()})
+
+
+@app.route("/registry/update", methods=["POST"])
+def update_registry():
+    """Register or update a service. Used during API/MCP plugging."""
+    data = request.get_json(force=True) or {}
+    service_name = data.get("service")
+    config = data.get("config", {})
+    if not service_name:
+        return jsonify({"error": "service name required"}), 400
+    from connectors.api_connector import register_service
+    register_service(service_name, config)
+    return jsonify({"status": "updated", "service": service_name})
+
+
+@app.route("/agents", methods=["GET"])
+def get_agents():
+    """Returns the full agent registry."""
+    with AGENT_OBS_LOCK:
+        return jsonify({"agents": dict(AGENT_REGISTRY)})
+
+
+@app.route("/agents/<agent_id>", methods=["GET"])
+def get_agent_detail(agent_id):
+    """Returns a single agent's full detail."""
+    with AGENT_OBS_LOCK:
+        agent = AGENT_REGISTRY.get(agent_id)
+        if not agent:
+            return jsonify({"error": f"Agent '{agent_id}' not found"}), 404
+        return jsonify(agent)
+
+
+@app.route("/agents/events", methods=["GET"])
+def get_agent_events():
+    """Returns the event log. Supports ?since=<timestamp> for polling."""
+    since = request.args.get("since", type=float, default=0)
+    with AGENT_OBS_LOCK:
+        if since > 0:
+            events = [e for e in AGENT_EVENT_LOG if e.get("timestamp", 0) > since]
+        else:
+            events = list(AGENT_EVENT_LOG)
+        return jsonify({"events": events})
+
+
+@app.route("/agents/interactions", methods=["GET"])
+def get_agent_interactions():
+    """Returns the interaction log (all prompts sent and results received)."""
+    with AGENT_OBS_LOCK:
+        interactions = [
+            e for e in AGENT_EVENT_LOG
+            if e.get("event_type") in ("prompt_sent", "result_received", "conflict", "gate_waiting")
+        ]
+        return jsonify({"interactions": interactions})
+
+
+def pipeline_event_logger(event: dict):
+    """Called by multi_agent_coordinator at each agent lifecycle point."""
+    import time
+    event["timestamp"] = time.time()
+    with AGENT_OBS_LOCK:
+        AGENT_EVENT_LOG.append(event)
+        # Also update registry if this is an agent event
+        agent_id = event.get("source") or event.get("agent_id")
+        if agent_id and agent_id not in ("Brain", "System"):
+            if agent_id not in AGENT_REGISTRY:
+                AGENT_REGISTRY[agent_id] = {}
+            AGENT_REGISTRY[agent_id].update({
+                "status": event.get("event_type"),
+                "last_update": event["timestamp"],
+            })
+            if event.get("event_type") == "completed":
+                AGENT_REGISTRY[agent_id]["output"] = event.get("data")
+            if event.get("event_type") == "spawned":
+                AGENT_REGISTRY[agent_id]["config"] = event.get("data")
+
+    # Sync with PLAN_STORE
+    plan_id = event.get("plan_id")
+    if plan_id:
+        with PLAN_STORE_LOCK:
+            for plan in PLAN_STORE:
+                if plan["id"] == plan_id:
+                    event_type = event.get("event_type")
+                    if event_type == "gate_waiting":
+                        plan["current_gate"] = event.get("source")
+                        plan["gate_status"] = "waiting"
+                        plan["gate_data"] = event.get("data")
+                    elif event_type == "gate_resolved":
+                        plan["current_gate"] = None
+                        plan["gate_status"] = "approved" if event.get("data", {}).get("approved") else "rejected"
+                    elif event_type == "blueprint_compiled":
+                        plan["master_blueprint"] = event.get("data")
+                        plan["phase"] = "execution"
+                    elif event_type == "execution_completed":
+                        plan["exec_results"] = event.get("data")
+                        plan["phase"] = "qa"
+                    elif event_type == "completed" and event.get("source") == "DeploymentAgent":
+                        plan["status"] = "complete"
+                        plan["deploy_result"] = event.get("data")
+                    elif event_type == "running" and event.get("source", "").startswith("Cycle"):
+                        plan["phase"] = "research"
+                        cycle_name = event.get("source")
+                        if cycle_name not in plan["cycles"]:
+                            plan["cycles"].append(cycle_name)
+                    elif event_type == "conflict":
+                        plan["phase"] = "conflict"
+                    break
+
+    if plan_id:
+        update_task_log_file(plan_id, event)
+
+
+@app.route("/plans", methods=["GET"])
+def get_plans():
+    """Returns the full plans store."""
+    with PLAN_STORE_LOCK:
+        return jsonify({"plans": list(PLAN_STORE)})
+
+
+@app.route("/plans/<plan_id>", methods=["GET"])
+def get_plan_detail(plan_id):
+    """Returns details for a single plan."""
+    with PLAN_STORE_LOCK:
+        for plan in PLAN_STORE:
+            if plan["id"] == plan_id:
+                return jsonify(plan)
+        return jsonify({"error": f"Plan '{plan_id}' not found"}), 404
 
 
 @app.route("/metrics/update", methods=["POST"])
@@ -724,7 +1009,7 @@ def get_metrics():
 def track_agent_loop():
     """Background thread. Checks metrics every 5 minutes.
     If any metric is below its threshold, signals the Brain to spawn
-    a corrective sub-task."""
+    a corrective sub-task. If above, extracts success insights via LLM."""
     print("[Track Agent] Started monitoring.")
     while True:
         time.sleep(300)  # 5 minutes
@@ -734,24 +1019,43 @@ def track_agent_loop():
         for metric_name, data in metrics_snapshot.items():
             value = data.get("value", 0)
             threshold = data.get("threshold", 0)
-            if threshold > 0 and value < threshold:
+            
+            # Change 1: Success pattern extraction
+            if threshold > 0 and value >= threshold:
+                pattern_prompt = (
+                    f"A deployment just performed well on metric '{metric_name}' "
+                    f"(value: {value:.3f}, threshold: {threshold:.3f}). "
+                    f"Analyze WHY this succeeded based on the execution blueprint and "
+                    f"produce an actionable insight pattern. Return JSON: "
+                    f'{{"pattern": "...", "metric_name": "{metric_name}", "metric_value": {value}}}'
+                )
+                try:
+                    pattern_response = coordinator.handle_request(pattern_prompt)
+                    # Parse and save to memory
+                    conn = db.get_connection(DB_PATH)
+                    db.save_memory_pattern(conn, pattern=pattern_response,
+                                           task_type=None, metric_name=metric_name,
+                                           metric_value=value, outcome='win')
+                    conn.close()
+                    print(f"[Track Agent] Saved success pattern for metric '{metric_name}' to memory.")
+                except Exception as e:
+                    print(f"[Track Agent] Error extracting pattern: {e}")
+
+            # Change 2: corrective loop spawning pipeline sub-task
+            elif threshold > 0 and value < threshold:
                 msg = (
                     f"[Track Agent] ALERT: '{metric_name}' is {value:.3f}, "
-                    f"below threshold {threshold:.3f}. Signalling Brain."
+                    f"below threshold {threshold:.3f}. Spawning corrective sub-task."
                 )
                 print(msg)
                 push_message("system", msg)
-                # Signal Brain via the coordinator
-                corrective_prompt = (
-                    f"Track Agent alert: metric '{metric_name}' is underperforming "
-                    f"(current: {value:.3f}, threshold: {threshold:.3f}). "
-                    f"Spawn a corrective sub-task to address this."
-                )
+                
+                corrective_task = f"Corrective sub-task: metric '{metric_name}' underperforming ({value:.3f} < {threshold:.3f})"
                 try:
-                    reply = coordinator.handle_request(corrective_prompt)
-                    push_message("ai", reply)
+                    # Enters pipeline bypassing research phase via Phase 6 execution target
+                    start_pipeline_local({"task": corrective_task})
                 except Exception as e:
-                    print(f"[Track Agent] Error signalling Brain: {e}")
+                    print(f"[Track Agent] Error starting corrective pipeline: {e}")
 
 
 @app.route("/pipeline/start", methods=["POST"])
@@ -761,48 +1065,8 @@ def start_pipeline():
     task = data.get("task", "").strip()
     if not task:
         return jsonify({"error": "task is required"}), 400
-
-    push_message("system", f"Pipeline started: {task[:80]}...")
-
-    async def gate_fn(gate_number: int, data: dict) -> dict:
-        """Polls PIPELINE_STATE until the gate is resolved."""
-        with PIPELINE_LOCK:
-            PIPELINE_STATE["current_gate"] = gate_number
-            PIPELINE_STATE["gate_status"] = "waiting"
-            PIPELINE_STATE["redirect_note"] = None
-
-        push_message("system", f"Gate {gate_number} is open. Waiting for your approval.")
-
-        # Poll every 2 seconds until approved or rejected
-        import asyncio
-        while True:
-            await asyncio.sleep(2)
-            with PIPELINE_LOCK:
-                status = PIPELINE_STATE["gate_status"]
-                note = PIPELINE_STATE["redirect_note"]
-            if status in ("approved", "rejected"):
-                with PIPELINE_LOCK:
-                    PIPELINE_STATE["current_gate"] = None
-                    PIPELINE_STATE["gate_status"] = "idle"
-                return {"approved": status == "approved", "redirect_note": note}
-
-    def run_pipeline():
-        import asyncio
-        from multi_agent_coordinator import run_full_pipeline
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # [FIX #5] Removed the dead lambda: None third argument
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn))
-            push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
-        except Exception as e:
-            push_message("system", f"Pipeline error: {e}")
-        finally:
-            loop.close()
-
-    # Run pipeline in background thread so Flask responds immediately
-    threading.Thread(target=run_pipeline, daemon=True).start()
-    return jsonify({"status": "pipeline_started", "task": task})
+    plan_id = initiate_pipeline(task)
+    return jsonify({"status": "pipeline_started", "task": task, "plan_id": plan_id})
 
 
 def run_server():

@@ -15,6 +15,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 async def run_research_agent(
     agent_config: dict,
     memory_context: str | None = None,
+    prior_context: str | None = None,   # approved blueprints from prior cycles
 ) -> dict:
     """
     Runs a single research agent asynchronously.
@@ -35,12 +36,15 @@ YOUR BRIEF:
 
 {"RELEVANT PAST PATTERNS FROM MEMORY:\n" + memory_context if memory_context else ""}
 
+{"APPROVED RESEARCH FROM PRIOR CYCLES (use as established context):\n" + prior_context if prior_context else ""}
+
 CRITICAL RULES:
 1. Focus ONLY on your brief. Do not go beyond it.
 2. Output your findings as a JSON object.
 3. Every claim must be backed by evidence (search results, data, or memory patterns).
 4. Include an "agent_id" field set to "{agent_id}" in your output.
 5. Include a "confidence" field from 0.0 to 1.0 rating how certain you are.
+6. If your research reveals specific APIs, services, or tools that would be valuable for executing this task, include them in your output under "recommended_tools" with service name, purpose, pros, cons, why you recommend it, and alternatives.
 
 Output format:
 {{
@@ -52,14 +56,31 @@ Output format:
     ...
   }},
   "sources": ["source1", "source2"],
-  "recommendation": "one sentence action recommendation"
+  "recommendation": "one sentence action recommendation",
+  "recommended_tools": [
+    {{
+      "service": "youtube_api",
+      "purpose": "why it is needed",
+      "pros": ["pro1", "pro2"],
+      "cons": ["con1", "con2"],
+      "why": "specific reason",
+      "alternatives": ["alt1"]
+    }}
+  ]
 }}
 """
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # Build tools list based on what the agent needs
-    tools_list = [{"google_search": {}}]
+    # Build tools list dynamically from agent config
+    tools_needed = agent_config.get("tools_needed", ["google_search"])
+    tools_list = []
+    for tool_name in tools_needed:
+        if tool_name == "google_search":
+            tools_list.append({"google_search": {}})
+        # Other tool types will be added by the API/Provider Registry (Step 6)
+    if not tools_list:
+        tools_list = [{"google_search": {}}]  # fallback
 
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,

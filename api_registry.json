@@ -1,0 +1,5 @@
+{
+    "google_search": {"status": "up", "fallback": null},
+    "youtube_api": {"status": "up", "api_key_env": "YOUTUBE_API_KEY", "fallback": "supadata"},
+    "supadata": {"status": "up", "api_key_env": "SUPADATA_API_KEY", "fallback": null}
+}

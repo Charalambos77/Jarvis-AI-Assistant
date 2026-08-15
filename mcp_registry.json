@@ -1,0 +1,4 @@
+{
+    "fetch": {"status": "up", "description": "Fetches web page content"},
+    "sqlite": {"status": "up", "description": "SQLite DB operations"}
+}
