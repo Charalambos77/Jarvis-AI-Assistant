@@ -631,7 +631,12 @@ def initiate_pipeline(task: str) -> str:
         asyncio.set_event_loop(loop)
         try:
             result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
-            push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
+            status = result.get('status', 'done')
+            if status == "escalated_to_human":
+                reason = result.get('message', 'Max retries exceeded.')
+                push_message("ai", f"Pipeline failed: {reason}")
+            else:
+                push_message("ai", f"Pipeline complete. Status: {status}.")
         except Exception as e:
             push_message("system", f"Pipeline error: {e}")
         finally:
@@ -743,7 +748,12 @@ def resume_pipeline_local(settings_dict):
         asyncio.set_event_loop(loop)
         try:
             result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
-            push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
+            status = result.get('status', 'done')
+            if status == "escalated_to_human":
+                reason = result.get('message', 'Max retries exceeded.')
+                push_message("ai", f"Pipeline failed: {reason}")
+            else:
+                push_message("ai", f"Pipeline complete. Status: {status}.")
         except Exception as e:
             push_message("system", f"Pipeline error: {e}")
         finally:

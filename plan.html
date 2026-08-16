@@ -280,6 +280,16 @@
             box-shadow: 0 0 8px #f97316;
         }
 
+        @keyframes dotPulse {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px #f97316; }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+
+        .status-dot.pulse {
+            animation: dotPulse 1.5s infinite ease-in-out;
+        }
+
         .items-list {
             display: flex;
             flex-direction: column;
@@ -1066,7 +1076,8 @@
 
             // Stage 2: Cycles list
             const stage2Dot = document.getElementById('stage-2-dot');
-            stage2Dot.className = `status-dot ${plan.phase === 'research' ? 'orange' : 'green'}`;
+            const isResearchActive = plan.phase === 'research' && plan.status === 'running' && plan.active !== false;
+            stage2Dot.className = `status-dot ${isResearchActive ? 'orange pulse' : (plan.cycles && plan.cycles.length > 0 ? 'green' : '')}`;
             let cycleHTML = "";
             if (plan.cycles && plan.cycles.length > 0) {
                 plan.cycles.forEach(c => {
@@ -1084,7 +1095,9 @@
 
             // Stage 3: Blueprint
             const stage3Dot = document.getElementById('stage-3-dot');
-            stage3Dot.className = `status-dot ${plan.phase === 'synthesis' ? 'orange' : (plan.master_blueprint && Object.keys(plan.master_blueprint).length > 0 ? 'green' : '')}`;
+            const isSynthesisActive = plan.phase === 'synthesis' && plan.status === 'running' && plan.active !== false;
+            const isReplanning = plan.gate_status === 'replanning';
+            stage3Dot.className = `status-dot ${isReplanning || isSynthesisActive ? 'orange pulse' : (plan.master_blueprint && Object.keys(plan.master_blueprint).length > 0 ? 'green' : '')}`;
             let bpHTML = "";
             
             // Capture scroll positions of existing code boxes in Stage 3 before rendering
@@ -1092,7 +1105,17 @@
             const codeBoxes = bpEl ? bpEl.querySelectorAll('.code-box') : [];
             const scrollTops = Array.from(codeBoxes).map(el => el.scrollTop);
 
-            if (plan.master_blueprint && Object.keys(plan.master_blueprint).length > 0) {
+            if (plan.gate_status === 'replanning') {
+                bpHTML = `
+                    <div style="font-size:11px; color:var(--orange-border); text-align:center; padding:15px 0;">
+                        <span style="display:inline-block; font-size: 14px; margin-right: 6px;">🔄</span>
+                        Re-planning Synthesis...
+                        <div style="font-size:9px; color:var(--text-muted); margin-top:4px; font-style:italic; word-break: break-word; max-height: 80px; overflow-y: auto;">
+                            Reason: "${(plan.gate_data && plan.gate_data.note) || 'None'}"
+                        </div>
+                    </div>
+                `;
+            } else if (plan.master_blueprint && Object.keys(plan.master_blueprint).length > 0) {
                 const allTools = plan.master_blueprint.tool_recommendations || [];
                 const devTools = allTools.filter(t => !isApiOrMcp(t.service));
                 const connectionTools = allTools.filter(t => isApiOrMcp(t.service));
@@ -1119,6 +1142,11 @@
                     bpHTML += `<div class="code-box" style="font-size: 10px; max-height: 90px;">` + 
                         connectionTools.map(t => `${t.service} (${t.agent_consensus || t.consensus_strength || 'strong'} consensus)`).join('\n') + 
                         `</div>`;
+                    bpHTML += `
+                        <button onclick="showToolsModal()" class="toggle-btn" style="width:100%; font-size:10px; padding:6px 10px; margin-top:8px; display:block; border-color: rgba(6, 182, 212, 0.4); color: #06b6d4; text-align: center;">
+                            🔌 Manage Tool Connections
+                        </button>
+                    `;
                 }
             } else {
                 bpHTML = '<div style="font-size:11px; color:var(--text-muted); text-align:center;">Compiling blueprint...</div>';
@@ -1135,7 +1163,8 @@
 
             // Stage 4: Execution agents
             const stage4Dot = document.getElementById('stage-4-dot');
-            stage4Dot.className = `status-dot ${plan.phase === 'execution' ? 'orange' : (plan.exec_results && plan.exec_results.length > 0 ? 'green' : '')}`;
+            const isExecutionActive = plan.phase === 'execution' && plan.status === 'running' && plan.active !== false;
+            stage4Dot.className = `status-dot ${isExecutionActive ? 'orange pulse' : (plan.exec_results && plan.exec_results.length > 0 ? 'green' : '')}`;
             let execHTML = "";
             if (plan.master_blueprint && plan.master_blueprint.execution_agents) {
                 plan.master_blueprint.execution_agents.forEach(a => {
@@ -1369,9 +1398,10 @@
                 const recs = (data.tool_recommendations || []).filter(r => isApiOrMcp(r.service));
                 recs.forEach((r, idx) => {
                     const isChecked = currentlyChecked.has(r.service) ? "checked" : "";
-                    const prosText = (r.pros && r.pros.length > 0) ? r.pros.join(', ') : "None";
-                    const consText = (r.cons && r.cons.length > 0) ? r.cons.join(', ') : "None";
+                    const prosText = (r.pros && Array.isArray(r.pros) && r.pros.length > 0) ? r.pros.join(', ') : "None";
+                    const consText = (r.cons && Array.isArray(r.cons) && r.cons.length > 0) ? r.cons.join(', ') : "None";
                     const purposeText = r.purpose || "No purpose provided.";
+                    const recBy = (r.recommended_by && Array.isArray(r.recommended_by)) ? r.recommended_by.join(', ') : "Brain";
                     
                     // Map common services to credentials/setup URL
                     let url = "";
@@ -1409,7 +1439,7 @@
                         <div class="step-row" style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.05);">
                             <input type="checkbox" id="check-${idx}" value="${r.service}" ${isChecked}>
                             <label for="check-${idx}">
-                                <strong>Tool: ${r.service}</strong> (Recommended by: ${r.recommended_by.join(', ')})<br>
+                                <strong>Tool: ${r.service}</strong> (Recommended by: ${recBy})<br>
                                 <span style="color: #a7f3d0; font-size: 11px;">Status: ${r.current_status === 'up' ? '✅ Up' : '❌ Unconfigured'}</span><br>
                                 <strong style="color: var(--text-muted);">What we'll use it for:</strong> ${purposeText}<br>
                                 <strong style="color: var(--text-muted);">Pros:</strong> ${prosText}<br>
@@ -1470,14 +1500,38 @@
             document.getElementById('modal-reject-btn').style.display = 'none';
         }
 
+        function showToolsModal() {
+            const plan = plansCache.find(p => p.id === selectedPlanId);
+            if (!plan) return;
+            
+            const recs = plan.master_blueprint ? (plan.master_blueprint.tool_recommendations || []) : [];
+            const data = { tool_recommendations: recs };
+            
+            document.getElementById('approval-modal').style.display = 'flex';
+            renderModalContent("api_mcp_plugging", data);
+            
+            document.getElementById('modal-approve-btn').style.display = 'none';
+            document.getElementById('modal-reject-btn').style.display = 'none';
+            document.getElementById('modal-confirm-reject-btn').style.display = 'none';
+            document.getElementById('rejection-feedback-container').style.display = 'none';
+            
+            document.getElementById('modal-title').innerText = "API / MCP Connections Details";
+            document.getElementById('modal-desc').innerText = "Details and setups for APIs and MCPs required for this project's execution. Use the links to retrieve credentials.";
+        }
+
         function closeApprovalModal() {
             userClosedModal = true;
             
-            // Sync checks from modal back to panel
             const modalChecks = document.querySelectorAll('#modal-content input[type="checkbox"]:checked');
             const checkedValues = Array.from(modalChecks).map(c => c.value);
             
             document.getElementById('approval-modal').style.display = 'none';
+            
+            // Restore default action buttons visibility
+            document.getElementById('modal-approve-btn').style.display = 'inline-block';
+            document.getElementById('modal-reject-btn').style.display = 'inline-block';
+            document.getElementById('modal-confirm-reject-btn').style.display = 'none';
+            document.getElementById('rejection-feedback-container').style.display = 'none';
             
             const panelChecks = document.querySelectorAll('.panel-checklist input[type="checkbox"]');
             panelChecks.forEach(c => {

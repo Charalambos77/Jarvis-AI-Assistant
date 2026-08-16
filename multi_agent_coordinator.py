@@ -26,12 +26,28 @@ async def run_research_phase_for_cycle(
     task_type: str,
     approved_blueprints: list[dict],
     event_logger=None,
+    project_name: str = "Default Project",
 ) -> dict:
     """Spawns all research agents for a cycle in parallel and returns their results."""
     if not agents:
         return {"status": "error", "message": "No agents defined for this research cycle."}
 
     prior_context = json.dumps(approved_blueprints, indent=2) if approved_blueprints else None
+
+    # Load physical project memories from memory/ folder
+    physical_memories = []
+    mem_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "memory")
+    for subdir in ("high_value", "general"):
+        subdir_path = os.path.join(mem_dir, subdir)
+        if os.path.exists(subdir_path):
+            for filename in os.listdir(subdir_path):
+                if filename.endswith(".json"):
+                    try:
+                        with open(os.path.join(subdir_path, filename), "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            physical_memories.append(f"[{subdir.upper()} MEMORY - {filename[:-5]}]: {json.dumps(data)}")
+                    except Exception:
+                        pass
 
     # For each agent, fetch memory context first
     tasks = []
@@ -54,7 +70,12 @@ async def run_research_phase_for_cycle(
                     for p in patterns
                 )
 
-        tasks.append(run_research_agent(agent_config, memory_context, prior_context))
+        # Combine database patterns with physical project memory files
+        combined_mem = memory_context or ""
+        if physical_memories:
+            combined_mem = "\n\nPHYSICAL PROJECT MEMORY FILES:\n" + "\n".join(physical_memories) + "\n\n" + combined_mem
+        
+        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context))
 
     print(f"[Multi-Agent] Spawning {len(tasks)} research agents in parallel...")
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -109,7 +130,7 @@ ADVISORY FINDINGS TO REVIEW:
 APPROVED BLUEPRINTS FROM PRIOR CYCLES (for context):
 {json.dumps(approved_blueprints, indent=2)}
 
-Produce your final authoritative findings. Output a single JSON object. Do not overwrite your core domain focus, but enhance it with the advisory insights.
+Produce your final authoritative findings and aggregate any tool recommendations. Output a single JSON object. Do not overwrite your core domain focus, but enhance it with the advisory insights.
 The output format must be JSON matching your original format:
 {{
   "agent_id": "{lead_id}",
@@ -120,7 +141,17 @@ The output format must be JSON matching your original format:
     ...
   }},
   "sources": ["source1", "source2"],
-  "recommendation": "one sentence action recommendation"
+  "recommendation": "one sentence action recommendation",
+  "recommended_tools": [
+    {{
+      "service": "exact_service_name",
+      "purpose": "why it is needed",
+      "pros": ["pro1"],
+      "cons": ["con1"],
+      "why": "reason",
+      "alternatives": ["alt1"]
+    }}
+  ]
 }}
 """
     config = types.GenerateContentConfig(
@@ -280,6 +311,27 @@ def save_agent_plan_file(plan_id: str, agent_plan: dict, project_name: str = "De
     
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
+
+def save_apis_mcps_file(plan_id: str, tools: list, project_name: str = "Default Project"):
+    if not plan_id:
+        return
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans")
+    os.makedirs(dir_path, exist_ok=True)
+    file_path = os.path.join(dir_path, f"apis_mcps_{plan_id}.json")
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(tools, f, indent=2, ensure_ascii=False)
+
+def load_apis_mcps_file(plan_id: str, project_name: str = "Default Project") -> list:
+    if not plan_id:
+        return []
+    file_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans", f"apis_mcps_{plan_id}.json")
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[load_apis_mcps_file] Error reading {file_path}: {e}")
+    return []
 
 def save_research_findings_file(plan_id: str, agent_id: str, findings: dict, project_name: str = "Default Project"):
     if not plan_id or not agent_id:
@@ -482,8 +534,15 @@ async def run_full_pipeline(
             if "error" in agent_plan:
                 return agent_plan
             save_agent_plan_file(plan_id, agent_plan, project_name)
+            init_tools = agent_plan.get("recommended_tools") or []
+            save_apis_mcps_file(plan_id, init_tools, project_name)
             if event_logger:
                 event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
+        else:
+            apis_mcps_file = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans", f"apis_mcps_{plan_id}.json")
+            if not os.path.exists(apis_mcps_file):
+                init_tools = agent_plan.get("recommended_tools") or []
+                save_apis_mcps_file(plan_id, init_tools, project_name)
 
         cycles = agent_plan.get("cycles", [])
         if len(cycles) < 3:
@@ -504,19 +563,37 @@ async def run_full_pipeline(
 
             while retry_count < MAX_RETRIES:
                 if event_logger:
-                    event_logger({"event_type": "running", "source": f"Cycle {cycle_id}"})
+                    source_str = f"Cycle {cycle_id}"
+                    if retry_count > 0:
+                        source_str += f" (Retry {retry_count})"
+                    event_logger({"event_type": "running", "source": source_str})
                 
                 # 2a: Spawn Lead + Advisory agents in parallel (Pass 1)
                 all_agents = [cycle["lead_specialist"]] + cycle.get("advisory_agents", [])
                 research_output = await run_research_phase_for_cycle(
                     all_agents, conn, agent_plan.get("task_type", "research"),
-                    approved_blueprints=approved_blueprints, event_logger=event_logger
+                    approved_blueprints=approved_blueprints, event_logger=event_logger,
+                    project_name=project_name
                 )
                 
-                # Save each research agent's findings
+                # Save each research agent's findings and save structured memory
                 for r in research_output.get("agent_results", []):
                     if r.get("status") == "ok":
                         save_research_findings_file(plan_id, r.get("agent_id"), r, project_name)
+                        
+                        # Save high value memory
+                        if "high_value_memory" in r and r["high_value_memory"]:
+                            hv_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "memory", "high_value")
+                            os.makedirs(hv_dir, exist_ok=True)
+                            with open(os.path.join(hv_dir, f"{r['agent_id']}.json"), "w", encoding="utf-8") as f:
+                                json.dump(r["high_value_memory"], f, indent=2, ensure_ascii=False)
+                        
+                        # Save general memory
+                        if "general_memory" in r and r["general_memory"]:
+                            gen_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "memory", "general")
+                            os.makedirs(gen_dir, exist_ok=True)
+                            with open(os.path.join(gen_dir, f"{r['agent_id']}.json"), "w", encoding="utf-8") as f:
+                                json.dump(r["general_memory"], f, indent=2, ensure_ascii=False)
 
                 # 2a: Lead Specialist review (Pass 2)
                 lead_config = cycle["lead_specialist"]
@@ -528,6 +605,20 @@ async def run_full_pipeline(
                 authoritative_output = await run_lead_review(
                     lead_config, lead_result, advisory_results, approved_blueprints
                 )
+                
+                # Extract and merge tools from authoritative_output into apis_mcps.json
+                new_tools = []
+                for item in authoritative_output:
+                    if isinstance(item, dict) and "recommended_tools" in item:
+                        new_tools.extend(item["recommended_tools"])
+                if new_tools:
+                    existing_tools = load_apis_mcps_file(plan_id, project_name)
+                    merged_tools = {t["service"]: t for t in existing_tools if "service" in t}
+                    for t in new_tools:
+                        service = t.get("service")
+                        if service:
+                            merged_tools[service] = t
+                    save_apis_mcps_file(plan_id, list(merged_tools.values()), project_name)
 
                 # 2b: Synthesis (per-cycle)
                 synthesis_result = await run_synthesis_agent(authoritative_output)
@@ -588,15 +679,33 @@ async def run_full_pipeline(
                     if event_logger:
                         event_logger({"event_type": "gate_resolved", "source": f"cycle_{cycle_id}_research", "data": gate_result})
                     # Re-plan only this cycle
-                    agent_plan_update = build_agent_plan(
-                        task, redirect_note=redirect_note,
-                        cycle_id=cycle_id, approved_blueprints=approved_blueprints,
-                        rejected_steps=rejected_steps
-                    )
-                    # Update only this cycle's agents
-                    updated_cycles = agent_plan_update.get("cycles", [])
-                    if updated_cycles:
-                        cycle.update(updated_cycles[0])
+                    try:
+                        agent_plan_update = build_agent_plan(
+                            task, redirect_note=redirect_note,
+                            cycle_id=cycle_id, approved_blueprints=approved_blueprints,
+                            rejected_steps=rejected_steps
+                        )
+                        if "error" in agent_plan_update:
+                            raise ValueError(agent_plan_update["error"])
+                        
+                        # Update only this cycle's agents (match by cycle_id)
+                        updated_cycles = agent_plan_update.get("cycles", [])
+                        matching_cycle = next((c for c in updated_cycles if c.get("cycle_id") == cycle_id), None)
+                        if matching_cycle:
+                            cycle.update(matching_cycle)
+                        elif updated_cycles:
+                            cycle.update(updated_cycles[0])
+                        
+                        save_agent_plan_file(plan_id, agent_plan, project_name)
+                        if event_logger:
+                            event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
+                    except Exception as e:
+                        print(f"[Pipeline] Re-planning failed: {e}")
+                        try:
+                            from jarvis import push_message
+                            push_message("system", f"Re-planning failed: {e}. Retrying cycle with existing instructions.")
+                        except ImportError:
+                            pass
                     retry_count += 1
 
             if retry_count >= MAX_RETRIES:
@@ -635,6 +744,8 @@ async def run_full_pipeline(
         if not master_blueprint or not master_blueprint.get("tool_recommendations"):
             print("[Pipeline] Phase 3: Compiling Master Blueprint from all cycles...")
             master_blueprint = await run_master_synthesis(approved_blueprints)
+            final_tools = load_apis_mcps_file(plan_id, project_name)
+            master_blueprint["tool_recommendations"] = final_tools
             save_master_blueprint_file(plan_id, master_blueprint, project_name)
             if event_logger:
                 event_logger({"event_type": "blueprint_compiled", "source": "synthesis", "data": master_blueprint})
@@ -672,6 +783,9 @@ async def run_full_pipeline(
                     task, redirect_note=redirect_note, approved_blueprints=approved_blueprints,
                     rejected_steps=rejected_steps
                 )
+                save_agent_plan_file(plan_id, agent_plan, project_name)
+                if event_logger:
+                    event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
                 exec_retry += 1
 
             if exec_retry >= MAX_RETRIES:
@@ -784,10 +898,19 @@ async def run_full_pipeline(
                 qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint)
                 qa_retry += 1
 
-            if qa_retry >= MAX_RETRIES:
+            if not qa_result["all_passed"]:
+                if event_logger:
+                    event_logger({"event_type": "execution_completed", "source": "execution", "data": exec_results})
+                issues_summary = []
+                for res in qa_result.get("results", []):
+                    if not res.get("passed"):
+                        issues_summary.append(f"{res['agent_id']}: {res.get('issues', 'failed specs')}")
+                msg = f"Failed after {MAX_RETRIES} retries at Quality Checker verification."
+                if issues_summary:
+                    msg += " // " + " | ".join(issues_summary)
                 return {
                     "status": "escalated_to_human",
-                    "message": f"Failed after {MAX_RETRIES} retries at Quality Checker verification.",
+                    "message": msg,
                     "retry_history": retry_history,
                 }
 

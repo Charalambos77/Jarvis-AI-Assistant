@@ -178,7 +178,9 @@ def _compress_blueprint_prompt(findings_json: str) -> str:
     Keep unique, complementary, high-value strategy details from every source.
     Do NOT arbitrarily discard any agent's unique contributions.
     
+    Make sure to preserve and include any 'recommended_tools' arrays from the inputs, grouping them under a top-level "recommended_tools" key in your JSON output.
+    
     FINDINGS:
     {findings_json}
     
-    Return a single flat JSON blueprint."""
+    Return a single JSON blueprint."""

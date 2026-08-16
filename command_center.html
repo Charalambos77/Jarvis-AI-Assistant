@@ -3803,7 +3803,6 @@
         async function sendToJarvis(text) {
             if (!text.trim()) return;
 
-            appendChatMessage(text, 'user');
             chatInput.value = '';
             chatInput.disabled = true;
             sendBtn.style.opacity = '0.4';
@@ -3812,16 +3811,17 @@
             orbLabel.textContent = 'THINKING';
 
             try {
-                const res = await fetch('/ask', {
+                const sendPromise = fetch('/ask', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text })
                 });
-                const data = await res.json();
-                if (data.reply) {
-                    appendChatMessage(data.reply, 'jarvis');
-                    lastMessageCount += 2; // user + ai already appended
-                }
+                
+                // Poll immediately to show user's message
+                setTimeout(pollState, 50);
+
+                await sendPromise;
+
                 // Refresh tasks if tasks panel is open
                 if (document.getElementById('panel-tasks-section').style.display !== 'none') {
                     fetchAndRenderLiveTasks();
