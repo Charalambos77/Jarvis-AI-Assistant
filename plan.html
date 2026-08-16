@@ -851,8 +851,9 @@
         let plansCache = [];
         let activeGateData = null;
         let viewMode = "listing"; // "listing" or "detail"
-        let userClosedModal = false;
+        let userClosedModal = true;
         let lastGateId = "";
+        let isFirstLoad = true;
 
         // Poll sessions list
         async function fetchPlans() {
@@ -946,6 +947,11 @@
         function selectPlan(planId) {
             selectedPlanId = planId;
             viewMode = "detail";
+            userClosedModal = true;
+            const plan = plansCache.find(p => p.id === planId);
+            if (plan) {
+                lastGateId = plan.current_gate || "";
+            }
             updateViewToggles();
             fetchPlans();
             setTimeout(drawConnectors, 100);
@@ -981,6 +987,8 @@
                     const activePlan = plansCache.find(p => p.status === 'running') || plansCache[plansCache.length - 1];
                     selectedPlanId = activePlan.id;
                     viewMode = "detail";
+                    userClosedModal = true;
+                    lastGateId = activePlan.current_gate || "";
                 } else {
                     alert("No pipelines available to display.");
                     return;
@@ -1260,9 +1268,13 @@
                  }
  
                  // Reset userClosedModal if a brand new gate has appeared
-                 if (plan.current_gate !== lastGateId) {
+                 if (isFirstLoad) {
+                     userClosedModal = true;
+                     lastGateId = plan.current_gate || "";
+                     isFirstLoad = false;
+                 } else if (plan.current_gate !== lastGateId) {
                      userClosedModal = false;
-                     lastGateId = plan.current_gate;
+                     lastGateId = plan.current_gate || "";
                  }
  
                  // If currently active run, show approval modal overlay unless user closed it
