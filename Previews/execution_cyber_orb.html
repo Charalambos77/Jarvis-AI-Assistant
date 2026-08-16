@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Constellation Map</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Cytoscape.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #2b2e4a;
+            --panel-bg: rgba(33, 35, 59, 0.95);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --text-main: #FFFFFF;
+            --text-muted: #9CA3AF;
+
+            --sales-color: #FB7185;
+            --ops-color: #22D3EE;
+            --intel-color: #60A5FA;
+            --marketing-color: #A78BFA;
+            --customer-color: #34D399;
+            --deals-color: #FCD34D;
+            --finance-color: #F87171;
+
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 1px);
+            background-size: 60px 60px;
+            background-position: 0 0;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, transparent 0%, rgba(20, 21, 38, 0.6) 100%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* 3D Globe Container */
+        #globe-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 900px;
+            height: 900px;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        #cy {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 2;
+        }
+
+        /* Detached Section Labels */
+        .department-label {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 5px;
+            text-transform: uppercase;
+            z-index: 5;
+            pointer-events: none;
+            text-shadow: 0 0 15px rgba(0, 0, 0, 0.8);
+        }
+
+        .header {
+            position: absolute;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 5px;
+            background: #1e1e2d;
+            padding: 6px;
+            border-radius: 40px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .header-tab {
+            color: #8c8c9a;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            padding: 10px 24px;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .header-tab.active {
+            background: #ffffff;
+            color: #000000;
+        }
+
+        /* Top Right Navigation */
+        .top-right-nav {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .nav-btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            color: #9CA3AF;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 160px;
+            text-align: center;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #FFFFFF;
+            border-color: rgba(255, 255, 255, 0.25);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
+        }
+
+        .nav-btn.active {
+            background: rgba(255, 255, 255, 0.95);
+            color: #000000;
+            border-color: #FFFFFF;
+            box-shadow: 0 0 25px rgba(255, 255, 255, 0.2);
+        }
+
+        /* Watermark styling */
+        #watermark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 15vw;
+            font-weight: 800;
+            color: rgba(255, 255, 255, 0.03);
+            pointer-events: none;
+            z-index: 1;
+            display: none;
+            text-transform: uppercase;
+            letter-spacing: -5px;
+            white-space: nowrap;
+        }
+
+        #side-panel {
+            position: absolute;
+            top: 0;
+            left: -550px;
+            width: 500px;
+            height: 100%;
+            background: var(--panel-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-right: 1px solid var(--border-color);
+            z-index: 20;
+            transition: left 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 20px 0 50px rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+        }
+
+        #side-panel.open {
+            left: 0;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 24px;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .close-btn:hover {
+            color: #fff;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .panel-tag {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-main);
+            background: var(--glass-bg);
+            border: 1px solid var(--border-color);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        #panel-title {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        #panel-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+        }
+
+        .tag-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 30px;
+        }
+
+        .pill {
+            font-size: 12px;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 6px 12px;
+            border-radius: 15px;
+            font-weight: 500;
+        }
+
+        .replace-box {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-bottom: 30px;
+            border-left: 3px solid #E2E8F0;
+        }
+
+        .nodes-grid {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 15px;
+            margin-bottom: 30px;
+            font-size: 13px;
+        }
+
+        .node-label {
+            color: var(--text-main);
+            font-weight: 600;
+            font-size: 11px;
+            letter-spacing: 1px;
+        }
+
+        .node-desc {
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .action-box {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: auto;
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 14px;
+            background: #fff;
+            color: #000;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .action-btn:hover {
+            background: #E2E8F0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Navigation buttons -->
+    <div class="top-right-nav">
+        <button class="nav-btn active" id="btn-execution">Execution</button>
+        <button class="nav-btn" id="btn-logs" onclick="window.location.href='agent_talk.task_log.html'">Task
+            Logs/Chat</button>
+        <button class="nav-btn" id="btn-plan">Plan</button>
+        <button class="nav-btn" id="btn-apis">APIs/MCPs</button>
+    </div>
+
+    <!-- Wrapper to zoom everything out synchronously -->
+    <div id="map-wrapper"
+        style="width: 100%; height: 100%; position: absolute; transform: scale(1.75); transform-origin: center;">
+
+        <!-- Giant Watermark for Drill Down -->
+        <div id="watermark"></div>
+
+        <!-- 3D Rotating Earth of White Stars -->
+        <div id="globe-container"></div>
+        <div id="globe-click-target"
+            style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 160px; height: 160px; border-radius: 50%; z-index: 3; cursor: pointer; pointer-events: auto;">
+        </div>
+
+        <!-- Detached Labels Container -->
+        <div id="labels-container"></div>
+
+        <div id="cy"></div>
+    </div>
+
+    <div id="side-panel">
+        <button class="close-btn" onclick="closePanel()">×</button>
+
+        <div class="panel-header">
+            <h2 id="panel-title">Agent Node</h2>
+            <span class="panel-tag" id="panel-type">AGENT</span>
+        </div>
+
+        <p id="panel-desc">Agent description goes here.</p>
+
+        <div class="section-title">WHAT IT LIVES ON</div>
+        <div class="tag-row" id="panel-tags">
+            <div class="pill">company.md</div>
+        </div>
+
+        <div class="section-title">WHAT IT REPLACES</div>
+        <div class="replace-box" id="panel-replaces">
+            Manual execution...
+        </div>
+
+        <div class="section-title">THE 3 NODES</div>
+        <div class="nodes-grid" id="panel-nodes">
+            <div class="node-label">HUMAN-LED</div>
+            <div class="node-desc">Current limits in the business require manual intervention for highly subjective
+                tasks.</div>
+
+            <div class="node-label">HUMAN-ASSISTED</div>
+            <div class="node-desc">Agent executes up to 80%, generates a draft, and prompts a human for final approval.
+            </div>
+
+            <div class="node-label">FULLY AUTONOMOUS</div>
+            <div class="node-desc">Agent executes end-to-end without review. Output is sent directly to production.
+            </div>
+        </div>
+
+        <div class="action-box">
+            <div class="section-title">RUN THE SKILL</div>
+            <button class="action-btn" id="action-btn">Launch Agent Console</button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 0. DATA DEFINITION
+        // ==========================================
+        const departments = [
+            {
+                id: 'ops', label: 'OPERATIONS', color: '#22D3EE',
+                agents: [{ id: 'o1', label: 'Client Onboarding' }, { id: 'o2', label: 'Integrations' }, { id: 'o3', label: 'QA' }, { id: 'o4', label: 'Status Reporting' }, { id: 'o5', label: 'Incident Response' }]
+            },
+            {
+                id: 'intel', label: 'INTELLIGENCE', color: '#60A5FA',
+                agents: [{ id: 'i1', label: 'Company Research' }, { id: 'i2', label: 'Competitive Intel' }, { id: 'i3', label: 'Market Mapping' }, { id: 'i4', label: 'Signal Monitoring' }]
+            },
+            {
+                id: 'customer', label: 'CUSTOMER', color: '#34D399',
+                agents: [{ id: 'c1', label: 'Support Deflection' }, { id: 'c2', label: 'Health Scoring' }, { id: 'c3', label: 'Churn Prediction' }, { id: 'c4', label: 'Community' }]
+            },
+            {
+                id: 'finance', label: 'BACK OFFICE', color: '#F87171',
+                agents: [{ id: 'b1', label: 'Invoicing' }, { id: 'b2', label: 'Financial Reporting' }, { id: 'b3', label: 'Contracts' }, { id: 'b4', label: 'Cash-Flow Forecasting' }]
+            },
+            {
+                id: 'sales', label: 'SALES', color: '#FB7185',
+                agents: [{ id: 's1', label: 'ICP Definition' }, { id: 's2', label: 'Lead Sourcing' }, { id: 's3', label: 'Enrichment' }, { id: 's4', label: 'Cold Email' }, { id: 's5', label: 'Sequencing' }, { id: 's6', label: 'Call Prep' }]
+            },
+            {
+                id: 'deals', label: 'DEALS', color: '#FCD34D',
+                agents: [{ id: 'd1', label: 'Reply Triage' }, { id: 'd2', label: 'Meeting Booking' }, { id: 'd3', label: 'Proposal Writing' }, { id: 'd4', label: 'Deal Debriefs' }, { id: 'd5', label: 'Pipeline Reporting' }]
+            },
+            {
+                id: 'marketing', label: 'MARKETING', color: '#A78BFA',
+                agents: [{ id: 'm1', label: 'Performance Analysis' }, { id: 'm2', label: 'Scriptwriting' }, { id: 'm3', label: 'Carousels' }, { id: 'm4', label: 'Repurposing' }, { id: 'm5', label: 'Distribution' }]
+            }
+        ];
+
+        // ==========================================
+        // 1. THREE.JS SMOKY NEBULA EARTH
+        // ==========================================
+        const container = document.getElementById('globe-container');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+        camera.position.z = 2.5;
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(900, 900);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        // Ultra high-res radial gradient texture for sharp cyber particles
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createRadialGradient(256, 256, 0, 256, 256, 256);
+        gradient.addColorStop(0, 'rgba(255,255,255,1)');
+        gradient.addColorStop(0.12, 'rgba(0,225,255,0.95)');
+        gradient.addColorStop(0.35, 'rgba(90,140,255,0.6)');
+        gradient.addColorStop(0.65, 'rgba(140,80,255,0.2)');
+        gradient.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 512, 512);
+        const texture = new THREE.CanvasTexture(canvas);
+
+        // Particle system with outward motion - Higher count, smaller size for high definition
+        const smokeGeo = new THREE.BufferGeometry();
+        const smokeCount = 7000;
+        const posArray = new Float32Array(smokeCount * 3);
+        const colorArray = new Float32Array(smokeCount * 3);
+
+        const dirs = [];
+        const speeds = [];
+        const distances = [];
+        const maxDistance = 1.1; // Extends nicely but fades out before WebGL viewport boundaries
+        const baseColor = new THREE.Color(0xaabbff);
+
+        for (let i = 0; i < smokeCount; i++) {
+            // Generate a random spherical direction vector
+            let theta = Math.random() * 2 * Math.PI;
+            let phi = Math.acos(2 * Math.random() - 1);
+            let dx = Math.sin(phi) * Math.cos(theta);
+            let dy = Math.sin(phi) * Math.sin(theta);
+            let dz = Math.cos(phi);
+
+            dirs.push({ x: dx, y: dy, z: dz });
+
+            // Random initial distance to distribute particles
+            let dist = Math.random() * maxDistance;
+            distances.push(dist);
+
+            // Random outward drift speed
+            let speed = 0.0015 + Math.random() * 0.0035;
+            speeds.push(speed);
+
+            let idx = i * 3;
+            posArray[idx] = dx * dist;
+            posArray[idx + 1] = dy * dist;
+            posArray[idx + 2] = dz * dist;
+
+            // Fade based on distance
+            let factor = Math.pow(1.0 - (dist / maxDistance), 1.5);
+            colorArray[idx] = baseColor.r * factor;
+            colorArray[idx + 1] = baseColor.g * factor;
+            colorArray[idx + 2] = baseColor.b * factor;
+        }
+
+        smokeGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        smokeGeo.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
+
+        const smokeMat = new THREE.PointsMaterial({
+            size: 0.045, // Sharp stardust nodes
+            map: texture,
+            transparent: true,
+            opacity: 0.8,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            vertexColors: true
+        });
+
+        const nebula = new THREE.Points(smokeGeo, smokeMat);
+        scene.add(nebula);
+
+        // Add a secondary inner dense rotating core (keeps center solid, bright, and powerful)
+        const coreGeo = new THREE.BufferGeometry();
+        const coreCount = 3500;
+        const corePosArray = new Float32Array(coreCount * 3);
+        for (let i = 0; i < coreCount * 3; i += 3) {
+            let r = Math.pow(Math.random(), 1.2) * 0.58; // Expanded core volume
+            let theta = Math.random() * 2 * Math.PI;
+            let phi = Math.acos(2 * Math.random() - 1);
+            corePosArray[i] = r * Math.sin(phi) * Math.cos(theta);
+            corePosArray[i + 1] = r * Math.sin(phi) * Math.sin(theta);
+            corePosArray[i + 2] = r * Math.cos(phi);
+        }
+        coreGeo.setAttribute('position', new THREE.BufferAttribute(corePosArray, 3));
+        
+        const coreMat = new THREE.PointsMaterial({ size: 0.02, color: 0xffffff, transparent: true, opacity: 0.5 });
+        const core = new THREE.Points(coreGeo, coreMat);
+        scene.add(core);
+
+        // Add Cyber Orbital Ring
+        const ringGeo = new THREE.TorusGeometry(0.72, 0.008, 16, 120);
+        const ringMat = new THREE.MeshBasicMaterial({
+            color: 0x22d3ee,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.45,
+            blending: THREE.AdditiveBlending
+        });
+        const cyberRing = new THREE.Mesh(ringGeo, ringMat);
+        cyberRing.rotation.x = Math.PI / 3;
+        scene.add(cyberRing);
+
+        // Glowing laser conduit lines and pulses to power the departments
+        const pulses = [];
+        const conduitsGroup = new THREE.Group();
+        scene.add(conduitsGroup);
+
+        departments.forEach((dept, index) => {
+            let angle = -Math.PI / 2 + (index * (2 * Math.PI / departments.length));
+            let tx = Math.cos(angle) * 0.69;
+            let ty = -Math.sin(angle) * 0.69;
+
+            // Faint colored laser conduit line
+            const points = [];
+            points.push(new THREE.Vector3(Math.cos(angle) * 0.15, -Math.sin(angle) * 0.15, 0));
+            points.push(new THREE.Vector3(tx, ty, 0));
+            const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+            const lineMat = new THREE.LineBasicMaterial({
+                color: dept.color,
+                transparent: true,
+                opacity: 0.18,
+                blending: THREE.AdditiveBlending
+            });
+            const line = new THREE.Line(lineGeo, lineMat);
+            conduitsGroup.add(line);
+
+            // Create multiple pulses per department line to make them look continuous (e.g., 3 pulses)
+            for (let pIdx = 0; pIdx < 3; pIdx++) {
+                const spriteMat = new THREE.SpriteMaterial({
+                    map: texture,
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0.9,
+                    blending: THREE.AdditiveBlending
+                });
+                const sprite = new THREE.Sprite(spriteMat);
+                sprite.scale.set(0.12, 0.12, 1);
+                conduitsGroup.add(sprite);
+
+                pulses.push({
+                    sprite: sprite,
+                    angle: angle,
+                    progress: (pIdx / 3) + (Math.random() * 0.1), // Perfectly staggered spacing
+                    speed: 0.003 + Math.random() * 0.003,
+                    color: new THREE.Color(dept.color)
+                });
+            }
+        });
+
+        const posAttribute = nebula.geometry.attributes.position;
+        const colorAttribute = nebula.geometry.attributes.color;
+
+        function animateGlobe() {
+            requestAnimationFrame(animateGlobe);
+
+            // Subtle rotation of entire structures
+            nebula.rotation.y -= 0.0008;
+            core.rotation.y += 0.002;
+            core.rotation.x += 0.0005;
+            cyberRing.rotation.z += 0.005;
+
+            // Expand and fade nebula particles
+            for (let i = 0; i < smokeCount; i++) {
+                let dist = distances[i] + speeds[i];
+                if (dist > maxDistance) {
+                    dist = 0; // reset back to central origin
+                }
+                distances[i] = dist;
+
+                let dir = dirs[i];
+                let idx = i * 3;
+
+                // Update position
+                posAttribute.array[idx] = dir.x * dist;
+                posAttribute.array[idx + 1] = dir.y * dist;
+                posAttribute.array[idx + 2] = dir.z * dist;
+
+                // Fade colors to black as particles approach maxDistance
+                let factor = Math.pow(1.0 - (dist / maxDistance), 1.5);
+                colorAttribute.array[idx] = baseColor.r * factor;
+                colorAttribute.array[idx + 1] = baseColor.g * factor;
+                colorAttribute.array[idx + 2] = baseColor.b * factor;
+            }
+
+            posAttribute.needsUpdate = true;
+            colorAttribute.needsUpdate = true;
+
+            // Animate energy pulses traveling to departments
+            pulses.forEach(p => {
+                p.progress += p.speed;
+                if (p.progress > 1) {
+                    p.progress = 0;
+                }
+
+                let r = 0.15 + p.progress * (0.69 - 0.15);
+                p.sprite.position.x = Math.cos(p.angle) * r;
+                p.sprite.position.y = -Math.sin(p.angle) * r;
+
+                let alpha = 1;
+                if (p.progress < 0.15) {
+                    alpha = p.progress / 0.15;
+                } else if (p.progress > 0.75) {
+                    alpha = (1.0 - p.progress) / 0.25;
+                }
+                p.sprite.material.opacity = alpha * 0.95;
+
+                // Color interpolation (starts white hot, shifts to department color)
+                p.sprite.material.color.lerpColors(new THREE.Color(0xffffff), p.color, p.progress);
+            });
+
+            renderer.render(scene, camera);
+        }
+        animateGlobe();
+
+        document.getElementById('globe-click-target').addEventListener('click', () => {
+            document.getElementById('panel-title').innerText = 'THE BRAIN';
+            document.getElementById('panel-type').innerText = 'CORE';
+            document.getElementById('panel-replaces').innerText = "Re-briefing every task agency/freelancer from scratch forever. This architecture is invisible because every project/employee/bot pulls from this compounding context.";
+            document.getElementById('panel-tags').innerHTML = '<div class="pill">company.md</div><div class="pill">offers.md</div><div class="pill">voice.md</div>';
+            document.getElementById('side-panel').classList.add('open');
+        });
+
+        // ==========================================
+        // 2. CYTOSCAPE & TRIGONOMETRIC LAYOUT
+        // ==========================================
+
+        let elements = [];
+        let nodesPositions = {};
+        let labelsHTML = '';
+
+        const CENTER_X = window.innerWidth / 2;
+        const CENTER_Y = window.innerHeight / 2;
+        const GLOBE_RADIUS = 90; // Radius where lines should stop (edge of the 3D earth)
+        const DEPT_RADIUS = 200;
+        const LABEL_RADIUS = 530; // Closer layout for a denser look
+
+        departments.forEach((dept, index) => {
+            let angle = -Math.PI / 2 + (index * (2 * Math.PI / departments.length));
+
+            let currentDeptRadius = DEPT_RADIUS;
+            let currentLabelRadius = LABEL_RADIUS;
+
+            let dx = CENTER_X + currentDeptRadius * Math.cos(angle);
+            let dy = CENTER_Y + currentDeptRadius * Math.sin(angle);
+
+            // Create an invisible connection point at the edge of the 3D globe
+            let anchorId = 'anchor_' + dept.id;
+            let cx = CENTER_X + GLOBE_RADIUS * Math.cos(angle);
+            let cy = CENTER_Y + GLOBE_RADIUS * Math.sin(angle);
+            elements.push({ data: { id: anchorId, type: 'anchor' } });
+            nodesPositions[anchorId] = { x: cx, y: cy };
+
+            // Tapered Sizing: Department is massive
+            elements.push({ data: { id: dept.id, label: '', type: 'dept', color: dept.color, deptId: dept.id } });
+            nodesPositions[dept.id] = { x: dx, y: dy };
+        });
+
+        const cy = cytoscape({
+            container: document.getElementById('cy'),
+            elements: elements,
+
+            style: [
+                /* Invisible Anchor */
+                {
+                    selector: 'node[type="anchor"]',
+                    style: {
+                        'width': 1, 'height': 1, 'opacity': 0
+                    }
+                },
+                /* TAPER 2: Medium Agents */
+                {
+                    selector: 'node[type="agent_large"]',
+                    style: {
+                        'label': 'data(label)',
+                        'color': '#fff',
+                        'font-size': '10px',
+                        'font-family': 'Inter',
+                        'text-valign': 'bottom',
+                        'text-halign': 'center',
+                        'text-margin-y': 6,
+
+                        'background-color': '#EAE6EE',
+                        'width': 22,  // Medium Size
+                        'height': 22,
+                        'border-width': 1,
+                        'border-color': '#fff',
+                        'shadow-blur': 10,
+                        'shadow-color': '#EAE6EE',
+                        'shadow-opacity': 0.3
+                    }
+                },
+                /* TAPER 1: Massive Departments */
+                {
+                    selector: 'node[type="dept"]',
+                    style: {
+                        'background-color': '#1C1E32',
+                        'width': 44, // Massive Size
+                        'height': 44,
+                        'border-width': 2,
+                        'border-color': 'data(color)',
+                        'shadow-blur': 25,
+                        'shadow-color': 'data(color)',
+                        'shadow-opacity': 0.6
+                    }
+                },
+                /* TAPER 3: Tiny Constellation Dots */
+                {
+                    selector: 'node[type="agent_dot"]',
+                    style: {
+                        'background-color': '#fff',
+                        'width': 6, // Tiny Size
+                        'height': 6,
+                        'label': '',
+                        'shadow-blur': 5,
+                        'shadow-color': '#fff',
+                        'shadow-opacity': 0.8
+                    }
+                },
+                /* EDGES (Standard) */
+                {
+                    selector: 'edge',
+                    style: {
+                        'width': 1.5,
+                        'line-color': 'rgba(255, 255, 255, 0.2)',
+                        'curve-style': 'unbundled-bezier',
+                        'control-point-distances': 'data(cpDist)',
+                        'control-point-weights': 'data(cpWeight)',
+                        'target-arrow-shape': 'circle',
+                        'target-arrow-color': 'rgba(255, 255, 255, 0.5)',
+                        'target-arrow-fill': 'filled',
+                        'arrow-scale': 0.6,
+                        'transition-property': 'line-color, target-arrow-color, width, shadow-opacity, shadow-blur, opacity',
+                        'transition-duration': '0.3s'
+                    }
+                },
+                /* SMOKY MAIN EDGES FROM CENTER */
+                {
+                    selector: 'edge[source ^= "anchor"]',
+                    style: {
+                        'width': 6,
+                        'line-color': 'data(color)',
+                        'opacity': 0.4,
+                        'curve-style': 'unbundled-bezier',
+                        'control-point-distances': 'data(cpDist)',
+                        'control-point-weights': 'data(cpWeight)',
+                        'shadow-blur': 25,
+                        'shadow-color': 'data(color)',
+                        'shadow-opacity': 0.9,
+                        'target-arrow-shape': 'none'
+                    }
+                },
+                /* DIMMED STATE */
+                {
+                    selector: '.dimmed',
+                    style: {
+                        'opacity': 0.15
+                    }
+                },
+                /* HIGHLIGHTED EDGE */
+                {
+                    selector: 'edge.highlighted',
+                    style: {
+                        'line-color': 'data(color)',
+                        'target-arrow-color': 'data(color)',
+                        'width': 2.5,
+                        'shadow-blur': 15,
+                        'shadow-color': 'data(color)',
+                        'shadow-opacity': 0.8,
+                        'z-index': 100
+                    }
+                },
+                /* HIGHLIGHTED NODE */
+                {
+                    selector: 'node.highlighted',
+                    style: {
+                        'border-color': 'data(color)',
+                        'shadow-blur': 30,
+                        'shadow-color': 'data(color)',
+                        'shadow-opacity': 1,
+                        'z-index': 100
+                    }
+                }
+            ],
+
+            layout: {
+                name: 'preset',
+                positions: nodesPositions,
+                fit: false
+            },
+
+            userZoomingEnabled: false,
+            userPanningEnabled: false,
+            boxSelectionEnabled: false
+        });
+
+        // Add geometric SVG icons to departments
+        cy.nodes('[type="dept"]').forEach(n => {
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${n.data('color')}" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+            n.style('background-image', 'data:image/svg+xml;utf8,' + encodeURIComponent(svg));
+            n.style('background-width', '60%');
+            n.style('background-height', '60%');
+            n.style('background-position-x', '50%');
+            n.style('background-position-y', '50%');
+        });
+
+        // Add dark icons to medium agents
+        const icon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#1F2937" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>';
+        cy.nodes('[type="agent_large"]').forEach(n => {
+            n.style('background-image', 'data:image/svg+xml;utf8,' + encodeURIComponent(icon));
+            n.style('background-width', '50%');
+            n.style('background-height', '50%');
+            n.style('background-position-x', '50%');
+            n.style('background-position-y', '50%');
+        });
+
+        // Hover Interaction logic based on radial slices (pie sections)
+        let activeDeptId = null;
+
+        function applyHoverHighlight(deptId) {
+            activeDeptId = deptId;
+            cy.elements().addClass('dimmed');
+
+            let branch = cy.elements(`[deptId = "${deptId}"]`);
+            branch.removeClass('dimmed').addClass('highlighted');
+
+            cy.getElementById('anchor_' + deptId).removeClass('dimmed');
+        }
+
+        function clearHoverHighlight() {
+            if (activeDeptId === null) return;
+            activeDeptId = null;
+            cy.elements().removeClass('dimmed highlighted');
+        }
+
+        window.addEventListener('mousemove', (e) => {
+            if (isDrillDownMode || isTransitioning) return;
+
+            // If side panel is open, do not highlight elements when hovering over it (left 500px)
+            if (document.getElementById('side-panel').classList.contains('open') && e.clientX < 500) {
+                clearHoverHighlight();
+                return;
+            }
+
+            const cx = window.innerWidth / 2;
+            const cy = window.innerHeight / 2;
+
+            const dx = e.clientX - cx;
+            const dy = e.clientY - cy;
+            // Convert screen coordinates distance to map-wrapper coordinate space (accounting for the 1.75 scale)
+            const distance = Math.sqrt(dx * dx + dy * dy) / 1.75;
+
+            // Hover active around department nodes circle
+            if (distance < 140 || distance > 260) {
+                clearHoverHighlight();
+                return;
+            }
+
+            // Calculate angle in radians [-Math.PI, Math.PI]
+            let mouseAngle = Math.atan2(dy, dx);
+
+            // Stagger mapping index matching departments placement
+            const sectorSize = (2 * Math.PI) / departments.length;
+
+            // Adjust so sector 0 (Ops) center is exactly at -Math.PI / 2
+            let adjustedAngle = mouseAngle - (-Math.PI / 2) + (sectorSize / 2);
+
+            // Normalize angle to [0, 2*PI]
+            while (adjustedAngle < 0) adjustedAngle += 2 * Math.PI;
+            while (adjustedAngle >= 2 * Math.PI) adjustedAngle -= 2 * Math.PI;
+
+            const deptIndex = Math.floor(adjustedAngle / sectorSize) % departments.length;
+            const targetDept = departments[deptIndex];
+
+            if (targetDept) {
+                if (targetDept.id !== activeDeptId) {
+                    applyHoverHighlight(targetDept.id);
+                }
+            } else {
+                clearHoverHighlight();
+            }
+        });
+
+        // Clear hover when mouse leaves the page structure
+        document.body.addEventListener('mouseleave', () => {
+            if (!isDrillDownMode && !isTransitioning) {
+                clearHoverHighlight();
+            }
+        });
+
+        // State Management
+        let isDrillDownMode = false;
+        let isTransitioning = false;
+        let currentDrillDept = null;
+        let drillDownPositions = {};
+
+        // Floating / Orbit Animation Loop (subtle breathing effect)
+        let time = 0;
+        setInterval(() => {
+            if (isTransitioning) return; // Pause during major layouts
+            time += 0.05;
+            cy.nodes().forEach((node, i) => {
+                if (node.data('type') === 'anchor') return;
+
+                let basePos = nodesPositions[node.id()];
+
+                if (isDrillDownMode) {
+                    if (node.data('deptId') === currentDrillDept && drillDownPositions[node.id()]) {
+                        basePos = drillDownPositions[node.id()];
+                    } else {
+                        return; // don't animate hidden nodes
+                    }
+                }
+
+                let offsetX = Math.sin(time + i) * 1.5;
+                let offsetY = Math.cos(time + i * 1.5) * 1.5;
+                node.position({ x: basePos.x + offsetX, y: basePos.y + offsetY });
+            });
+        }, 30);
+
+        // Click Event -> Open Panel and Zoom in
+        cy.on('tap', 'node', function (evt) {
+            let node = evt.target;
+            let d = node.data();
+            if (d.type === 'anchor') return;
+
+            // Open the panel and zoom onto the node!
+            document.getElementById('panel-title').innerText = d.label || 'Sub-Agent';
+            document.getElementById('panel-type').innerText = d.type.toUpperCase().replace('_', ' ');
+
+            if (d.type === 'dept') {
+                document.getElementById('panel-replaces').innerText = `Manual orchestration of the department.`;
+            } else {
+                document.getElementById('panel-replaces').innerText = "Execution of singular microscopic tasks.";
+            }
+
+            document.getElementById('side-panel').classList.add('open');
+
+            // Zoom on node, shifting it to the right to prevent overlap with side panel
+            const targetZoom = 2.0;
+            const targetX = (window.innerWidth / 2) + 150;
+            const targetY = window.innerHeight / 2;
+            cy.animate({
+                zoom: targetZoom,
+                pan: {
+                    x: targetX - (node.position().x * targetZoom),
+                    y: targetY - (node.position().y * targetZoom)
+                }
+            }, {
+                duration: 650,
+                easing: 'ease-out-cubic'
+            });
+        });
+
+        cy.on('tap', function (evt) {
+            if (evt.target === cy) {
+                closePanel();
+            }
+        });
+
+        function resetBranchZoom() {
+            cy.animate({
+                zoom: 1.0,
+                pan: { x: 0, y: 0 }
+            }, {
+                duration: 600,
+                easing: 'ease-out-cubic'
+            });
+        }
+
+        function closePanel() {
+            document.getElementById('side-panel').classList.remove('open');
+            if (isDrillDownMode && !isTransitioning) {
+                resetBranchZoom();
+            }
+        }
+
+        function enterDrillDown(deptId) {
+            isDrillDownMode = true;
+            currentDrillDept = deptId;
+            isTransitioning = true;
+
+            // Reset pan/zoom coordinates to default before arranging nodes
+            cy.zoom(1.0);
+            cy.pan({ x: 0, y: 0 });
+
+            // Clean hover states
+            cy.elements().removeClass('dimmed highlighted');
+
+            // Hide map UI
+            document.getElementById('globe-container').style.display = 'none';
+            document.getElementById('globe-click-target').style.display = 'none';
+            document.getElementById('labels-container').style.display = 'none';
+            conduitsGroup.visible = false;
+
+            // Show watermark
+            let wm = document.getElementById('watermark');
+            let deptObj = departments.find(d => d.id === deptId);
+            wm.innerText = deptObj.label;
+            wm.style.display = 'block';
+
+            // Filter Cytoscape
+            cy.elements().style('display', 'none');
+            let branch = cy.elements(`[deptId = "${deptId}"]`);
+            branch.style('display', 'element');
+            branch.edges(`[source = "anchor_${deptId}"]`).style('display', 'none');
+
+            // Change Root Label
+            cy.getElementById(deptId).data('label', 'START HERE');
+
+            // Calculate Bottom-Up Layout
+            let deptNode = cy.getElementById(deptId);
+            let rootX = window.innerWidth / 2;
+            let rootY = window.innerHeight - 150; // Place root near bottom
+
+            drillDownPositions = {};
+            drillDownPositions[deptId] = { x: rootX, y: rootY };
+
+            let levels = { 0: [deptNode] };
+            let queue = [{ node: deptNode, level: 0 }];
+            let visited = new Set([deptId]);
+
+            // BFS to assign levels
+            while (queue.length > 0) {
+                let curr = queue.shift();
+                let succ = curr.node.outgoers('node');
+                succ.forEach(s => {
+                    if (!visited.has(s.id())) {
+                        visited.add(s.id());
+                        let nextLevel = curr.level + 1;
+                        if (!levels[nextLevel]) levels[nextLevel] = [];
+                        levels[nextLevel].push(s);
+                        queue.push({ node: s, level: nextLevel });
+                    }
+                });
+            }
+
+            let levelSpacingY = -120; // moving UP
+            let spacingX = 180;
+
+            Object.keys(levels).forEach(lvlStr => {
+                let lvl = parseInt(lvlStr);
+                if (lvl === 0) return;
+
+                let nodesInLvl = levels[lvl];
+                let width = (nodesInLvl.length - 1) * spacingX;
+                let startX = rootX - width / 2;
+
+                nodesInLvl.forEach((n, idx) => {
+                    let x = startX + idx * spacingX;
+                    // Jitter for organic branch look
+                    x += (Math.random() - 0.5) * 80;
+                    let y = rootY + (lvl * levelSpacingY) + (Math.random() - 0.5) * 50;
+                    drillDownPositions[n.id()] = { x: x, y: y };
+                });
+            });
+
+            // Animate layout
+            cy.nodes(`[deptId = "${deptId}"]`).forEach(n => {
+                let pos = drillDownPositions[n.id()];
+                if (pos) {
+                    n.animate({ position: pos }, { duration: 800, easing: 'ease-out-cubic' });
+                }
+            });
+
+            setTimeout(() => { isTransitioning = false; }, 800);
+        }
+
+        // Exit Drill Down via Mouse going below the root department node
+        window.addEventListener('mousemove', (e) => {
+            if (isDrillDownMode && !isTransitioning) {
+                const deptNode = cy.getElementById(currentDrillDept);
+                if (deptNode && deptNode.length > 0) {
+                    const cyCenterY = (window.innerHeight / 2) + 40;
+                    // Project the node's position into screen coordinates (accounting for 0.8 scale from center)
+                    const nodeScreenY = (window.innerHeight / 2) + (deptNode.position().y - cyCenterY) * 0.8;
+
+                    // Exit if mouse goes 25px below the center of the root node
+                    if (e.clientY >= nodeScreenY + 25) {
+                        exitDrillDown();
+                    }
+                }
+            }
+        });
+
+        function exitDrillDown() {
+            isDrillDownMode = false;
+            isTransitioning = true;
+
+            closePanel();
+
+            document.getElementById('globe-container').style.display = 'block';
+            document.getElementById('globe-click-target').style.display = 'block';
+            document.getElementById('labels-container').style.display = 'block';
+            conduitsGroup.visible = true;
+            document.getElementById('watermark').style.display = 'none';
+
+            // Restore original dept label
+            let deptObj = departments.find(d => d.id === currentDrillDept);
+            cy.getElementById(currentDrillDept).data('label', '');
+
+            currentDrillDept = null;
+
+            cy.elements().style('display', 'element');
+            document.querySelectorAll('.department-label').forEach(el => {
+                el.style.opacity = '1';
+                el.style.textShadow = `0 0 15px rgba(0,0,0,0.8)`;
+            });
+
+            // Animate back to original 360 circle math
+            cy.nodes().forEach(n => {
+                let pos = nodesPositions[n.id()];
+                if (pos) {
+                    n.animate({ position: pos }, { duration: 800, easing: 'ease-out-cubic' });
+                }
+            });
+
+            setTimeout(() => { isTransitioning = false; }, 800);
+        }
+
+        // Navigation Buttons Event Listeners
+        document.getElementById('btn-execution').addEventListener('click', () => {
+            window.location.href = 'execution.html';
+        });
+
+        document.getElementById('btn-plan').addEventListener('click', () => {
+            window.location.href = 'plan.html?from=execution';
+        });
+
+        document.getElementById('btn-apis').addEventListener('click', () => {
+            window.location.href = 'provider_comparison.html?from=execution';
+        });
+
+        // Voice navigation state polling
+        setInterval(async () => {
+            try {
+                const res = await fetch('/state');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.ui_action && data.ui_action.type === 'navigate' && data.ui_action.url) {
+                        window.location.href = data.ui_action.url;
+                    } else if (data.ui_action && data.ui_action.type === 'control_interface') {
+                        if (data.ui_action.action === 'go_back') {
+                            window.history.back();
+                        } else if (data.ui_action.action === 'go_to_brain') {
+                            window.location.href = 'command_center.html';
+                        } else if (data.ui_action.action === 'go_to_plan') {
+                            window.location.href = 'plan.html?from=execution';
+                        }
+                    }
+                }
+            } catch (e) { }
+        }, 800);
+    </script>
+</body>
+
+</html>
