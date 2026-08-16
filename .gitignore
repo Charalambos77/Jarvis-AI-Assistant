@@ -23,3 +23,6 @@ ENV/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Project deliverables / generated plans
+Let Jarvis Handle It/
