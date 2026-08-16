@@ -3544,7 +3544,11 @@
                             // Voice / Text navigation triggers
                             if (!isFirstPoll && role === 'user') {
                                 const textLower = msg.text.toLowerCase();
-                                if (textLower.includes('show plan') || textLower.includes('open plan') || textLower.includes('go to plan') || textLower.includes('go to the plan')) {
+                                if (textLower.includes('execution mode') || textLower.includes('execution map') || textLower.includes('go to execution') || textLower.includes('open execution')) {
+                                    window.location.href = 'execution.html';
+                                } else if (textLower.includes('console') || textLower.includes('task console') || textLower.includes('chat stream')) {
+                                    window.location.href = 'execution.html';
+                                } else if (textLower.includes('show plan') || textLower.includes('open plan') || textLower.includes('go to plan') || textLower.includes('go to the plan')) {
                                     animateWarpExit();
                                 } else if (textLower.includes('close panel') || textLower.includes('exit focus') || textLower.includes('hide panel') || textLower.includes('close focus')) {
                                     closePanel();
@@ -3554,10 +3558,8 @@
                                 } else if (textLower.includes('show task database') || textLower.includes('open task database') || textLower.includes('show tasks') || textLower.includes('open tasks')) {
                                     targetCameraPos.set(0, 0, 2.5);
                                     openTasksPanel();
-                                } else if (textLower.includes('show brain') || textLower.includes('open brain') || textLower.includes('focus on brain')) {
-                                    targetCameraPos.set(0, 0, 1.8);
-                                    const brainData = brainHitMesh.userData.data;
-                                    openDetailPanel(brainData);
+                                } else if (textLower.includes('show brain') || textLower.includes('open brain') || textLower.includes('focus on brain') || textLower.includes('go back')) {
+                                    window.location.href = 'command_center.html';
                                 } else if (textLower.includes('exit completely') || textLower.includes('shutdown completely')) {
                                     animateCoreCollapse();
                                 }
@@ -3570,7 +3572,9 @@
                     // Dispatch custom Three.js UI Action animations
                     if (!isFirstPoll && data.ui_action) {
                         const act = data.ui_action;
-                        if (act.type === 'task_created') {
+                        if (act.type === 'navigate' && act.url) {
+                            window.location.href = act.url;
+                        } else if (act.type === 'task_created') {
                             const tempTask = { id: act.task_id, content: 'New Task', priority: act.priority || 'medium', status: 'open' };
                             const targetPos = getSphericalPosition(liveNodeMap.size, liveNodeMap.size + 1);
                             triggerCreatedAnimation(tempTask, targetPos);
@@ -3713,6 +3717,8 @@
                                     openDetailPanel(brainData);
                                 } else if (action === 'go_to_apis') {
                                     window.location.href = 'provider_comparison.html';
+                                } else if (action === 'go_to_execution') {
+                                    window.location.href = 'execution.html';
                                 } else if (action === 'open_side_panel') {
                                     targetCameraPos.set(0, 0, 2.5);
                                     openTasksPanel();

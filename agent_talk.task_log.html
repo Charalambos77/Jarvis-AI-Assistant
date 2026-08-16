@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Task Execution Stream</title>
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0b0c16;
+            --panel-bg: rgba(15, 17, 28, 0.88);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --text-main: #FFFFFF;
+            --text-muted: #9CA3AF;
+            --accent-cyan: #22D3EE;
+            --accent-blue: #60A5FA;
+            --accent-purple: #A78BFA;
+            --accent-green: #34D399;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 60px 60px;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, transparent 0%, rgba(5, 6, 12, 0.88) 100%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        #globe-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Headless Layout Grid - No Header Nav Buttons */
+        .execution-container {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            right: 30px;
+            bottom: 30px;
+            z-index: 10;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 80px 1fr 70px;
+            gap: 20px;
+            pointer-events: auto;
+        }
+
+        /* Top Status Bar */
+        .status-header {
+            grid-column: 1 / -1;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+            border-radius: 12px;
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .title-group {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .status-badge {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            background: rgba(34, 211, 238, 0.15);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(34, 211, 238, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            box-shadow: 0 0 10px var(--accent-cyan);
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.4;
+                transform: scale(0.85);
+            }
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        /* Navigation Buttons */
+        .top-right-nav {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            color: #9CA3AF;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            padding: 8px 20px;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #FFFFFF;
+            border-color: rgba(255, 255, 255, 0.3);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.15);
+        }
+
+        .nav-btn.active {
+            background: #FFFFFF;
+            color: #000000;
+            font-weight: 700;
+            border-color: #FFFFFF;
+            box-shadow: 0 0 25px rgba(255, 255, 255, 0.5);
+        }
+
+        /* Console Log Panel */
+        .panel-box {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(25px);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .panel-header {
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--accent-blue);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-body {
+            flex-grow: 1;
+            padding: 16px 20px;
+            overflow-y: auto;
+            font-family: 'Fira Code', monospace;
+            font-size: 12px;
+            line-height: 1.7;
+            color: #D1D5DB;
+        }
+
+        .panel-body::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .panel-body::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+
+        .log-entry .timestamp {
+            color: var(--text-muted);
+            margin-right: 8px;
+        }
+
+        .log-entry.info .source {
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+
+        .log-entry.warn .source {
+            color: #F59E0B;
+            font-weight: 600;
+        }
+
+        .log-entry.error .source {
+            color: #EF4444;
+            font-weight: 600;
+        }
+
+        /* Inter-Agent Chat Feed Panel */
+        .chat-bubble {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 10px;
+        }
+
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .sender-tag {
+            color: var(--accent-purple);
+        }
+
+        .receiver-tag {
+            color: var(--accent-green);
+        }
+
+        .chat-message {
+            font-size: 12px;
+            color: #E5E7EB;
+        }
+
+        /* Bottom Input Bar */
+        .bottom-bar {
+            grid-column: 1 / -1;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(20px);
+            border-radius: 12px;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        #chat-input {
+            flex-grow: 1;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #FFFFFF;
+            font-size: 13px;
+            padding: 12px 18px;
+            border-radius: 8px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        #chat-input:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.2);
+        }
+
+        .mic-indicator {
+            font-size: 12px;
+            color: var(--accent-cyan);
+            font-weight: 600;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Full viewport 3D Nebula -->
+    <div id="globe-container"></div>
+
+    <!-- Execution Dashboard Layout -->
+    <div class="execution-container">
+        <!-- Top Status Bar -->
+        <div class="status-header">
+            <div class="title-group">
+                <div class="status-badge">
+                    <div class="status-dot"></div>
+                    Execution Active
+                </div>
+                <div class="header-title">Jarvis Task & Multi-Agent Execution Stream</div>
+            </div>
+            <div class="top-right-nav">
+                <button class="nav-btn" onclick="window.location.href='execution.html'">Execution</button>
+                <button class="nav-btn active" onclick="window.location.href='agent_talk.task_log.html'">Task
+                    Logs/Chat</button>
+                <button class="nav-btn" onclick="window.location.href='plan.html?from=execution'">Plan</button>
+                <button class="nav-btn"
+                    onclick="window.location.href='provider_comparison.html?from=execution'">APIs/MCPs</button>
+            </div>
+        </div>
+
+        <!-- Real-Time Console Panel -->
+        <div class="panel-box">
+            <div class="panel-header">
+                <span>Task Console Stream</span>
+                <span style="font-size:10px; color:var(--text-muted);">/api/console_logs</span>
+            </div>
+            <div class="panel-body" id="console-logs-body">
+                <div class="log-entry info">
+                    <span class="timestamp">[SYSTEM]</span>
+                    <span class="source">[TaskConsole]</span> Real-time execution stream initialized.
+                </div>
+            </div>
+        </div>
+
+        <!-- Inter-Agent Dialogue Stream Panel -->
+        <div class="panel-box">
+            <div class="panel-header" style="color: var(--accent-purple);">
+                <span>Inter-Agent Dialogue Stream</span>
+                <span style="font-size:10px; color:var(--text-muted);">/api/agent_chat</span>
+            </div>
+            <div class="panel-body" id="agent-chat-body">
+                <div class="chat-bubble">
+                    <div class="chat-header">
+                        <span class="sender-tag">System</span>
+                        <span class="receiver-tag">&rarr; All Agents</span>
+                    </div>
+                    <div class="chat-message">Inter-agent communication stream online. Monitoring dialogue channels...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Voice / Terminal Widget -->
+        <div class="bottom-bar">
+            <div class="mic-indicator">
+                <div class="status-dot"></div>
+                VOICE ACTIVE
+            </div>
+            <input type="text" id="chat-input" placeholder="Type a message or speak 'Jarvis, go back'..."
+                autocomplete="off">
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. THREE.JS BACKGROUND NEBULA
+        // ==========================================
+        const container = document.getElementById('globe-container');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 2.5;
+
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        const smokeGeo = new THREE.BufferGeometry();
+        const smokeCount = 4000;
+        const posArray = new Float32Array(smokeCount * 3);
+        for (let i = 0; i < smokeCount * 3; i++) {
+            posArray[i] = (Math.random() - 0.5) * 4;
+        }
+        smokeGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        const smokeMat = new THREE.PointsMaterial({
+            size: 0.03,
+            color: 0x22D3EE,
+            transparent: true,
+            opacity: 0.4,
+            blending: THREE.AdditiveBlending
+        });
+        const nebula = new THREE.Points(smokeGeo, smokeMat);
+        scene.add(nebula);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            nebula.rotation.y += 0.0008;
+            nebula.rotation.x += 0.0004;
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ==========================================
+        // 2. REAL-TIME LOG POLLING LOGIC
+        // ==========================================
+        const consoleBody = document.getElementById('console-logs-body');
+        const chatBody = document.getElementById('agent-chat-body');
+        const apiBase = location.protocol === 'file:' ? 'http://127.0.0.1:5000' : '';
+
+        async function fetchLogs() {
+            try {
+                // Fetch Console Logs
+                const consoleRes = await fetch(apiBase + '/api/console_logs');
+                if (consoleRes.ok) {
+                    const data = await consoleRes.json();
+                    if (data.logs && data.logs.length > 0) {
+                        consoleBody.innerHTML = data.logs.map(log => {
+                            const time = new Date(log.timestamp * 1000).toLocaleTimeString();
+                            const levelClass = log.level ? log.level.toLowerCase() : 'info';
+                            return `<div class="log-entry ${levelClass}">
+                                <span class="timestamp">[${time}]</span>
+                                <span class="source">[${log.source || 'System'}]</span> ${log.text}
+                            </div>`;
+                        }).join('');
+                        consoleBody.scrollTop = consoleBody.scrollHeight;
+                    }
+                }
+
+                // Fetch Agent Chat Logs
+                const chatRes = await fetch(apiBase + '/api/agent_chat');
+                if (chatRes.ok) {
+                    const data = await chatRes.json();
+                    if (data.chat && data.chat.length > 0) {
+                        chatBody.innerHTML = data.chat.map(msg => {
+                            const time = new Date(msg.timestamp * 1000).toLocaleTimeString();
+                            return `<div class="chat-bubble">
+                                <div class="chat-header">
+                                    <span class="sender-tag">${msg.sender}</span>
+                                    <span class="receiver-tag">&rarr; ${msg.receiver}</span>
+                                    <span style="color:var(--text-muted); font-size:10px;">${time}</span>
+                                </div>
+                                <div class="chat-message">${msg.message}</div>
+                            </div>`;
+                        }).join('');
+                        chatBody.scrollTop = chatBody.scrollHeight;
+                    }
+                }
+            } catch (e) {
+                // Ignore network errors during reload/navigation
+            }
+        }
+
+        setInterval(fetchLogs, 1000);
+        fetchLogs();
+
+        // ==========================================
+        // 3. VOICE NAVIGATION POLLING (/state)
+        // ==========================================
+        setInterval(async () => {
+            try {
+                const res = await fetch(apiBase + '/state');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.ui_action && data.ui_action.type === 'navigate' && data.ui_action.url) {
+                        window.location.href = data.ui_action.url;
+                    } else if (data.ui_action && data.ui_action.type === 'control_interface') {
+                        if (data.ui_action.action === 'go_back') {
+                            window.history.back();
+                        } else if (data.ui_action.action === 'go_to_brain') {
+                            window.location.href = 'command_center.html';
+                        } else if (data.ui_action.action === 'go_to_plan') {
+                            window.location.href = 'plan.html';
+                        }
+                    }
+                }
+            } catch (e) { }
+        }, 800);
+
+        // ==========================================
+        // 4. CHAT INPUT HANDLING
+        // ==========================================
+        const chatInput = document.getElementById('chat-input');
+        chatInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && chatInput.value.trim() !== '') {
+                const text = chatInput.value.trim();
+                chatInput.value = '';
+                try {
+                    await fetch(apiBase + '/ask', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: text })
+                    });
+                } catch (err) {
+                    console.error(err);
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>

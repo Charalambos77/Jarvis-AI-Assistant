@@ -867,11 +867,11 @@
                 let zWorldAttracted = zWorld + dZWorld * attraction;
 
                 // 4. Rotate the attracted world position BACK into the local space of the nebula
-                posAttribute.array[idx]     = xWorldAttracted * cosVal - zWorldAttracted * sinVal;
+                posAttribute.array[idx] = xWorldAttracted * cosVal - zWorldAttracted * sinVal;
                 posAttribute.array[idx + 1] = yWorldAttracted;
                 posAttribute.array[idx + 2] = xWorldAttracted * sinVal + zWorldAttracted * cosVal + attraction * 0.55; // Pull towards mouse + Z-projection bulge
                 let factor = Math.pow(1.0 - (dist / maxDistance), 1.5);
-                colorAttribute.array[idx]     = Math.min(1.0, baseColor.r * factor + attraction * 0.7);
+                colorAttribute.array[idx] = Math.min(1.0, baseColor.r * factor + attraction * 0.7);
                 colorAttribute.array[idx + 1] = Math.min(1.0, baseColor.g * factor + attraction * 0.85);
                 colorAttribute.array[idx + 2] = Math.min(1.0, baseColor.b * factor + attraction * 1.0);
             }
@@ -1110,7 +1110,7 @@
         });
 
         buttons.plan.addEventListener('click', () => {
-            window.location.href = 'plan.html';
+            window.location.href = 'plan.html?from=brain';
         });
 
         buttons.apis.addEventListener('click', () => {
@@ -1165,12 +1165,35 @@
             } else if (textLower.includes('mcp') || textLower.includes('api')) {
                 reply = "Retrieving loaded Model Context Protocol interfaces. Directing view to the integration node.";
                 buttons.apis.click();
+            } else if (textLower.includes('console')) {
+                reply = "Opening task console stream.";
+                window.location.href = 'execution.html';
             } else if (textLower.includes('sync')) {
                 reply = "Syncing local memory graphs with the git remote repository. Pushed commits successfully.";
             }
 
             appendChatMessage(reply, 'jarvis');
         }
+
+        // Poll /state for voice navigation actions from Jarvis
+        setInterval(async () => {
+            try {
+                const apiBase = location.protocol === 'file:' ? 'http://127.0.0.1:5000' : '';
+                const res = await fetch(apiBase + '/state');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.ui_action && data.ui_action.type === 'navigate' && data.ui_action.url) {
+                        window.location.href = data.ui_action.url;
+                    } else if (data.ui_action && data.ui_action.type === 'control_interface') {
+                        if (data.ui_action.action === 'go_to_execution') {
+                            window.location.href = 'execution.html';
+                        } else if (data.ui_action.action === 'go_to_console') {
+                            window.location.href = 'execution.html';
+                        }
+                    }
+                }
+            } catch (e) { }
+        }, 800);
     </script>
 </body>
 

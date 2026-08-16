@@ -798,9 +798,10 @@
             <select id="session-select" class="session-dropdown" onchange="loadSession(this.value)">
                 <option value="">-- CURRENT SESSION --</option>
             </select>
-            <button class="nav-btn" onclick="window.location.href='command-center'">Brain</button>
+            <button class="nav-btn" id="first-nav-btn" onclick="goFirstNavTarget()">Brain</button>
+            <button class="nav-btn" id="btn-logs-nav" onclick="window.location.href='agent_talk.task_log.html'" style="display: none;">Task Logs/Chat</button>
             <button class="nav-btn active">Plan</button>
-            <button class="nav-btn" onclick="window.location.href='provider_comparison.html'">APIs/MCPs</button>
+            <button class="nav-btn" id="plan-apis-btn" onclick="goApisNavTarget()">APIs/MCPs</button>
         </div>
     </header>
 
@@ -999,8 +1000,35 @@
         let viewMode = "listing"; // "listing" or "detail"
         let userClosedModal = true;
         let lastGateId = "";
-        let isFirstLoad = true;
-        let activeModalTabId = "brain";
+        // Dynamic navigation context (Brain vs Execution)
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromSource = urlParams.get('from') || 'brain';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const btn = document.getElementById('first-nav-btn');
+            const logsBtn = document.getElementById('btn-logs-nav');
+            if (btn) {
+                if (fromSource === 'execution') {
+                    btn.innerText = 'Execution';
+                    if (logsBtn) logsBtn.style.display = 'inline-block';
+                } else {
+                    btn.innerText = 'Brain';
+                    if (logsBtn) logsBtn.style.display = 'none';
+                }
+            }
+        });
+
+        function goFirstNavTarget() {
+            if (fromSource === 'execution') {
+                window.location.href = 'execution.html';
+            } else {
+                window.location.href = 'command_center.html';
+            }
+        }
+
+        function goApisNavTarget() {
+            window.location.href = `provider_comparison.html?from=${fromSource}`;
+        }
 
         // Poll sessions list
         async function fetchPlans() {
@@ -2128,7 +2156,9 @@
 
                     if (data.ui_action) {
                         const act = data.ui_action;
-                        if (act.type === 'control_interface') {
+                        if (act.type === 'navigate' && act.url) {
+                            window.location.href = act.url;
+                        } else if (act.type === 'control_interface') {
                             const action = act.action;
                             if (action === 'go_to_brain') {
                                 window.location.href = 'command-center';

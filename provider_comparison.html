@@ -112,6 +112,7 @@
       text-transform: uppercase;
       background: linear-gradient(90deg, var(--cyan), var(--neon-pink));
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
@@ -686,8 +687,9 @@
         <p>Compare, price-calculate, and select alternative APIs and MCPs for the Automated Video Machine stack.</p>
       </div>
       <div class="nav-group-header" style="display: flex; gap: 8px; align-items: center; margin-left: auto; margin-right: 16px;">
-        <button class="theme-btn" onclick="window.location.href='command-center'" style="border: 1px solid var(--panel-border); font-weight: 500;">Brain</button>
-        <button class="theme-btn" onclick="window.location.href='plan.html'" style="border: 1px solid var(--panel-border); font-weight: 500;">Plan</button>
+        <button class="theme-btn" id="first-nav-btn-apis" onclick="goFirstNavTargetApis()" style="border: 1px solid var(--panel-border); font-weight: 500;">Brain</button>
+        <button class="theme-btn" id="btn-logs-nav-apis" onclick="window.location.href='agent_talk.task_log.html'" style="border: 1px solid var(--panel-border); font-weight: 500; display: none;">Task Logs/Chat</button>
+        <button class="theme-btn" id="apis-plan-btn" onclick="goPlanNavTargetApis()" style="border: 1px solid var(--panel-border); font-weight: 500;">Plan</button>
         <button class="theme-btn active" style="border: 1px solid var(--cyan); font-weight: 700; color: var(--cyan); background: rgba(0, 242, 254, 0.08);">APIs/MCPs</button>
       </div>
       <div class="theme-selector">
@@ -3616,6 +3618,35 @@
     fetchGlobalConfiguredTools();
     setInterval(fetchGlobalConfiguredTools, 4000);
     pollState();
+    // Dynamic navigation context (Brain vs Execution)
+    const urlParamsApis = new URLSearchParams(window.location.search);
+    const fromSourceApis = urlParamsApis.get('from') || 'brain';
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('first-nav-btn-apis');
+      const logsBtn = document.getElementById('btn-logs-nav-apis');
+      if (btn) {
+        if (fromSourceApis === 'execution') {
+          btn.innerText = 'Execution';
+          if (logsBtn) logsBtn.style.display = 'inline-block';
+        } else {
+          btn.innerText = 'Brain';
+          if (logsBtn) logsBtn.style.display = 'none';
+        }
+      }
+    });
+
+    function goFirstNavTargetApis() {
+      if (fromSourceApis === 'execution') {
+        window.location.href = 'execution.html';
+      } else {
+        window.location.href = 'command_center.html';
+      }
+    }
+
+    function goPlanNavTargetApis() {
+      window.location.href = `plan.html?from=${fromSourceApis}`;
+    }
   </script>
 </body>
 

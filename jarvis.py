@@ -168,6 +168,27 @@ JARVIS_UI_SNAPSHOT = {
 JARVIS_ACK_QUEUE = collections.deque(maxlen=20)
 JARVIS_STATE_LOCK = threading.Lock()
 
+# --- Real-Time Console & Inter-Agent Log Storage ---
+CONSOLE_LOGS = []
+CONSOLE_LOGS_LOCK = threading.Lock()
+
+AGENT_CHAT_LOGS = []
+AGENT_CHAT_LOGS_LOCK = threading.Lock()
+
+def append_console_log(level: str, text: str, source: str = "System"):
+    entry = {"timestamp": time.time(), "level": level, "text": text, "source": source}
+    with CONSOLE_LOGS_LOCK:
+        CONSOLE_LOGS.append(entry)
+        if len(CONSOLE_LOGS) > 500:
+            CONSOLE_LOGS.pop(0)
+
+def append_agent_chat(sender: str, receiver: str, message: str):
+    entry = {"timestamp": time.time(), "sender": sender, "receiver": receiver, "message": message}
+    with AGENT_CHAT_LOGS_LOCK:
+        AGENT_CHAT_LOGS.append(entry)
+        if len(AGENT_CHAT_LOGS) > 300:
+            AGENT_CHAT_LOGS.pop(0)
+
 
 
 def push_message(role, text):
@@ -346,11 +367,21 @@ def jarvis_tool_listener(name, args, result):
                 "type": "google_search"
             }
         elif name == "control_interface":
-            UI_ACTION = {
-                "type": "control_interface",
-                "action": args.get("action"),
-                "payload": args.get("payload") or {}
-            }
+            action = args.get("action")
+            if action == "go_to_execution":
+                UI_ACTION = {"type": "navigate", "url": "execution.html"}
+            elif action == "go_to_plan":
+                UI_ACTION = {"type": "navigate", "url": "plan.html"}
+            elif action == "go_to_brain":
+                UI_ACTION = {"type": "navigate", "url": "command_center.html"}
+            elif action == "go_to_apis":
+                UI_ACTION = {"type": "navigate", "url": "provider_comparison.html"}
+            else:
+                UI_ACTION = {
+                    "type": "control_interface",
+                    "action": action,
+                    "payload": args.get("payload") or {}
+                }
         elif name == "update_task":
             changed_fields = {k: v for k, v in args.items() if k != "task_id"}
             UI_ACTION = {
@@ -826,7 +857,48 @@ coordinator.register_state_provider("read_metrics", read_metrics_local)
 
 coordinator.register_tool_listener(jarvis_tool_listener)
 
+def check_navigation_intent(transcript: str) -> str:
+    global UI_ACTION
+    t_lower = transcript.lower()
+    if any(k in t_lower for k in ["console", "console stream", "task console", "chat stream", "console logs", "agent chat"]):
+        with STATE_LOCK:
+            UI_ACTION = {"type": "navigate", "url": "execution.html"}
+        return "console"
+    elif any(k in t_lower for k in ["execution mode", "execution map", "go to execution", "open execution"]):
+        with STATE_LOCK:
+            UI_ACTION = {"type": "navigate", "url": "execution.html"}
+        return "execution"
+    elif any(k in t_lower for k in ["go back", "previous page", "navigate back"]):
+        with STATE_LOCK:
+            UI_ACTION = {"type": "control_interface", "action": "go_back"}
+        return "back"
+    elif any(k in t_lower for k in [
+        "open brain", "back to brain", "brain page", "go to brain", 
+        "go to the brain", "take me to brain", "take me to the brain", 
+        "switch to brain", "switch to the brain", "show brain", "show the brain",
+        "command center", "open command center", "go to command center"
+    ]):
+        with STATE_LOCK:
+            UI_ACTION = {"type": "navigate", "url": "command_center.html"}
+        return "brain"
+    elif any(k in t_lower for k in ["open plan", "go to plan", "plan page"]):
+        with STATE_LOCK:
+            UI_ACTION = {"type": "navigate", "url": "plan.html"}
+        return "plan"
+    return ""
+
 def handle_request(transcript: str) -> str:
+    nav_target = check_navigation_intent(transcript)
+    if nav_target == "execution":
+        return "Going into execution mode."
+    elif nav_target == "console":
+        return "Opening task console stream."
+    elif nav_target == "plan":
+        return "Navigating to the plan page."
+    elif nav_target == "brain":
+        return "Navigating to the brain core map."
+    elif nav_target == "back":
+        return "Going back to the previous page."
     return coordinator.handle_request(transcript)
 
 
@@ -850,9 +922,29 @@ import logging
 logging.getLogger("werkzeug").setLevel(logging.WARNING)  # quiet the request logs
 
 
+@app.route("/")
+def root_page():
+    return send_from_directory(BASE_DIR, "command_center.html")
+
+
 @app.route("/command-center")
 def command_center():
     return send_from_directory(BASE_DIR, "command_center.html")
+
+
+@app.route("/command_center.html")
+def command_center_html_page():
+    return send_from_directory(BASE_DIR, "command_center.html")
+
+
+@app.route("/agent_map_final.html")
+def agent_map_final_page():
+    return send_from_directory(BASE_DIR, "command_center.html")
+
+
+@app.route("/agent_map_demo.html")
+def agent_map_demo_page():
+    return send_from_directory(os.path.join(BASE_DIR, "Previews"), "agent_map_demo.html")
 
 
 @app.route("/plan.html")
@@ -860,9 +952,31 @@ def plan_page():
     return send_from_directory(BASE_DIR, "plan.html")
 
 
+@app.route("/execution.html")
+def execution_page():
+    return send_from_directory(BASE_DIR, "execution.html")
+
+
+@app.route("/agent_talk.task_log.html")
+def agent_talk_task_log_page():
+    return send_from_directory(BASE_DIR, "agent_talk.task_log.html")
+
+
 @app.route("/provider_comparison.html")
 def provider_comparison_page():
     return send_from_directory(BASE_DIR, "provider_comparison.html")
+
+
+@app.route("/api/console_logs", methods=["GET"])
+def get_console_logs():
+    with CONSOLE_LOGS_LOCK:
+        return jsonify({"logs": list(CONSOLE_LOGS)})
+
+
+@app.route("/api/agent_chat", methods=["GET"])
+def get_agent_chat_logs():
+    with AGENT_CHAT_LOGS_LOCK:
+        return jsonify({"chat": list(AGENT_CHAT_LOGS)})
 
 
 @app.route("/tasks", methods=["GET"])

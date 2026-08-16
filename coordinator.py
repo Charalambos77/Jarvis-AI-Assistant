@@ -347,6 +347,7 @@ TOOLS = [
                         "go_to_plan",
                         "go_to_brain",
                         "go_to_apis",
+                        "go_to_execution",
                         "open_side_panel",
                         "close_side_panel",
                         "open_notes_panel",
@@ -363,6 +364,7 @@ TOOLS = [
                         "go_to_plan: Navigate to the Plan page. "
                         "go_to_brain: Return to Brain Core (3D map home). "
                         "go_to_apis: Navigate to the APIs/MCPs comparison page. "
+                        "go_to_execution: Navigate to the Execution page dashboard. "
                         "open_side_panel: Open the left side panel showing tasks. "
                         "close_side_panel: Close/hide the left side panel. "
                         "open_notes_panel: Open side panel showing all saved notes. "
@@ -689,6 +691,8 @@ UI_MAP = (
     "    Action: go_to_plan\n"
     "  - APIs/MCPs Page (provider_comparison.html): Compare AI providers. "
     "    Action: go_to_apis\n"
+    "  - Execution Page (execution.html): Real-time execution stream and task logs. "
+    "    Action: go_to_execution\n"
     "SIDE PANEL (left drawer, slides in/out):\n"
     "  - Tasks list view: All open tasks. Action: open_side_panel\n"
     "  - Notes list view: All saved notes sorted by date. Action: open_notes_panel\n"

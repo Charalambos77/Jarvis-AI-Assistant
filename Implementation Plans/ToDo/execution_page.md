@@ -1,73 +1,87 @@
-# Implementation Plan: Execution Mode Switch & Inter-Agent Console/Chat Interface
+# Implementation Plan: Standalone Execution Page & Real-Time Logging Engine
 
-This implementation plan details how Jarvis transitions into **Execution Mode** upon voice trigger (`"Jarvis switch to execution mode"`), using the layout and aesthetics from [agent_map_demo.html](file:///d:/Charalambos/Desktop/AI/second-brain-voice/Previews/agent_map_demo.html) without deleting or overwriting the preview file.
-
-## Key Changes & Requirements
-
-1. **Voice Triggers & Flash Transitions**:
-   - Voice trigger `"Jarvis switch to execution mode"` or `"switch to execution mode"` triggers a full-screen cyan/white flash overlay and switches the UI view into Execution Mode.
-   - Voice trigger `"go back to the brain"` or `"switch to brain mode"` triggers the same flash overlay and returns the UI to the main Brain view.
-2. **Dynamic SPA (Single-Page Application) Rendering**:
-   - Transitions take place without reloading `plan.html` or refreshing the browser page, preventing Three.js/WebGL re-initialization flashes.
-3. **Navigation & Tab State**:
-   - The top navigation bar remains active.
-   - In Execution Mode, the primary button label dynamically morphs from `BRAIN` to `PROJECT`.
-   - The `PLAN` and `APIS/MCPS` tabs remain active and functional.
-   - Two new navigation buttons appear: `CONSOLE` (task output logs) and `CHAT` (inter-agent dialogue).
-4. **Dynamic Running Agents Constellation**:
-   - The 6 placeholder categories (`marketing`, `operations`, `intelligence`, `customer`, `back office`, `sales`, `deals`) are replaced by active sub-agents currently executing in the project.
-5. **Real-Time Backend IPC & Streaming**:
-   - `voice_assistant.py` and `coordinator.py` broadcast mode updates via Flask Server-Sent Events (`/api/stream_events`).
-   - `/api/console_logs` and `/api/agent_chat` endpoints provide real-time streams for task execution outputs and inter-agent dialogues.
+This document details the complete design and code specifications for the **Execution Page (`execution.html`)** and its supporting backend infrastructure.
 
 ---
 
-## User Review Required
+## Complete Feature Matrix
 
-> [!IMPORTANT]
-> The preview file [agent_map_demo.html](file:///d:/Charalambos/Desktop/AI/second-brain-voice/Previews/agent_map_demo.html) will be preserved in `Previews/` untouched as requested. All new rendering logic will be incorporated directly into [agent_map_final.html](file:///d:/Charalambos/Desktop/AI/second-brain-voice/agent_map_final.html) and [jarvis.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/jarvis.py).
+### 1. Backend Real-Time Logging Engine (`jarvis.py`)
+- **Console Log Storage**: In-memory `CONSOLE_LOGS` buffer with lock (500 max entries) storing timestamped level, source, and text.
+- **Inter-Agent Chat Storage**: In-memory `AGENT_CHAT_LOGS` buffer with lock (300 max entries) storing sender, receiver, and message.
+- **REST Log Endpoints**:
+  - `GET /api/console_logs`: returns active task execution logs, CLI outputs, and pipeline gate statuses.
+  - `GET /api/agent_chat`: returns live inter-agent dialogue messages.
+- **Live Event Broadcaster**: `append_console_log()` and `append_agent_chat()` push real-time events to the UI stream.
+
+### 2. Standalone Execution Page (`execution.html`)
+- **Independent Page Structure**: Dedicated HTML page served at `execution.html` (matching `plan.html`).
+- **Cyberpunk Stardust Aesthetic**: Full Three.js stardust nebula canvas background consistent with the core Jarvis theme.
+- **Real-Time Task Console Panel**: Displays CLI logs, build output, script execution, and gate statuses.
+- **Inter-Agent Dialogue Feed Panel**: Displays live messaging between sub-agents (e.g. ResearchAgent $\rightarrow$ SynthesisAgent $\rightarrow$ DeploymentAgent) and Jarvis.
+- **Task & Blueprint Status**: Active step metrics and execution pipeline status.
+- **Voice / Chat Terminal Widget**: Embedded bottom bar listening to user commands and speech.
+
+### 3. Voice-Only Navigation System
+- **No On-Screen Navigation Buttons**: Header top bar is completely headless. No buttons on `agent_map_final.html`, `plan.html`, or `execution.html` for switching to/from execution page.
+- **Voice Command Entry**: Saying *"Jarvis, open execution page"*, *"go to execution mode"*, or starting a pipeline task triggers navigation to `execution.html`.
+- **Voice Command Exit**: Saying *"Jarvis, go back"*, *"open brain"*, or *"open plan"* triggers navigation back to `agent_map_final.html` or `plan.html`.
 
 ---
 
-## Proposed Changes
+## Detailed Code Specs
 
-### Core Backend & Voice Handler
+### Component 1: Flask Log Endpoints & Log Collectors
 
-#### [MODIFY] [jarvis.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/jarvis.py)
-- Add `/api/stream_events` Server-Sent Events (SSE) route for real-time IPC between Python processes and frontend.
-- Add `/api/console_logs` and `/api/agent_chat` queue endpoints.
-- Update `/api/voice_command` handler to detect `"switch to execution mode"` and `"go back to the brain"`, emitting `{ "action": "SWITCH_MODE", "mode": "EXECUTION" }` or `{ "action": "SWITCH_MODE", "mode": "BRAIN" }`.
+```python
+# In jarvis.py
+CONSOLE_LOGS = []
+CONSOLE_LOGS_LOCK = threading.Lock()
 
-#### [MODIFY] [coordinator.py](file:///d:/Charalambos/Desktop/AI/second-brain-voice/coordinator.py)
-- Add natural language recognition for execution mode navigation commands.
-- Broadcast inter-agent chat logs and active running agents list to `jarvis.py` state buffer.
+AGENT_CHAT_LOGS = []
+AGENT_CHAT_LOGS_LOCK = threading.Lock()
 
----
+def append_console_log(level: str, text: str, source: str = "System"):
+    entry = {"timestamp": time.time(), "level": level, "text": text, "source": source}
+    with CONSOLE_LOGS_LOCK:
+        CONSOLE_LOGS.append(entry)
+        if len(CONSOLE_LOGS) > 500:
+            CONSOLE_LOGS.pop(0)
 
-### User Interface & Visual Mode System
+def append_agent_chat(sender: str, receiver: str, message: str):
+    entry = {"timestamp": time.time(), "sender": sender, "receiver": receiver, "message": message}
+    with AGENT_CHAT_LOGS_LOCK:
+        AGENT_CHAT_LOGS.append(entry)
+        if len(AGENT_CHAT_LOGS) > 300:
+            AGENT_CHAT_LOGS.pop(0)
 
-#### [MODIFY] [agent_map_final.html](file:///d:/Charalambos/Desktop/AI/second-brain-voice/agent_map_final.html)
-- Add CSS Flash Overlay element (`#flash-overlay`) with keyframe transition for smooth mode shifts.
-- Update top navigation header:
-  - Add dynamic tab switching between `BRAIN` and `PROJECT`.
-  - Add `CONSOLE` and `CHAT` nav tab buttons.
-- Integrate active running agent Cytoscape trigonometric layout engine from `agent_map_demo.html`.
-- Add `#console-modal` panel for CLI/task execution logs.
-- Add `#agent-chat-modal` panel for Jarvis <-> Agent and Agent <-> Agent communication log.
-- Connect EventSource listener to `/api/stream_events` for zero-latency voice triggering.
+@app.route("/api/console_logs", methods=["GET"])
+def get_console_logs():
+    with CONSOLE_LOGS_LOCK:
+        return jsonify({"logs": list(CONSOLE_LOGS)})
+
+@app.route("/api/agent_chat", methods=["GET"])
+def get_agent_chat_logs():
+    with AGENT_CHAT_LOGS_LOCK:
+        return jsonify({"chat": list(AGENT_CHAT_LOGS)})
+```
+
+### Component 2: Standalone `execution.html`
+- Full Three.js stardust canvas background.
+- Dual-panel interface: Task Console Stream + Inter-Agent Dialogue Stream.
+- Auto-updating log containers polling `/api/console_logs` and `/api/agent_chat`.
+- Embedded voice terminal at bottom.
+- Headless layout (no header navigation buttons).
+
+### Component 3: Voice Navigation Routing in `jarvis.py`
+- Parse intent in `handle_request()`:
+  - Navigation commands trigger `UI_ACTION = {"type": "navigate", "url": "execution.html"}` or `"agent_map_final.html"`.
 
 ---
 
 ## Verification Plan
 
-### Automated & Integration Tests
-1. **Server SSE Endpoint Verification**:
-   - Test `/api/stream_events` using `curl` or Python script to verify event broadcasting.
-2. **Voice Intent Recognition**:
-   - Send simulated voice transcript `"Jarvis switch to execution mode"` through `/api/voice_command` and assert event payload.
-
-### Manual Verification
-1. Speak `"Jarvis switch to execution mode"`: Confirm full-screen white/cyan flash transition activates and view morphs to project execution layout without full page reload.
-2. Check top navigation tabs: Confirm `PROJECT`, `PLAN`, `APIS/MCPS`, `CONSOLE`, and `CHAT` buttons are visible and functional.
-3. Open `CONSOLE` and `CHAT` panels to confirm real-time streaming of task outputs and agent messages.
-4. Speak `"go back to the brain"`: Confirm flash transition activates and interface cleanly returns to the central Brain mode.
+1. **Backend Verification**: Call `/api/console_logs` and `/api/agent_chat` and verify log JSON output.
+2. **Voice Navigation Entry**: Speak *"Jarvis, go to execution page"* $\rightarrow$ Browser navigates to `execution.html`.
+3. **Stream Verification**: Verify console logs and inter-agent messages stream live into the `execution.html` panels.
+4. **Voice Navigation Exit**: Speak *"Jarvis, go back"* or *"Jarvis, open brain"* $\rightarrow$ Browser navigates back to `agent_map_final.html`.
