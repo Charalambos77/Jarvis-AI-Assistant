@@ -1292,9 +1292,6 @@ def pipeline_event_logger(event: dict):
     else:
         chat_text = f"Agent status updated: {event_type}"
 
-    if len(chat_text) > 300:
-        chat_text = chat_text[:297] + "..."
-
     append_agent_chat(sender=source, receiver=target, message=chat_text)
 
     with AGENT_OBS_LOCK:

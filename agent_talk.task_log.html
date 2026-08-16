@@ -195,6 +195,147 @@
             flex-direction: column;
             overflow: hidden;
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .panel-box.expanded {
+            grid-column: 1 / -1;
+            z-index: 20;
+        }
+
+        .panel-box.hidden {
+            display: none !important;
+        }
+
+        .expand-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .expand-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 8px rgba(255, 255, 255, 0.1);
+        }
+
+        /* Tab Buttons inside panel headers */
+        .tab-buttons {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 2px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .tab-btn.active {
+            color: #FFFFFF;
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Agent Card Styles */
+        .thoughts-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 4px 0;
+        }
+
+        .agent-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .agent-card:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(34, 211, 238, 0.2);
+            box-shadow: 0 4px 12px rgba(34, 211, 238, 0.05);
+        }
+
+        .agent-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .agent-card-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+        }
+
+        .agent-card-status {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: rgba(52, 211, 153, 0.1);
+            color: var(--accent-green);
+        }
+
+        .agent-card-status.offline {
+            background: rgba(156, 163, 175, 0.1);
+            color: var(--text-muted);
+        }
+
+        .agent-card-body {
+            font-size: 11px;
+            color: #9CA3AF;
+            line-height: 1.5;
+        }
+
+        .view-more-btn {
+            background: none;
+            border: none;
+            color: var(--accent-cyan);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 0;
+            margin-top: 4px;
+            display: inline-block;
+            text-decoration: underline;
+        }
+
+        .view-more-btn:hover {
+            color: var(--accent-blue);
         }
 
         .panel-header {
@@ -353,9 +494,16 @@
         </div>
 
         <!-- Real-Time Console Panel -->
-        <div class="panel-box">
+        <div class="panel-box" id="console-panel">
             <div class="panel-header">
-                <span>Task Console Stream</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span>Task Console Stream</span>
+                    <button class="expand-btn" onclick="toggleFullscreen('console-panel')" title="Toggle Fullscreen">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 12h14M5 12l4-4M5 12l4 4M19 12l-4-4M19 12l-4 4"/>
+                        </svg>
+                    </button>
+                </div>
                 <span style="font-size:10px; color:var(--text-muted);">/api/console_logs</span>
             </div>
             <div class="panel-body" id="console-logs-body">
@@ -367,19 +515,35 @@
         </div>
 
         <!-- Inter-Agent Dialogue Stream Panel -->
-        <div class="panel-box">
+        <div class="panel-box" id="chat-panel">
             <div class="panel-header" style="color: var(--accent-purple);">
-                <span>Inter-Agent Dialogue Stream</span>
-                <span style="font-size:10px; color:var(--text-muted);">/api/agent_chat</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span>Inter-Agent Dialogue Stream</span>
+                    <button class="expand-btn" onclick="toggleFullscreen('chat-panel')" title="Toggle Fullscreen">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 12h14M5 12l4-4M5 12l4 4M19 12l-4-4M19 12l-4 4"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="tab-buttons">
+                    <button class="tab-btn active" id="chat-tab-btn" onclick="switchRightTab('chat')">Chat</button>
+                    <button class="tab-btn" id="thoughts-tab-btn" onclick="switchRightTab('thoughts')">Thoughts</button>
+                </div>
             </div>
             <div class="panel-body" id="agent-chat-body">
-                <div class="chat-bubble">
-                    <div class="chat-header">
-                        <span class="sender-tag">System</span>
-                        <span class="receiver-tag">&rarr; All Agents</span>
+                <div id="chat-stream-view">
+                    <div class="chat-bubble">
+                        <div class="chat-header">
+                            <div>
+                                <span class="sender-tag">System</span>
+                                <span class="receiver-tag">&rarr; All Agents</span>
+                            </div>
+                        </div>
+                        <div class="chat-message">Inter-agent communication stream online. Monitoring dialogue channels...</div>
                     </div>
-                    <div class="chat-message">Inter-agent communication stream online. Monitoring dialogue channels...
-                    </div>
+                </div>
+                <div id="thoughts-stream-view" class="thoughts-container" style="display: none;">
+                    <!-- Dynamically rendered thoughts list -->
                 </div>
             </div>
         </div>
@@ -441,10 +605,180 @@
         });
 
         // ==========================================
-        // 2. REAL-TIME LOG POLLING LOGIC
+        // 2. UI HELPERS & STATE MANAGEMENT
+        // ==========================================
+        let activeRightTab = 'chat';
+        let lastChatData = [];
+        const expandedMessages = new Set();
+
+        function toggleFullscreen(panelId) {
+            const panel = document.getElementById(panelId);
+            const otherPanelId = panelId === 'console-panel' ? 'chat-panel' : 'console-panel';
+            const otherPanel = document.getElementById(otherPanelId);
+            
+            if (panel.classList.contains('expanded')) {
+                panel.classList.remove('expanded');
+                otherPanel.classList.remove('hidden');
+            } else {
+                panel.classList.add('expanded');
+                otherPanel.classList.add('hidden');
+            }
+        }
+
+        function switchRightTab(tabId) {
+            activeRightTab = tabId;
+            const chatBtn = document.getElementById('chat-tab-btn');
+            const thoughtsBtn = document.getElementById('thoughts-tab-btn');
+            const chatView = document.getElementById('chat-stream-view');
+            const thoughtsView = document.getElementById('thoughts-stream-view');
+            
+            if (tabId === 'chat') {
+                chatBtn.classList.add('active');
+                thoughtsBtn.classList.remove('active');
+                chatView.style.display = 'block';
+                thoughtsView.style.display = 'none';
+                
+                // Scroll to bottom of chat logs
+                const panelBody = document.getElementById('agent-chat-body');
+                panelBody.scrollTop = panelBody.scrollHeight;
+            } else {
+                chatBtn.classList.remove('active');
+                thoughtsBtn.classList.add('active');
+                chatView.style.display = 'none';
+                thoughtsView.style.display = 'block';
+                fetchAgents();
+            }
+        }
+
+        function toggleMessageExpansion(msgId) {
+            if (expandedMessages.has(msgId)) {
+                expandedMessages.delete(msgId);
+            } else {
+                expandedMessages.add(msgId);
+            }
+            renderChatLogs(lastChatData);
+        }
+
+        function renderChatLogs(chatData) {
+            const chatStreamView = document.getElementById('chat-stream-view');
+            if (!chatStreamView) return;
+            
+            chatStreamView.innerHTML = chatData.map((msg, index) => {
+                const time = new Date(msg.timestamp * 1000).toLocaleTimeString();
+                const msgId = msg.timestamp + '_' + index;
+                
+                const truncateLimit = 250;
+                const isLong = msg.message.length > truncateLimit;
+                const isExpanded = expandedMessages.has(msgId);
+                
+                let messageHtml = '';
+                if (isLong) {
+                    if (isExpanded) {
+                        messageHtml = `
+                            <div class="chat-message">${msg.message}</div>
+                            <button class="view-more-btn" onclick="toggleMessageExpansion('${msgId}')">View Less</button>
+                        `;
+                    } else {
+                        const snippet = msg.message.substring(0, truncateLimit) + '...';
+                        messageHtml = `
+                            <div class="chat-message">${snippet}</div>
+                            <button class="view-more-btn" onclick="toggleMessageExpansion('${msgId}')">View More</button>
+                        `;
+                    }
+                } else {
+                    messageHtml = `<div class="chat-message">${msg.message}</div>`;
+                }
+                
+                return `<div class="chat-bubble">
+                    <div class="chat-header">
+                        <div>
+                            <span class="sender-tag">${msg.sender}</span>
+                            <span class="receiver-tag">&rarr; ${msg.receiver}</span>
+                        </div>
+                        <span style="color:var(--text-muted); font-size:10px;">${time}</span>
+                    </div>
+                    ${messageHtml}
+                </div>`;
+            }).join('');
+            
+            if (activeRightTab === 'chat') {
+                const panelBody = document.getElementById('agent-chat-body');
+                panelBody.scrollTop = panelBody.scrollHeight;
+            }
+        }
+
+        async function fetchAgents() {
+            try {
+                const res = await fetch(apiBase + '/agents');
+                if (res.ok) {
+                    const data = await res.json();
+                    renderThoughts(data.agents || {});
+                }
+            } catch (e) {
+                console.error("Error fetching agents:", e);
+            }
+        }
+
+        function renderThoughts(agents) {
+            const thoughtsStreamView = document.getElementById('thoughts-stream-view');
+            if (!thoughtsStreamView) return;
+            
+            let html = '';
+            
+            // Central Brain Coordinator
+            html += `
+                <div class="agent-card">
+                    <div class="agent-card-header">
+                        <span class="agent-card-title">Brain Core Coordinator</span>
+                        <span class="agent-card-status">Active</span>
+                    </div>
+                    <div class="agent-card-body">
+                        The central intelligence engine coordinating multi-agent loops, processing user state, and routing tasks.
+                    </div>
+                </div>
+            `;
+            
+            const agentIds = Object.keys(agents);
+            if (agentIds.length > 0) {
+                agentIds.forEach(id => {
+                    const agent = agents[id];
+                    const statusClass = agent.status ? '' : 'offline';
+                    const statusText = agent.status || 'inactive';
+                    
+                    let configInfo = '';
+                    if (agent.config && agent.config.role) {
+                        configInfo = `<strong>Role:</strong> ${agent.config.role}<br/><strong>Brief:</strong> ${agent.config.brief || 'No brief provided.'}`;
+                    } else {
+                        configInfo = `Active execution thread monitoring pipeline steps.`;
+                    }
+                    
+                    html += `
+                        <div class="agent-card">
+                            <div class="agent-card-header">
+                                <span class="agent-card-title">${id}</span>
+                                <span class="agent-card-status ${statusClass}">${statusText}</span>
+                            </div>
+                            <div class="agent-card-body">
+                                ${configInfo}
+                            </div>
+                        </div>
+                    `;
+                });
+            } else {
+                html += `
+                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 20px;">
+                        No other agents are currently active in this pipeline cycle.
+                    </div>
+                `;
+            }
+            
+            thoughtsStreamView.innerHTML = html;
+        }
+
+        // ==========================================
+        // 3. REAL-TIME LOG POLLING LOGIC
         // ==========================================
         const consoleBody = document.getElementById('console-logs-body');
-        const chatBody = document.getElementById('agent-chat-body');
         const apiBase = location.protocol === 'file:' ? 'http://127.0.0.1:5000' : '';
 
         async function fetchLogs() {
@@ -471,19 +805,13 @@
                 if (chatRes.ok) {
                     const data = await chatRes.json();
                     if (data.chat && data.chat.length > 0) {
-                        chatBody.innerHTML = data.chat.map(msg => {
-                            const time = new Date(msg.timestamp * 1000).toLocaleTimeString();
-                            return `<div class="chat-bubble">
-                                <div class="chat-header">
-                                    <span class="sender-tag">${msg.sender}</span>
-                                    <span class="receiver-tag">&rarr; ${msg.receiver}</span>
-                                    <span style="color:var(--text-muted); font-size:10px;">${time}</span>
-                                </div>
-                                <div class="chat-message">${msg.message}</div>
-                            </div>`;
-                        }).join('');
-                        chatBody.scrollTop = chatBody.scrollHeight;
+                        lastChatData = data.chat;
+                        renderChatLogs(lastChatData);
                     }
+                }
+
+                if (activeRightTab === 'thoughts') {
+                    await fetchAgents();
                 }
             } catch (e) {
                 // Ignore network errors during reload/navigation
