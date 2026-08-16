@@ -1354,6 +1354,35 @@ def delete_pipeline_route():
     return jsonify(res)
 
 
+@app.route("/api/connect-tool", methods=["POST"])
+def connect_tool_route():
+    """Saves tool credentials to .env and updates status in registry."""
+    from connectors.api_connector import save_tool_credentials
+    data = request.get_json(force=True) or {}
+    service_name = data.get("service_name", "").strip()
+    credentials = data.get("credentials", {})
+    method_id = data.get("method_id")
+    
+    if not service_name:
+        return jsonify({"error": "service_name is required"}), 400
+    if not credentials or not isinstance(credentials, dict):
+        return jsonify({"error": "credentials dict is required"}), 400
+        
+    success = save_tool_credentials(service_name, credentials, method_id=method_id)
+    if success:
+        return jsonify({"status": "success", "message": f"Successfully connected {service_name}"})
+    else:
+        return jsonify({"error": f"Failed to save credentials for {service_name}"}), 500
+
+
+@app.route("/api/configured-tools", methods=["GET"])
+def get_configured_tools_route():
+    """Returns all globally configured services across all projects."""
+    from connectors.api_connector import get_all_configured_services
+    configured = get_all_configured_services()
+    return jsonify({"status": "success", "tools": configured})
+
+
 def run_server():
     app.run(host=HOST, port=PORT, use_reloader=False)
 

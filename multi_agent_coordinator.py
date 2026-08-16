@@ -312,26 +312,34 @@ def save_agent_plan_file(plan_id: str, agent_plan: dict, project_name: str = "De
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-def save_apis_mcps_file(plan_id: str, tools: list, project_name: str = "Default Project"):
+def save_apis_mcps_file(plan_id: str, data: dict, project_name: str = "Default Project"):
     if not plan_id:
         return
-    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans")
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "memory")
     os.makedirs(dir_path, exist_ok=True)
-    file_path = os.path.join(dir_path, f"apis_mcps_{plan_id}.json")
+    os.makedirs(os.path.join(dir_path, "high_value"), exist_ok=True)
+    os.makedirs(os.path.join(dir_path, "general"), exist_ok=True)
+    file_path = os.path.join(dir_path, "apis_mcps.json")
     with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(tools, f, indent=2, ensure_ascii=False)
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-def load_apis_mcps_file(plan_id: str, project_name: str = "Default Project") -> list:
+def load_apis_mcps_file(plan_id: str, project_name: str = "Default Project") -> dict:
     if not plan_id:
-        return []
-    file_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans", f"apis_mcps_{plan_id}.json")
+        return {"brain": [], "agents": []}
+    file_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "memory", "apis_mcps.json")
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                content = json.load(f)
+                if isinstance(content, dict):
+                    content.setdefault("brain", [])
+                    content.setdefault("agents", [])
+                    return content
+                elif isinstance(content, list):
+                    return {"brain": content, "agents": []}
         except Exception as e:
             print(f"[load_apis_mcps_file] Error reading {file_path}: {e}")
-    return []
+    return {"brain": [], "agents": []}
 
 def save_research_findings_file(plan_id: str, agent_id: str, findings: dict, project_name: str = "Default Project"):
     if not plan_id or not agent_id:
@@ -535,14 +543,22 @@ async def run_full_pipeline(
                 return agent_plan
             save_agent_plan_file(plan_id, agent_plan, project_name)
             init_tools = agent_plan.get("recommended_tools") or []
-            save_apis_mcps_file(plan_id, init_tools, project_name)
+            for t in init_tools:
+                t["recommended_by"] = ["Brain"]
+            save_apis_mcps_file(plan_id, {"brain": init_tools, "agents": []}, project_name)
             if event_logger:
                 event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
         else:
-            apis_mcps_file = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans", f"apis_mcps_{plan_id}.json")
+            mem_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "memory")
+            os.makedirs(mem_dir, exist_ok=True)
+            os.makedirs(os.path.join(mem_dir, "high_value"), exist_ok=True)
+            os.makedirs(os.path.join(mem_dir, "general"), exist_ok=True)
+            apis_mcps_file = os.path.join(mem_dir, "apis_mcps.json")
             if not os.path.exists(apis_mcps_file):
                 init_tools = agent_plan.get("recommended_tools") or []
-                save_apis_mcps_file(plan_id, init_tools, project_name)
+                for t in init_tools:
+                    t["recommended_by"] = ["Brain"]
+                save_apis_mcps_file(plan_id, {"brain": init_tools, "agents": []}, project_name)
 
         cycles = agent_plan.get("cycles", [])
         if len(cycles) < 3:
@@ -612,13 +628,24 @@ async def run_full_pipeline(
                     if isinstance(item, dict) and "recommended_tools" in item:
                         new_tools.extend(item["recommended_tools"])
                 if new_tools:
-                    existing_tools = load_apis_mcps_file(plan_id, project_name)
-                    merged_tools = {t["service"]: t for t in existing_tools if "service" in t}
+                    existing_data = load_apis_mcps_file(plan_id, project_name)
+                    merged_agents = {t["service"].lower(): t for t in existing_data["agents"] if "service" in t}
                     for t in new_tools:
                         service = t.get("service")
                         if service:
-                            merged_tools[service] = t
-                    save_apis_mcps_file(plan_id, list(merged_tools.values()), project_name)
+                            s_key = service.lower()
+                            if "recommended_by" not in t or not t["recommended_by"]:
+                                t["recommended_by"] = [f"cycle{cycle_id}"]
+                            elif f"cycle{cycle_id}" not in t["recommended_by"]:
+                                t["recommended_by"].append(f"cycle{cycle_id}")
+                                
+                            if s_key in merged_agents:
+                                existing = merged_agents[s_key]
+                                existing["recommended_by"] = list(set((existing.get("recommended_by") or []) + t["recommended_by"]))
+                            else:
+                                merged_agents[s_key] = t
+                    existing_data["agents"] = list(merged_agents.values())
+                    save_apis_mcps_file(plan_id, existing_data, project_name)
 
                 # 2b: Synthesis (per-cycle)
                 synthesis_result = await run_synthesis_agent(authoritative_output)
@@ -729,28 +756,36 @@ async def run_full_pipeline(
                         json_part = parts[-1].split("```")[0].strip()
                         disk_bp = json.loads(json_part)
                         
-                        if "tool_recommendations" not in disk_bp or not disk_bp["tool_recommendations"]:
-                            db_bp = existing_plan.get("master_blueprint", {})
-                            disk_bp["tool_recommendations"] = db_bp.get("tool_recommendations", [])
-                        
+                        tools_data = load_apis_mcps_file(plan_id, project_name)
+                        disk_bp["tool_recommendations"] = tools_data.get("brain", []) + tools_data.get("agents", [])
                         master_blueprint = disk_bp
                         print(f"[Pipeline] Successfully read and updated master blueprint from disk: {blueprint_file}")
                 except Exception as e:
                     print(f"[Pipeline] Error reading master blueprint from disk: {e}")
                     master_blueprint = existing_plan.get("master_blueprint")
+                    if master_blueprint:
+                        tools_data = load_apis_mcps_file(plan_id, project_name)
+                        master_blueprint["tool_recommendations"] = tools_data.get("brain", []) + tools_data.get("agents", [])
             else:
                 master_blueprint = existing_plan.get("master_blueprint")
+                if master_blueprint:
+                    tools_data = load_apis_mcps_file(plan_id, project_name)
+                    master_blueprint["tool_recommendations"] = tools_data.get("brain", []) + tools_data.get("agents", [])
 
         if not master_blueprint or not master_blueprint.get("tool_recommendations"):
             print("[Pipeline] Phase 3: Compiling Master Blueprint from all cycles...")
             master_blueprint = await run_master_synthesis(approved_blueprints)
-            final_tools = load_apis_mcps_file(plan_id, project_name)
-            master_blueprint["tool_recommendations"] = final_tools
+            tools_data = load_apis_mcps_file(plan_id, project_name)
+            combined = tools_data.get("brain", []) + tools_data.get("agents", [])
+            master_blueprint["tool_recommendations"] = combined
             save_master_blueprint_file(plan_id, master_blueprint, project_name)
             if event_logger:
                 event_logger({"event_type": "blueprint_compiled", "source": "synthesis", "data": master_blueprint})
         else:
             print("[Pipeline] Resuming: Found existing Master Blueprint. Skipping compilation.")
+            if master_blueprint:
+                tools_data = load_apis_mcps_file(plan_id, project_name)
+                master_blueprint["tool_recommendations"] = tools_data.get("brain", []) + tools_data.get("agents", [])
 
         # Check if the execution blueprint gate was already approved
         skip_exec_gate = False

@@ -63,10 +63,26 @@ Output format:
     {{
       "service": "youtube_api",
       "purpose": "why it is needed",
+      "doc_url": "official developer website or documentation URL",
       "pros": ["pro1", "pro2"],
       "cons": ["con1", "con2"],
       "why": "specific reason",
-      "alternatives": ["alt1"]
+      "alternatives": ["alt1"],
+      "connection_methods": [
+        {{
+          "method_id": "api_key",
+          "label": "API Key (Simple)",
+          "fields": [{{"name": "api_key", "label": "API Key", "type": "password"}}]
+        }},
+        {{
+          "method_id": "oauth",
+          "label": "OAuth 2.0 Client",
+          "fields": [
+            {{"name": "client_id", "label": "Client ID", "type": "text"}},
+            {{"name": "client_secret", "label": "Client Secret", "type": "password"}}
+          ]
+        }}
+      ]
     }}
   ],
   "high_value_memory": {{

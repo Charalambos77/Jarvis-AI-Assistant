@@ -833,6 +833,18 @@
 
       <!-- Right: Sticky Planner / Calculator -->
       <div style="position: sticky; top: 24px; height: fit-content;">
+        <!-- Global Configured APIs Panel -->
+        <div class="panel" style="border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);">
+          <div class="panel-title" style="color: var(--emerald);">
+            <span>Global Active APIs</span>
+            <span class="mono" id="configured-tools-count" style="font-size: 10px; background: rgba(16, 185, 129, 0.15); border: 1px solid var(--emerald); color: var(--emerald); padding: 2px 8px; border-radius: 12px;">0 Active</span>
+          </div>
+          <p style="font-size: 11px; color: var(--text-muted); margin-top: -10px; margin-bottom: 12px;">APIs connected here are saved to your global environment and accessible across all current and future projects.</p>
+          <div class="stack-list" id="global-configured-tools-list">
+            <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px;">Loading global credentials...</div>
+          </div>
+        </div>
+
         <!-- Selected Stack Panel -->
         <div class="panel">
           <div class="panel-title">Current Architecture Stack</div>
@@ -3560,10 +3572,49 @@
         });
     }
 
+    async function fetchGlobalConfiguredTools() {
+      try {
+        const res = await fetch('/api/configured-tools');
+        const data = await res.json();
+        const tools = data.tools || {};
+        const container = document.getElementById('global-configured-tools-list');
+        const countBadge = document.getElementById('configured-tools-count');
+
+        const toolKeys = Object.keys(tools);
+        if (countBadge) countBadge.innerText = `${toolKeys.length} Active`;
+
+        if (toolKeys.length === 0) {
+          container.innerHTML = `<div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px; font-style: italic;">No active APIs configured yet. Connect tools in your plan or environmental setup.</div>`;
+          return;
+        }
+
+        let html = "";
+        toolKeys.forEach(key => {
+          const cfg = tools[key];
+          const method = cfg.method_id ? `(${cfg.method_id})` : '';
+          const updated = cfg.last_updated ? `Updated: ${cfg.last_updated}` : '';
+          html += `
+            <div class="stack-item" style="border-left: 3px solid var(--emerald); background: rgba(16, 185, 129, 0.05);">
+              <div>
+                <span class="stack-layer" style="color: var(--emerald);">${key}</span> ${method}
+                <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">${updated}</div>
+              </div>
+              <span class="stack-selection" style="color: #22c55e; font-size: 10px;">✅ ACTIVE</span>
+            </div>
+          `;
+        });
+        container.innerHTML = html;
+      } catch (err) {
+        console.error("Error fetching configured tools:", err);
+      }
+    }
+
     // Initialize
     initMemory();
     populateDirectory();
     createJarvisToast();
+    fetchGlobalConfiguredTools();
+    setInterval(fetchGlobalConfiguredTools, 4000);
     pollState();
   </script>
 </body>
