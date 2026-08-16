@@ -533,6 +533,7 @@
         // =========================================================
         let isCurrentPipelineRunning = false;
         let isTransitioningState = false;
+        let isInitialLoad = true;
 
         function triggerFlashTransition(onPeakCallback) {
             if (isTransitioningState) return;
@@ -578,6 +579,19 @@
                     const data = await res.json();
                     const shouldBeRunning = !!data.active;
 
+                    // On initial page navigation/load: set view instantly without flash effect
+                    if (isInitialLoad) {
+                        isInitialLoad = false;
+                        isCurrentPipelineRunning = shouldBeRunning;
+                        if (shouldBeRunning) {
+                            switchToActiveView();
+                        } else {
+                            switchToIdleView();
+                        }
+                        return;
+                    }
+
+                    // On live state change while remaining on page: trigger flash transition
                     if (shouldBeRunning && !isCurrentPipelineRunning) {
                         isCurrentPipelineRunning = true;
                         triggerFlashTransition(() => {
@@ -594,6 +608,7 @@
                 console.error("Status poll error:", e);
             }
         }
+
 
         setInterval(pollPipelineStatus, 1500);
         pollPipelineStatus();
@@ -1267,12 +1282,15 @@
                             'curve-style': 'straight',
                             'target-arrow-shape': 'none'
                         }
-                    }
+                    },
+                    { selector: '.dimmed', style: { 'opacity': 0.15 } },
+
+                    { selector: 'edge.highlighted', style: { 'line-color': 'data(color)', 'width': 2.5, 'shadow-blur': 15, 'shadow-color': 'data(color)', 'shadow-opacity': 0.8, 'z-index': 100 } },
+                    { selector: 'node.highlighted', style: { 'border-color': 'data(color)', 'shadow-blur': 30, 'shadow-color': 'data(color)', 'shadow-opacity': 1, 'z-index': 100 } }
                 ],
                 layout: { name: 'preset', positions: nodesPositions, fit: false },
                 userZoomingEnabled: false, userPanningEnabled: false
             });
-
 
             cyActive.nodes('[type="dept"]').forEach(n => {
                 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${n.data('color')}" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
@@ -1281,19 +1299,262 @@
                 n.style('background-position-x', '50%'); n.style('background-position-y', '50%');
             });
 
-            cyActive.on('tap', 'node', function (evt) {
-                let d = evt.target.data();
-                if (d.type === 'anchor') return;
-                document.getElementById('active-panel-title').innerText = d.label || 'Agent Node';
-                document.getElementById('active-panel-type').innerText = d.type.toUpperCase();
-                document.getElementById('active-panel-replaces').innerText = `Active processing node inside ${d.deptId || 'system'} department.`;
-                document.getElementById('active-side-panel').classList.add('open');
+            // Sector Mouseover Hover Glow Highlight
+            let activeDeptId = null;
+
+            function applyHoverHighlight(deptId) {
+                activeDeptId = deptId;
+                cyActive.elements().addClass('dimmed');
+                let branch = cyActive.elements(`[deptId = "${deptId}"]`);
+                branch.removeClass('dimmed').addClass('highlighted');
+                cyActive.getElementById('anchor_' + deptId).removeClass('dimmed');
+
+                document.querySelectorAll('#active-view-container .department-label').forEach(el => {
+                    if (el.id !== 'label_' + deptId) {
+                        el.style.opacity = '0.15';
+                    } else {
+                        const deptObj = departments.find(d => d.id === deptId);
+                        el.style.opacity = '1';
+                        el.style.textShadow = `0 0 20px ${deptObj.color}`;
+                    }
+                });
+            }
+
+            function clearHoverHighlight() {
+                if (activeDeptId === null) return;
+                activeDeptId = null;
+                cyActive.elements().removeClass('dimmed highlighted');
+                document.querySelectorAll('#active-view-container .department-label').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.textShadow = `0 0 15px rgba(0,0,0,0.8)`;
+                });
+            }
+
+            window.addEventListener('mousemove', (e) => {
+                if (isDrillDownMode || isTransitioning || !document.getElementById('idle-view-container').classList.contains('hidden')) return;
+
+                if (document.getElementById('active-side-panel').classList.contains('open') && e.clientX < 500) {
+                    clearHoverHighlight();
+                    return;
+                }
+
+                const cx = window.innerWidth / 2;
+                const cy = (window.innerHeight / 2) + 40;
+                const dx = e.clientX - cx;
+                const dy = e.clientY - cy;
+                const distance = Math.sqrt(dx * dx + dy * dy) / 0.8;
+
+                if (distance < 180 || distance > 550) {
+                    clearHoverHighlight();
+                    return;
+                }
+
+                let mouseAngle = Math.atan2(dy, dx);
+                const sectorSize = (2 * Math.PI) / departments.length;
+                let adjustedAngle = mouseAngle - (-Math.PI / 2) + (sectorSize / 2);
+                while (adjustedAngle < 0) adjustedAngle += 2 * Math.PI;
+                while (adjustedAngle >= 2 * Math.PI) adjustedAngle -= 2 * Math.PI;
+
+                const deptIndex = Math.floor(adjustedAngle / sectorSize) % departments.length;
+                const targetDept = departments[deptIndex];
+
+                if (targetDept && targetDept.id !== activeDeptId) {
+                    applyHoverHighlight(targetDept.id);
+                }
             });
+
+            document.body.addEventListener('mouseleave', () => {
+                if (!isDrillDownMode && !isTransitioning) clearHoverHighlight();
+            });
+
+            // Department Drill-Down State Management
+            let isDrillDownMode = false;
+            let isTransitioning = false;
+            let currentDrillDept = null;
+            let drillDownPositions = {};
+
+            // Breathing float animation
+            let animTime = 0;
+            setInterval(() => {
+                if (isTransitioning) return;
+                animTime += 0.05;
+                cyActive.nodes().forEach((node, i) => {
+                    if (node.data('type') === 'anchor') return;
+                    let basePos = nodesPositions[node.id()];
+                    if (isDrillDownMode) {
+                        if (node.data('deptId') === currentDrillDept && drillDownPositions[node.id()]) {
+                            basePos = drillDownPositions[node.id()];
+                        } else { return; }
+                    }
+                    if (!basePos) return;
+                    let offsetX = Math.sin(animTime + i) * 1.5;
+                    let offsetY = Math.cos(animTime + i * 1.5) * 1.5;
+                    node.position({ x: basePos.x + offsetX, y: basePos.y + offsetY });
+                });
+            }, 30);
+
+            // Node Click: Enter Drill Down OR Open Side Panel + Camera Zoom
+            cyActive.on('tap', 'node', function (evt) {
+                let node = evt.target;
+                let d = node.data();
+                if (d.type === 'anchor') return;
+
+                if (!isDrillDownMode) {
+                    enterDrillDown(d.deptId);
+                    return;
+                }
+
+                const deptObj = departments.find(dep => dep.id === (d.deptId || d.id)) || { label: d.label || 'Agent Node' };
+                document.getElementById('active-panel-title').innerText = d.label || deptObj.label;
+                document.getElementById('active-panel-type').innerText = d.type.toUpperCase().replace('_', ' ');
+                document.getElementById('active-panel-replaces').innerText = `Active automated execution node for ${deptObj.label}.`;
+                document.getElementById('active-side-panel').classList.add('open');
+
+                const targetZoom = 2.0;
+                const targetX = (window.innerWidth / 2) + 150;
+                const targetY = window.innerHeight / 2;
+                cyActive.animate({
+                    zoom: targetZoom,
+                    pan: { x: targetX - (node.position().x * targetZoom), y: targetY - (node.position().y * targetZoom) }
+                }, { duration: 650, easing: 'ease-out-cubic' });
+            });
+
+            cyActive.on('tap', function (evt) {
+                if (evt.target === cyActive) {
+                    if (!isDrillDownMode && activeDeptId) {
+                        enterDrillDown(activeDeptId);
+                    } else {
+                        closeActivePanel();
+                    }
+                }
+            });
+
+            function enterDrillDown(deptId) {
+                isDrillDownMode = true;
+                currentDrillDept = deptId;
+                isTransitioning = true;
+
+                cyActive.zoom(1.0);
+                cyActive.pan({ x: 0, y: 0 });
+                cyActive.elements().removeClass('dimmed highlighted');
+
+                document.getElementById('active-globe-container').style.display = 'none';
+                document.getElementById('active-globe-click-target').style.display = 'none';
+                document.getElementById('labels-container').style.display = 'none';
+                conduitsGroup.visible = false;
+
+                let wm = document.getElementById('watermark');
+                let deptObj = departments.find(d => d.id === deptId);
+                wm.innerText = deptObj.label;
+                wm.style.display = 'block';
+
+                cyActive.elements().style('display', 'none');
+                let branch = cyActive.elements(`[deptId = "${deptId}"]`);
+                branch.style('display', 'element');
+
+                cyActive.getElementById(deptId).data('label', 'START HERE');
+
+                let deptNode = cyActive.getElementById(deptId);
+                let rootX = window.innerWidth / 2;
+                let rootY = window.innerHeight - 150;
+
+                drillDownPositions = {};
+                drillDownPositions[deptId] = { x: rootX, y: rootY };
+
+                let levels = { 0: [deptNode] };
+                let queue = [{ node: deptNode, level: 0 }];
+                let visited = new Set([deptId]);
+
+                while (queue.length > 0) {
+                    let curr = queue.shift();
+                    let succ = curr.node.outgoers('node');
+                    succ.forEach(s => {
+                        if (!visited.has(s.id())) {
+                            visited.add(s.id());
+                            let nextLevel = curr.level + 1;
+                            if (!levels[nextLevel]) levels[nextLevel] = [];
+                            levels[nextLevel].push(s);
+                            queue.push({ node: s, level: nextLevel });
+                        }
+                    });
+                }
+
+                let levelSpacingY = -120;
+                let spacingX = 180;
+
+                Object.keys(levels).forEach(lvlStr => {
+                    let lvl = parseInt(lvlStr);
+                    if (lvl === 0) return;
+                    let nodesInLvl = levels[lvl];
+                    let width = (nodesInLvl.length - 1) * spacingX;
+                    let startX = rootX - width / 2;
+
+                    nodesInLvl.forEach((n, idx) => {
+                        let x = startX + idx * spacingX + (Math.random() - 0.5) * 80;
+                        let y = rootY + (lvl * levelSpacingY) + (Math.random() - 0.5) * 50;
+                        drillDownPositions[n.id()] = { x: x, y: y };
+                    });
+                });
+
+                cyActive.nodes(`[deptId = "${deptId}"]`).forEach(n => {
+                    let pos = drillDownPositions[n.id()];
+                    if (pos) n.animate({ position: pos }, { duration: 800, easing: 'ease-out-cubic' });
+                });
+
+                setTimeout(() => { isTransitioning = false; }, 800);
+            }
+
+            window.addEventListener('mousemove', (e) => {
+                if (isDrillDownMode && !isTransitioning) {
+                    const deptNode = cyActive.getElementById(currentDrillDept);
+                    if (deptNode && deptNode.length > 0) {
+                        const cyCenterY = (window.innerHeight / 2) + 40;
+                        const nodeScreenY = (window.innerHeight / 2) + (deptNode.position().y - cyCenterY) * 0.8;
+                        if (e.clientY >= nodeScreenY + 5) exitDrillDown();
+                    }
+                }
+            });
+
+            function exitDrillDown() {
+                isDrillDownMode = false;
+                isTransitioning = true;
+
+                closeActivePanel();
+
+                document.getElementById('active-globe-container').style.display = 'block';
+                document.getElementById('active-globe-click-target').style.display = 'block';
+                document.getElementById('labels-container').style.display = 'block';
+                conduitsGroup.visible = true;
+                document.getElementById('watermark').style.display = 'none';
+
+                if (currentDrillDept) {
+                    cyActive.getElementById(currentDrillDept).data('label', '');
+                    currentDrillDept = null;
+                }
+
+                cyActive.elements().style('display', 'element');
+                document.querySelectorAll('#active-view-container .department-label').forEach(el => {
+                    el.style.opacity = '1';
+                    el.style.textShadow = `0 0 15px rgba(0,0,0,0.8)`;
+                });
+
+                cyActive.nodes().forEach(n => {
+                    let pos = nodesPositions[n.id()];
+                    if (pos) n.animate({ position: pos }, { duration: 250, easing: 'ease-out-quad' });
+                });
+
+                setTimeout(() => { isTransitioning = false; }, 250);
+            }
 
             window.closeActivePanel = function() {
                 document.getElementById('active-side-panel').classList.remove('open');
+                if (isDrillDownMode && !isTransitioning) {
+                    cyActive.animate({ zoom: 1.0, pan: { x: 0, y: 0 } }, { duration: 250, easing: 'ease-out-quad' });
+                }
             };
+
         })();
+
 
         // Navigation Buttons Event Listeners
         document.getElementById('btn-execution').addEventListener('click', () => { window.location.href = 'execution.html'; });
