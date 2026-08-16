@@ -273,19 +273,23 @@
 
         .agent-card {
             background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            border-radius: 8px;
-            padding: 12px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 14px 18px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
-            transition: all 0.2s ease;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
         }
 
         .agent-card:hover {
-            background: rgba(255, 255, 255, 0.04);
-            border-color: rgba(34, 211, 238, 0.2);
-            box-shadow: 0 4px 12px rgba(34, 211, 238, 0.05);
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(34, 211, 238, 0.4);
+            box-shadow: 0 4px 20px rgba(34, 211, 238, 0.15), 0 0 30px rgba(167, 139, 250, 0.1);
+            transform: translateY(-2px);
         }
 
         .agent-card-header {
@@ -321,6 +325,42 @@
             line-height: 1.5;
         }
 
+        .agent-card-preview {
+            font-size: 11px;
+            color: #9CA3AF;
+            font-family: 'Fira Code', monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            margin-top: 4px;
+        }
+
+        .back-nav-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #FFFFFF;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .back-nav-btn:hover {
+            background: rgba(34, 211, 238, 0.15);
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+            box-shadow: 0 0 10px rgba(34, 211, 238, 0.2);
+        }
+
         .view-more-btn {
             background: none;
             border: none;
@@ -336,6 +376,24 @@
 
         .view-more-btn:hover {
             color: var(--accent-blue);
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0;
+            }
+        }
+
+        .cursor-blink {
+            animation: blink 1.0s infinite;
+            color: var(--accent-cyan);
+            font-weight: bold;
         }
 
         .panel-header {
@@ -499,8 +557,9 @@
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span>Task Console Stream</span>
                     <button class="expand-btn" onclick="toggleFullscreen('console-panel')" title="Toggle Fullscreen">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M5 12h14M5 12l4-4M5 12l4 4M19 12l-4-4M19 12l-4 4"/>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 12h14M5 12l4-4M5 12l4 4M19 12l-4-4M19 12l-4 4" />
                         </svg>
                     </button>
                 </div>
@@ -520,8 +579,9 @@
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span>Inter-Agent Dialogue Stream</span>
                     <button class="expand-btn" onclick="toggleFullscreen('chat-panel')" title="Toggle Fullscreen">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M5 12h14M5 12l4-4M5 12l4 4M19 12l-4-4M19 12l-4 4"/>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 12h14M5 12l4-4M5 12l4 4M19 12l-4-4M19 12l-4 4" />
                         </svg>
                     </button>
                 </div>
@@ -539,7 +599,8 @@
                                 <span class="receiver-tag">&rarr; All Agents</span>
                             </div>
                         </div>
-                        <div class="chat-message">Inter-agent communication stream online. Monitoring dialogue channels...</div>
+                        <div class="chat-message">Inter-agent communication stream online. Monitoring dialogue
+                            channels...</div>
                     </div>
                 </div>
                 <div id="thoughts-stream-view" class="thoughts-container" style="display: none;">
@@ -615,7 +676,7 @@
             const panel = document.getElementById(panelId);
             const otherPanelId = panelId === 'console-panel' ? 'chat-panel' : 'console-panel';
             const otherPanel = document.getElementById(otherPanelId);
-            
+
             if (panel.classList.contains('expanded')) {
                 panel.classList.remove('expanded');
                 otherPanel.classList.remove('hidden');
@@ -631,13 +692,13 @@
             const thoughtsBtn = document.getElementById('thoughts-tab-btn');
             const chatView = document.getElementById('chat-stream-view');
             const thoughtsView = document.getElementById('thoughts-stream-view');
-            
+
             if (tabId === 'chat') {
                 chatBtn.classList.add('active');
                 thoughtsBtn.classList.remove('active');
                 chatView.style.display = 'block';
                 thoughtsView.style.display = 'none';
-                
+
                 // Scroll to bottom of chat logs
                 const panelBody = document.getElementById('agent-chat-body');
                 panelBody.scrollTop = panelBody.scrollHeight;
@@ -662,15 +723,15 @@
         function renderChatLogs(chatData) {
             const chatStreamView = document.getElementById('chat-stream-view');
             if (!chatStreamView) return;
-            
+
             chatStreamView.innerHTML = chatData.map((msg, index) => {
                 const time = new Date(msg.timestamp * 1000).toLocaleTimeString();
                 const msgId = msg.timestamp + '_' + index;
-                
+
                 const truncateLimit = 250;
                 const isLong = msg.message.length > truncateLimit;
                 const isExpanded = expandedMessages.has(msgId);
-                
+
                 let messageHtml = '';
                 if (isLong) {
                     if (isExpanded) {
@@ -688,7 +749,7 @@
                 } else {
                     messageHtml = `<div class="chat-message">${msg.message}</div>`;
                 }
-                
+
                 return `<div class="chat-bubble">
                     <div class="chat-header">
                         <div>
@@ -700,11 +761,24 @@
                     ${messageHtml}
                 </div>`;
             }).join('');
-            
+
             if (activeRightTab === 'chat') {
                 const panelBody = document.getElementById('agent-chat-body');
                 panelBody.scrollTop = panelBody.scrollHeight;
             }
+        }
+
+        let lastAgentsData = {};
+        let selectedThoughtAgentId = null;
+
+        function selectAgentForThoughtChat(agentId) {
+            selectedThoughtAgentId = agentId;
+            renderThoughts(lastAgentsData);
+        }
+
+        function clearSelectedThoughtAgent() {
+            selectedThoughtAgentId = null;
+            renderThoughts(lastAgentsData);
         }
 
         async function fetchAgents() {
@@ -712,7 +786,8 @@
                 const res = await fetch(apiBase + '/agents');
                 if (res.ok) {
                     const data = await res.json();
-                    renderThoughts(data.agents || {});
+                    lastAgentsData = data.agents || {};
+                    renderThoughts(lastAgentsData);
                 }
             } catch (e) {
                 console.error("Error fetching agents:", e);
@@ -722,56 +797,155 @@
         function renderThoughts(agents) {
             const thoughtsStreamView = document.getElementById('thoughts-stream-view');
             if (!thoughtsStreamView) return;
-            
+
             let html = '';
-            
-            // Central Brain Coordinator
+
+            // MODE 2: Full-Section Dedicated Thought Chat View for selected agent
+            if (selectedThoughtAgentId !== null) {
+                const agent = selectedThoughtAgentId === 'Brain' ? {
+                    status: 'active',
+                    config: { role: 'Brain Core Coordinator' },
+                    output: { thought_process: 'Central intelligence engine coordinating multi-agent loops, evaluating syntheses, and routing tasks.' }
+                } : (agents[selectedThoughtAgentId] || { status: 'active', config: { role: 'Specialized Agent' } });
+
+                const roleStr = (agent.config && agent.config.role) ? agent.config.role : ((agent.output && agent.output.role) ? agent.output.role : 'Specialized Agent');
+
+                // Top bar with Back Button on the right
+                html += `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:14px; font-weight:700; color:var(--accent-cyan);">${selectedThoughtAgentId === 'Brain' ? 'Brain Core Coordinator' : selectedThoughtAgentId}</span>
+                            <span style="font-size:9px; background:rgba(34,211,238,0.15); color:var(--accent-cyan); padding:2px 6px; border-radius:4px; font-weight:600;">${roleStr}</span>
+                        </div>
+                        <button class="back-nav-btn" onclick="clearSelectedThoughtAgent()">
+                            &larr; Back to Agents
+                        </button>
+                    </div>
+                `;
+
+                // Stream of Thought Chat Bubbles for this selected agent
+                let thoughtText = agent.streamed_thoughts || (agent.output && agent.output.thought_process ? agent.output.thought_process : null);
+
+                if (!thoughtText && agent.output && agent.output.findings) {
+                    if (typeof agent.output.findings === 'object') {
+                        thoughtText = Object.entries(agent.output.findings).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
+                    } else {
+                        thoughtText = String(agent.output.findings);
+                    }
+                }
+
+                if (!thoughtText && agent.config && agent.config.brief) {
+                    thoughtText = `[Research Brief]: ${agent.config.brief}`;
+                }
+
+                if (!thoughtText) {
+                    thoughtText = `Agent initialized and monitoring pipeline step (${agent.status || 'active'}).`;
+                }
+
+                const steps = thoughtText.split('\n\n').filter(s => s.trim().length > 0);
+
+                if (steps.length > 0) {
+                    steps.forEach((step, idx) => {
+                        const timeStr = agent.last_update ? new Date(agent.last_update * 1000).toLocaleTimeString() : 'Live';
+                        html += `
+                            <div class="chat-bubble" style="margin-bottom:10px;">
+                                <div class="chat-header">
+                                    <div>
+                                        <span class="sender-tag">${selectedThoughtAgentId}</span>
+                                        <span class="receiver-tag">&rarr; Thought Step #${idx + 1}</span>
+                                    </div>
+                                    <span style="color:var(--text-muted); font-size:10px;">${timeStr}</span>
+                                </div>
+                                <div class="chat-message" style="white-space: pre-wrap; font-family: 'Fira Code', monospace; color: var(--accent-cyan); margin-top: 4px;">${step}${agent.status === 'thinking' && idx === steps.length - 1 ? '<span class="cursor-blink">█</span>' : ''}</div>
+                            </div>
+                        `;
+                    });
+                } else {
+                    html += `
+                        <div class="chat-bubble">
+                            <div class="chat-header">
+                                <div>
+                                    <span class="sender-tag">${selectedThoughtAgentId}</span>
+                                    <span class="receiver-tag">&rarr; Thought Stream</span>
+                                </div>
+                                <span style="color:var(--text-muted); font-size:10px;">Live</span>
+                            </div>
+                            <div class="chat-message" style="white-space: pre-wrap; font-family: 'Fira Code', monospace; color: var(--accent-cyan);">Initializing logical thought stream...</div>
+                        </div>
+                    `;
+                }
+
+                thoughtsStreamView.innerHTML = html;
+                return;
+            }
+
+            // MODE 1: Grid / List Overview of Agent Cards
+            const agentIds = Object.keys(agents);
+
+            // 1. Brain Card (Always present)
             html += `
-                <div class="agent-card">
+                <div class="agent-card" onclick="selectAgentForThoughtChat('Brain')" style="border-left: 3px solid var(--accent-cyan);">
                     <div class="agent-card-header">
-                        <span class="agent-card-title">Brain Core Coordinator</span>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="agent-card-title">Brain Core Coordinator</span>
+                            <span style="font-size:9px; background:rgba(34,211,238,0.15); color:var(--accent-cyan); padding:2px 6px; border-radius:4px; font-weight:600;">ORCHESTRATOR</span>
+                        </div>
                         <span class="agent-card-status">Active</span>
                     </div>
                     <div class="agent-card-body">
-                        The central intelligence engine coordinating multi-agent loops, processing user state, and routing tasks.
+                        <div style="font-size:11px; color:#9CA3AF; line-height:1.4;">The central intelligence engine coordinating multi-agent loops and routing tasks.</div>
+                        <div class="agent-card-preview">
+                            Spawns specialized researchers, orchestrates execution threads, and evaluates syntheses.
+                        </div>
                     </div>
                 </div>
             `;
-            
-            const agentIds = Object.keys(agents);
+
+            // 2. Active Agents Cards
             if (agentIds.length > 0) {
                 agentIds.forEach(id => {
                     const agent = agents[id];
-                    const statusClass = agent.status ? '' : 'offline';
-                    const statusText = agent.status || 'inactive';
-                    
-                    let configInfo = '';
-                    if (agent.config && agent.config.role) {
-                        configInfo = `<strong>Role:</strong> ${agent.config.role}<br/><strong>Brief:</strong> ${agent.config.brief || 'No brief provided.'}`;
-                    } else {
-                        configInfo = `Active execution thread monitoring pipeline steps.`;
+                    const statusClass = agent.status === 'offline' ? 'offline' : '';
+                    const statusText = (agent.status || 'active').toUpperCase();
+                    const roleStr = (agent.config && agent.config.role) ? agent.config.role : ((agent.output && agent.output.role) ? agent.output.role : 'Specialized Agent');
+
+                    let snippet = agent.streamed_thoughts || (agent.output && agent.output.thought_process ? agent.output.thought_process : null);
+                    if (!snippet && agent.config && agent.config.brief) {
+                        snippet = agent.config.brief;
                     }
-                    
+                    if (!snippet) {
+                        snippet = `Monitoring pipeline execution step...`;
+                    }
+                    snippet = snippet.replace(/\n/g, ' ').trim();
+                    if (snippet.length > 90) {
+                        snippet = snippet.substring(0, 87) + '...';
+                    }
+
                     html += `
-                        <div class="agent-card">
+                        <div class="agent-card" onclick="selectAgentForThoughtChat('${id}')" style="border-left: 3px solid var(--accent-purple);">
                             <div class="agent-card-header">
-                                <span class="agent-card-title">${id}</span>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <span class="agent-card-title">${id}</span>
+                                    <span style="font-size:9px; background:rgba(167,139,250,0.15); color:var(--accent-purple); padding:2px 6px; border-radius:4px; font-weight:600;">${roleStr}</span>
+                                </div>
                                 <span class="agent-card-status ${statusClass}">${statusText}</span>
                             </div>
                             <div class="agent-card-body">
-                                ${configInfo}
+                                <div class="agent-card-preview">
+                                    ${snippet}
+                                </div>
                             </div>
                         </div>
                     `;
                 });
             } else {
                 html += `
-                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 20px;">
-                        No other agents are currently active in this pipeline cycle.
+                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 16px 0;">
+                        No active pipeline agents. Click the Brain card above to view core coordinator thoughts.
                     </div>
                 `;
             }
-            
+
             thoughtsStreamView.innerHTML = html;
         }
 

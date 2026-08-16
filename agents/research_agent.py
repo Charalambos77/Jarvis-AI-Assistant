@@ -16,6 +16,7 @@ async def run_research_agent(
     agent_config: dict,
     memory_context: str | None = None,
     prior_context: str | None = None,   # approved blueprints from prior cycles
+    on_chunk_callback=None
 ) -> dict:
     """
     Runs a single research agent asynchronously.
@@ -115,15 +116,22 @@ Output format:
     try:
         # [FIX #3] Use get_running_loop(), not get_event_loop() — required in Python 3.10+
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
+
+        def run_stream():
+            full_text = ""
+            for chunk in client.models.generate_content_stream(
                 model="gemini-2.5-flash",
                 contents=f"Execute your research brief now. Task context: {brief}",
                 config=config
-            )
-        )
-        result = json.loads(response.text)
+            ):
+                if chunk.text:
+                    full_text += chunk.text
+                    if on_chunk_callback:
+                        loop.call_soon_threadsafe(on_chunk_callback, agent_id, full_text)
+            return full_text
+
+        response_text = await loop.run_in_executor(None, run_stream)
+        result = json.loads(response_text)
         result["agent_id"] = agent_id  # ensure it's always set
         result["status"] = "ok"
         return result

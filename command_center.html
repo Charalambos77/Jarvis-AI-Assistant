@@ -959,9 +959,11 @@
             return group;
         }
 
-        function getSphericalPosition(index, total, radius = 0.95) {
-            const phi = Math.acos(-1 + (2 * index) / Math.max(total, 1));
-            const theta = Math.sqrt(Math.max(total, 1) * Math.PI) * phi;
+        function getSphericalPosition(index, total, minRadius = 0.82) {
+            const count = Math.max(total, 1);
+            const phi = Math.acos(-1 + (2 * (index + 0.5)) / count);
+            const theta = Math.sqrt(count * Math.PI) * phi + (index * 0.5);
+            const radius = minRadius + ((index % 3) * 0.10);
             return new THREE.Vector3(
                 radius * Math.sin(phi) * Math.cos(theta),
                 radius * Math.sin(phi) * Math.sin(theta),
@@ -970,8 +972,9 @@
         }
 
         function getSubtaskOffset(index, total, radius = 0.22) {
-            const phi = Math.acos(-1 + (2 * index) / Math.max(total, 1));
-            const theta = Math.sqrt(Math.max(total, 1) * Math.PI) * phi;
+            const count = Math.max(total, 1);
+            const phi = Math.acos(-1 + (2 * (index + 0.5)) / count);
+            const theta = Math.sqrt(count * Math.PI) * phi + (index * 0.7);
             return new THREE.Vector3(
                 radius * Math.sin(phi) * Math.cos(theta),
                 radius * Math.sin(phi) * Math.sin(theta),
@@ -980,8 +983,9 @@
         }
 
         function getNoteOffset(index, total, radius = 0.14) {
-            const phi = Math.acos(-1 + (2 * index) / Math.max(total, 1));
-            const theta = Math.sqrt(Math.max(total, 1) * Math.PI) * phi + Math.PI / 4;
+            const count = Math.max(total, 1);
+            const phi = Math.acos(-1 + (2 * (index + 0.5)) / count);
+            const theta = Math.sqrt(count * Math.PI) * phi + Math.PI / 4 + (index * 0.5);
             return new THREE.Vector3(
                 radius * Math.sin(phi) * Math.cos(theta),
                 radius * Math.sin(phi) * Math.sin(theta),
@@ -1248,7 +1252,13 @@
 
                 tasksData = tasks;
 
-                const openTasks = tasks.filter(t => t.status !== 'done');
+                function isDoneStatus(s) {
+                    if (!s) return false;
+                    const lower = String(s).toLowerCase().trim();
+                    return lower === 'done' || lower === 'completed' || lower === 'closed' || lower === 'finished' || lower === 'complete';
+                }
+
+                const openTasks = tasks.filter(t => !isDoneStatus(t.status));
                 const mainTasks = openTasks.filter(t => !t.parent_id);
                 const subTasks = openTasks.filter(t => t.parent_id);
 

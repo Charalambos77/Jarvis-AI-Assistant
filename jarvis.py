@@ -1276,6 +1276,17 @@ def pipeline_event_logger(event: dict):
     event_type = event.get("event_type", "info")
     data_val = event.get("data") or event.get("message") or ""
 
+    if event_type == "thinking_stream":
+        with AGENT_OBS_LOCK:
+            agent_id = event.get("agent_id")
+            if agent_id:
+                if agent_id not in AGENT_REGISTRY:
+                    AGENT_REGISTRY[agent_id] = {}
+                AGENT_REGISTRY[agent_id]["streamed_thoughts"] = data_val
+                AGENT_REGISTRY[agent_id]["status"] = "thinking"
+                AGENT_REGISTRY[agent_id]["last_update"] = timestamp
+        return
+
     # 1. Push to Console Stream (/api/console_logs)
     log_level = "error" if event_type in ("error", "failed") else ("warn" if event_type == "conflict" else "info")
     data_str = data_val if isinstance(data_val, str) else (json.dumps(data_val) if data_val else event_type)

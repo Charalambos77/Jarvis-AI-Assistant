@@ -49,6 +49,10 @@ async def run_research_phase_for_cycle(
                     except Exception:
                         pass
 
+    def on_chunk(agent_id, accumulated_text):
+        if event_logger:
+            event_logger({"event_type": "thinking_stream", "agent_id": agent_id, "data": accumulated_text})
+
     # For each agent, fetch memory context first
     tasks = []
     for agent_config in agents:
@@ -75,7 +79,7 @@ async def run_research_phase_for_cycle(
         if physical_memories:
             combined_mem = "\n\nPHYSICAL PROJECT MEMORY FILES:\n" + "\n".join(physical_memories) + "\n\n" + combined_mem
         
-        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context))
+        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context, on_chunk_callback=on_chunk))
 
     print(f"[Multi-Agent] Spawning {len(tasks)} research agents in parallel...")
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)

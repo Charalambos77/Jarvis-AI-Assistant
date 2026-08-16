@@ -1000,16 +1000,26 @@
                 renderTaskDatabaseList(liveTasks);
             }
 
+            function isDoneStatus(s) {
+                if (!s) return false;
+                const lower = String(s).toLowerCase().trim();
+                return lower === 'done' || lower === 'completed' || lower === 'closed' || lower === 'finished' || lower === 'complete';
+            }
+
             function renderTaskConstellation(tasks) {
                 cyIdle.elements().remove();
                 nodesPositions = {};
                 if (!tasks || tasks.length === 0) return;
 
+                // Filter out completed / done tasks
+                const openTasks = tasks.filter(t => !isDoneStatus(t.status));
+                if (openTasks.length === 0) return;
+
                 const taskMap = new Map();
-                tasks.forEach(t => { t.subtasks = []; taskMap.set(t.id, t); });
+                openTasks.forEach(t => { t.subtasks = []; taskMap.set(t.id, t); });
 
                 const roots = []; const children = [];
-                tasks.forEach(t => {
+                openTasks.forEach(t => {
                     if (t.parent_id && taskMap.has(t.parent_id)) {
                         taskMap.get(t.parent_id).subtasks.push(t);
                         children.push(t);
