@@ -44,7 +44,9 @@ CRITICAL RULES:
 3. Every claim must be backed by evidence (search results, data, or memory patterns).
 4. Include an "agent_id" field set to "{agent_id}" in your output.
 5. Include a "confidence" field from 0.0 to 1.0 rating how certain you are.
-6. If your research reveals specific APIs, services, or tools that would be valuable for executing this task, include them in your output under "recommended_tools" with service name, purpose, pros, cons, why you recommend it, and alternatives.
+6. If your research reveals specific APIs, services, or tools that would be valuable for executing this task, include them in your output under "recommended_tools".
+7. Save critical discoveries, formulas, constants, or key technical specifications under "high_value_memory" as a key-value dictionary.
+8. Save general notes, minor facts, background logs, or broad summaries under "general_memory" as a key-value dictionary.
 
 Output format:
 {{
@@ -61,12 +63,34 @@ Output format:
     {{
       "service": "youtube_api",
       "purpose": "why it is needed",
+      "doc_url": "official developer website or documentation URL",
       "pros": ["pro1", "pro2"],
       "cons": ["con1", "con2"],
       "why": "specific reason",
-      "alternatives": ["alt1"]
+      "alternatives": ["alt1"],
+      "connection_methods": [
+        {{
+          "method_id": "api_key",
+          "label": "API Key (Simple)",
+          "fields": [{{"name": "api_key", "label": "API Key", "type": "password"}}]
+        }},
+        {{
+          "method_id": "oauth",
+          "label": "OAuth 2.0 Client",
+          "fields": [
+            {{"name": "client_id", "label": "Client ID", "type": "text"}},
+            {{"name": "client_secret", "label": "Client Secret", "type": "password"}}
+          ]
+        }}
+      ]
     }}
-  ]
+  ],
+  "high_value_memory": {{
+    "critical_constant_or_key_formula": "value"
+  }},
+  "general_memory": {{
+    "background_notes_or_context": "value"
+  }}
 }}
 """
 

@@ -1,5 +1,25 @@
 {
-    "google_search": {"status": "up", "fallback": null},
-    "youtube_api": {"status": "up", "api_key_env": "YOUTUBE_API_KEY", "fallback": "supadata"},
-    "supadata": {"status": "up", "api_key_env": "SUPADATA_API_KEY", "fallback": null}
+  "google_search": {
+    "status": "up",
+    "fallback": null
+  },
+  "youtube_api": {
+    "status": "up",
+    "api_key_env": "YOUTUBE_API_KEY",
+    "fallback": "supadata"
+  },
+  "supadata": {
+    "status": "up",
+    "api_key_env": "SUPADATA_API_KEY",
+    "fallback": null
+  },
+  "google_docs_api": {
+    "status": "up"
+  },
+  "google_drive_api": {
+    "status": "up"
+  },
+  "arxiv_api": {
+    "status": "up"
+  }
 }

@@ -631,7 +631,12 @@ def initiate_pipeline(task: str) -> str:
         asyncio.set_event_loop(loop)
         try:
             result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
-            push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
+            status = result.get('status', 'done')
+            if status == "escalated_to_human":
+                reason = result.get('message', 'Max retries exceeded.')
+                push_message("ai", f"Pipeline failed: {reason}")
+            else:
+                push_message("ai", f"Pipeline complete. Status: {status}.")
         except Exception as e:
             push_message("system", f"Pipeline error: {e}")
         finally:
@@ -743,7 +748,12 @@ def resume_pipeline_local(settings_dict):
         asyncio.set_event_loop(loop)
         try:
             result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
-            push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
+            status = result.get('status', 'done')
+            if status == "escalated_to_human":
+                reason = result.get('message', 'Max retries exceeded.')
+                push_message("ai", f"Pipeline failed: {reason}")
+            else:
+                push_message("ai", f"Pipeline complete. Status: {status}.")
         except Exception as e:
             push_message("system", f"Pipeline error: {e}")
         finally:
@@ -1342,6 +1352,35 @@ def delete_pipeline_route():
     if "error" in res:
         return jsonify(res), 404
     return jsonify(res)
+
+
+@app.route("/api/connect-tool", methods=["POST"])
+def connect_tool_route():
+    """Saves tool credentials to .env and updates status in registry."""
+    from connectors.api_connector import save_tool_credentials
+    data = request.get_json(force=True) or {}
+    service_name = data.get("service_name", "").strip()
+    credentials = data.get("credentials", {})
+    method_id = data.get("method_id")
+    
+    if not service_name:
+        return jsonify({"error": "service_name is required"}), 400
+    if not credentials or not isinstance(credentials, dict):
+        return jsonify({"error": "credentials dict is required"}), 400
+        
+    success = save_tool_credentials(service_name, credentials, method_id=method_id)
+    if success:
+        return jsonify({"status": "success", "message": f"Successfully connected {service_name}"})
+    else:
+        return jsonify({"error": f"Failed to save credentials for {service_name}"}), 500
+
+
+@app.route("/api/configured-tools", methods=["GET"])
+def get_configured_tools_route():
+    """Returns all globally configured services across all projects."""
+    from connectors.api_connector import get_all_configured_services
+    configured = get_all_configured_services()
+    return jsonify({"status": "success", "tools": configured})
 
 
 def run_server():

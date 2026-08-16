@@ -49,10 +49,26 @@ When given a task, output a JSON object with this exact structure:
     {
       "service": "youtube_api",
       "purpose": "Upload final video to YouTube channel",
+      "doc_url": "official developer website or documentation URL",
       "recommended_by": ["cycle1_lead", "cycle1_adv_1"],
       "pros": ["Direct upload", "Metadata control", "Playlist management"],
       "cons": ["Requires OAuth setup", "Rate limited"],
-      "alternatives": ["manual_upload"]
+      "alternatives": ["manual_upload"],
+      "connection_methods": [
+        {
+          "method_id": "api_key",
+          "label": "API Key (Simple)",
+          "fields": [{"name": "api_key", "label": "API Key", "type": "password"}]
+        },
+        {
+          "method_id": "oauth",
+          "label": "OAuth 2.0 Client",
+          "fields": [
+            {"name": "client_id", "label": "Client ID", "type": "text"},
+            {"name": "client_secret", "label": "Client Secret", "type": "password"}
+          ]
+        }
+      ]
     }
   ],
   "execution_agents": [
