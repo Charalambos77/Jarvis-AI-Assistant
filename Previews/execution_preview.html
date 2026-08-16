@@ -688,7 +688,7 @@
 
                         pulses.push({
                             sprite: sprite, startX: Math.cos(angle) * startDist, startY: Math.sin(angle) * startDist,
-                            targetX: tx, targetY: ty, progress: (pIdx / 3) + (Math.random() * 0.1), speed: 0.003 + Math.random() * 0.003, color: new THREE.Color(pColor)
+                            targetX: tx, targetY: ty, progress: pIdx / 3, speed: 0.0035, color: new THREE.Color(pColor)
                         });
                     }
                 });
@@ -721,11 +721,11 @@
 
                 pulses.forEach(p => {
                     p.progress += p.speed;
-                    if (p.progress > 1) p.progress = 0;
+                    if (p.progress >= 1) p.progress %= 1;
                     p.sprite.position.x = p.startX + p.progress * (p.targetX - p.startX);
                     p.sprite.position.y = p.startY + p.progress * (p.targetY - p.startY);
-                    let alpha = p.progress < 0.15 ? p.progress / 0.15 : (p.progress > 0.75 ? (1.0 - p.progress) / 0.25 : 1);
-                    p.sprite.material.opacity = alpha * 0.95;
+                    let alpha = p.progress < 0.15 ? (p.progress / 0.15) : (p.progress > 0.85 ? (1.0 - p.progress) / 0.15 : 1);
+                    p.sprite.material.opacity = Math.max(0, Math.min(1, alpha)) * 0.95;
                     p.sprite.material.color.lerpColors(new THREE.Color(0xffffff), p.color, p.progress);
                 });
 
@@ -841,7 +841,7 @@
 
                     if (cyIdle.getElementById(parentNodeId).length > 0) {
                         cyIdle.add({
-                            data: { id: 'edge_' + nodeId, source: parentNodeId, target: nodeId, type: 'task_edge', color: pColor, cpDist: (Math.random() - 0.5) * 20 }
+                            data: { id: 'edge_' + nodeId, source: parentNodeId, target: nodeId, type: 'task_edge', color: pColor, cpDist: (getTaskHash(st.id, 5) - 0.5) * 20 }
                         });
                     }
                 });
@@ -1067,7 +1067,7 @@
                     const sprite = new THREE.Sprite(spriteMat);
                     sprite.scale.set(0.12, 0.12, 1);
                     conduitsGroup.add(sprite);
-                    pulses.push({ sprite: sprite, angle: angle, progress: (pIdx / 3) + (Math.random() * 0.1), speed: 0.003 + Math.random() * 0.003, color: new THREE.Color(dept.color) });
+                    pulses.push({ sprite: sprite, angle: angle, progress: pIdx / 3, speed: 0.0035, color: new THREE.Color(dept.color) });
                 }
             });
 
@@ -1091,11 +1091,11 @@
 
                 pulses.forEach(p => {
                     p.progress += p.speed;
-                    if (p.progress > 1) p.progress = 0;
+                    if (p.progress >= 1) p.progress %= 1;
                     let r = 0.15 + p.progress * (0.69 - 0.15);
                     p.sprite.position.x = Math.cos(p.angle) * r; p.sprite.position.y = -Math.sin(p.angle) * r;
-                    let alpha = p.progress < 0.15 ? p.progress / 0.15 : (p.progress > 0.75 ? (1.0 - p.progress) / 0.25 : 1);
-                    p.sprite.material.opacity = alpha * 0.95;
+                    let alpha = p.progress < 0.15 ? (p.progress / 0.15) : (p.progress > 0.85 ? (1.0 - p.progress) / 0.15 : 1);
+                    p.sprite.material.opacity = Math.max(0, Math.min(1, alpha)) * 0.95;
                     p.sprite.material.color.lerpColors(new THREE.Color(0xffffff), p.color, p.progress);
                 });
 

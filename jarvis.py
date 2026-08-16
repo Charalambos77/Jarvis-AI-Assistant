@@ -194,6 +194,10 @@ def append_agent_chat(sender: str, receiver: str, message: str):
 def push_message(role, text):
     with STATE_LOCK:
         CONVO.append({"role": role, "text": text})
+    if role in ("system", "ai", "jarvis"):
+        append_console_log("info", text, source=role.capitalize())
+        if any(k in text.lower() for k in ["pipeline", "gate", "agent", "task"]):
+            append_agent_chat(sender=role.capitalize(), receiver="All Agents", message=text)
 
 
 def set_orb(state):
@@ -1263,8 +1267,36 @@ def get_agent_interactions():
 
 def pipeline_event_logger(event: dict):
     """Called by multi_agent_coordinator at each agent lifecycle point."""
-    import time
-    event["timestamp"] = time.time()
+    import time, json
+    timestamp = time.time()
+    event["timestamp"] = timestamp
+
+    source = event.get("source") or event.get("agent_id") or "TaskConsole"
+    target = event.get("target") or event.get("receiver") or "All Agents"
+    event_type = event.get("event_type", "info")
+    data_val = event.get("data") or event.get("message") or ""
+
+    # 1. Push to Console Stream (/api/console_logs)
+    log_level = "error" if event_type in ("error", "failed") else ("warn" if event_type == "conflict" else "info")
+    data_str = data_val if isinstance(data_val, str) else (json.dumps(data_val) if data_val else event_type)
+    if len(data_str) > 200:
+        data_str = data_str[:197] + "..."
+    append_console_log(log_level, f"[{event_type.upper()}] {data_str}", source=source)
+
+    # 2. Push to Inter-Agent Dialogue Stream (/api/agent_chat)
+    chat_text = ""
+    if isinstance(data_val, dict):
+        chat_text = data_val.get("message") or data_val.get("summary") or data_val.get("prompt") or str(data_val)
+    elif data_val:
+        chat_text = str(data_val)
+    else:
+        chat_text = f"Agent status updated: {event_type}"
+
+    if len(chat_text) > 300:
+        chat_text = chat_text[:297] + "..."
+
+    append_agent_chat(sender=source, receiver=target, message=chat_text)
+
     with AGENT_OBS_LOCK:
         AGENT_EVENT_LOG.append(event)
         # Also update registry if this is an agent event

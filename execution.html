@@ -439,6 +439,129 @@
         }
 
         #active-side-panel.open { left: 0; }
+
+        /* Bottom Right Chat Box */
+        .chat-container {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 360px;
+            height: 400px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            background: transparent;
+            pointer-events: auto;
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 10px 0;
+            mask-image: linear-gradient(to bottom, transparent 0%, black 15%);
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%);
+            scrollbar-width: none;
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            display: none;
+        }
+
+        .chat-message {
+            font-size: 13px;
+            line-height: 1.5;
+            max-width: 90%;
+            word-wrap: break-word;
+            opacity: 0.85;
+            transition: opacity 0.3s ease;
+            animation: msgFadeIn 0.3s ease-out;
+        }
+
+        @keyframes msgFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(6px);
+            }
+            to {
+                opacity: 0.85;
+                transform: translateY(0);
+            }
+        }
+
+        .chat-message.user {
+            align-self: flex-end;
+            color: #E2E8F0;
+            text-align: right;
+        }
+
+        .chat-message.jarvis {
+            align-self: flex-start;
+            color: #60A5FA;
+            text-shadow: 0 0 8px rgba(96, 165, 250, 0.3);
+        }
+
+        .chat-message.system {
+            align-self: flex-start;
+            color: #F59E0B;
+            font-size: 11px;
+        }
+
+        .chat-input-wrapper {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        #chat-input {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.02) !important;
+            background-color: rgba(255, 255, 255, 0.02) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            color: #FFFFFF !important;
+            font-size: 13px;
+            padding: 10px 16px !important;
+            border-radius: 20px !important;
+            outline: none !important;
+            box-shadow: none !important;
+            transition: all 0.3s ease;
+        }
+
+        #chat-input:focus {
+            background: rgba(255, 255, 255, 0.04) !important;
+            background-color: rgba(255, 255, 255, 0.04) !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.03) !important;
+        }
+
+        #send-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #FFFFFF;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        #send-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+        }
+
+        #send-btn svg {
+            width: 14px;
+            height: 14px;
+        }
     </style>
 </head>
 
@@ -457,8 +580,8 @@
     <div class="top-right-nav">
         <button class="nav-btn active" id="btn-execution">Execution</button>
         <button class="nav-btn" id="btn-logs" onclick="window.location.href='agent_talk.task_log.html'">Task Logs/Chat</button>
-        <button class="nav-btn" id="btn-plan">Plan</button>
-        <button class="nav-btn" id="btn-apis">APIs/MCPs</button>
+        <button class="nav-btn" id="btn-plan" onclick="window.location.href='plan.html?from=execution'">Plan</button>
+        <button class="nav-btn" id="btn-apis" onclick="window.location.href='provider_comparison.html?from=execution'">APIs/MCPs</button>
     </div>
 
     <!-- ========================================== -->
@@ -698,8 +821,29 @@
             const pulses = [];
             const conduitsGroup = new THREE.Group();
             scene.add(conduitsGroup);
+            let lastConduitSignature = "";
 
             function updateTaskConduits(roots) {
+                if (!roots || roots.length === 0) {
+                    if (lastConduitSignature !== "") {
+                        while (conduitsGroup.children.length > 0) {
+                            const child = conduitsGroup.children[0];
+                            conduitsGroup.remove(child);
+                            if (child.geometry) child.geometry.dispose();
+                            if (child.material) child.material.dispose();
+                        }
+                        pulses.length = 0;
+                        lastConduitSignature = "";
+                    }
+                    return;
+                }
+
+                const currentSig = roots.map(t => `${t.id}:${nodesPositions['task_' + t.id]?.x || 0},${nodesPositions['task_' + t.id]?.y || 0}`).join('|');
+                if (currentSig === lastConduitSignature && conduitsGroup.children.length > 0) {
+                    return;
+                }
+                lastConduitSignature = currentSig;
+
                 while (conduitsGroup.children.length > 0) {
                     const child = conduitsGroup.children[0];
                     conduitsGroup.remove(child);
@@ -707,8 +851,6 @@
                     if (child.material) child.material.dispose();
                 }
                 pulses.length = 0;
-
-                if (!roots || roots.length === 0) return;
                 const aspect = 1;
                 const vFOV = THREE.MathUtils.degToRad(camera.fov);
                 const visibleHeight = 2 * Math.tan(vFOV / 2) * camera.position.z;
@@ -747,7 +889,7 @@
 
                         pulses.push({
                             sprite: sprite, startX: Math.cos(angle) * startDist, startY: Math.sin(angle) * startDist,
-                            targetX: tx, targetY: ty, progress: (pIdx / 3) + (Math.random() * 0.1), speed: 0.003 + Math.random() * 0.003, color: new THREE.Color(pColor)
+                            targetX: tx, targetY: ty, progress: pIdx / 3, speed: 0.0035, color: new THREE.Color(pColor)
                         });
                     }
                 });
@@ -780,11 +922,11 @@
 
                 pulses.forEach(p => {
                     p.progress += p.speed;
-                    if (p.progress > 1) p.progress = 0;
+                    if (p.progress >= 1) p.progress %= 1;
                     p.sprite.position.x = p.startX + p.progress * (p.targetX - p.startX);
                     p.sprite.position.y = p.startY + p.progress * (p.targetY - p.startY);
-                    let alpha = p.progress < 0.15 ? p.progress / 0.15 : (p.progress > 0.75 ? (1.0 - p.progress) / 0.25 : 1);
-                    p.sprite.material.opacity = alpha * 0.95;
+                    let alpha = p.progress < 0.15 ? (p.progress / 0.15) : (p.progress > 0.85 ? (1.0 - p.progress) / 0.15 : 1);
+                    p.sprite.material.opacity = Math.max(0, Math.min(1, alpha)) * 0.95;
                     p.sprite.material.color.lerpColors(new THREE.Color(0xffffff), p.color, p.progress);
                 });
 
@@ -912,7 +1054,7 @@
 
                     if (cyIdle.getElementById(parentNodeId).length > 0) {
                         cyIdle.add({
-                            data: { id: 'edge_' + nodeId, source: parentNodeId, target: nodeId, type: 'task_edge', color: pColor, cpDist: (Math.random() - 0.5) * 20 }
+                            data: { id: 'edge_' + nodeId, source: parentNodeId, target: nodeId, type: 'task_edge', color: pColor, cpDist: (getTaskHash(st.id, 5) - 0.5) * 20 }
                         });
                     }
                 });
@@ -1139,7 +1281,7 @@
                     const sprite = new THREE.Sprite(spriteMat);
                     sprite.scale.set(0.12, 0.12, 1);
                     conduitsGroup.add(sprite);
-                    pulses.push({ sprite: sprite, angle: angle, progress: (pIdx / 3) + (Math.random() * 0.1), speed: 0.003 + Math.random() * 0.003, color: new THREE.Color(dept.color) });
+                    pulses.push({ sprite: sprite, angle: angle, progress: pIdx / 3, speed: 0.0035, color: new THREE.Color(dept.color) });
                 }
             });
 
@@ -1163,11 +1305,11 @@
 
                 pulses.forEach(p => {
                     p.progress += p.speed;
-                    if (p.progress > 1) p.progress = 0;
+                    if (p.progress >= 1) p.progress %= 1;
                     let r = 0.15 + p.progress * (0.69 - 0.15);
                     p.sprite.position.x = Math.cos(p.angle) * r; p.sprite.position.y = -Math.sin(p.angle) * r;
-                    let alpha = p.progress < 0.15 ? p.progress / 0.15 : (p.progress > 0.75 ? (1.0 - p.progress) / 0.25 : 1);
-                    p.sprite.material.opacity = alpha * 0.95;
+                    let alpha = p.progress < 0.15 ? (p.progress / 0.15) : (p.progress > 0.85 ? (1.0 - p.progress) / 0.15 : 1);
+                    p.sprite.material.opacity = Math.max(0, Math.min(1, alpha)) * 0.95;
                     p.sprite.material.color.lerpColors(new THREE.Color(0xffffff), p.color, p.progress);
                 });
 
@@ -1555,18 +1697,81 @@
 
         })();
 
+    </script>
 
-        // Navigation Buttons Event Listeners
-        document.getElementById('btn-execution').addEventListener('click', () => { window.location.href = 'execution.html'; });
-        document.getElementById('btn-plan').addEventListener('click', () => { window.location.href = 'plan.html?from=execution'; });
-        document.getElementById('btn-apis').addEventListener('click', () => { window.location.href = 'provider_comparison.html?from=execution'; });
+    <!-- Transparent Chat Terminal (Synced with Brain) -->
+    <div class="chat-container">
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-message jarvis"><span style="color:#22D3EE; font-weight:bold; text-shadow: 0 0 4px rgba(34,211,238,0.5);">⚡ JARVIS:</span> Hello. How can I help you sync with the brain today?</div>
+        </div>
+        <div class="chat-input-wrapper">
+            <input type="text" id="chat-input" placeholder="Ask Jarvis..." autocomplete="off">
+            <button id="send-btn" title="Send" onclick="sendToJarvisFromInput()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+            </button>
+        </div>
+    </div>
 
-        // Voice navigation listener
+    <script>
+        // Chat & Conversation Sync
+        const chatInput = document.getElementById('chat-input');
+        const chatMessages = document.getElementById('chat-messages');
+        let lastMessageCount = 0;
+
+        function appendChatMessage(text, sender) {
+            if (!chatMessages) return;
+            const msg = document.createElement('div');
+            msg.className = `chat-message ${sender}`;
+            if (sender === 'jarvis') {
+                msg.innerHTML = `<span style="color:#22D3EE; font-weight:bold; text-shadow: 0 0 4px rgba(34,211,238,0.5);">⚡ JARVIS:</span> ` + text;
+            } else {
+                msg.innerText = text;
+            }
+            chatMessages.appendChild(msg);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        async function sendToJarvisFromInput() {
+            if (!chatInput) return;
+            const text = chatInput.value.trim();
+            if (!text) return;
+            chatInput.value = '';
+            try {
+                await fetch('/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+            } catch(e) {}
+        }
+
+        if (chatInput) {
+            chatInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') sendToJarvisFromInput();
+            });
+        }
+
+        // Voice & State & Chat Polling
         setInterval(async () => {
             try {
                 const res = await fetch('/state');
                 if (res.ok) {
                     const data = await res.json();
+
+                    // Sync conversation messages from backend
+                    const messages = data.messages || [];
+                    if (messages.length > lastMessageCount) {
+                        for (let i = lastMessageCount; i < messages.length; i++) {
+                            const msg = messages[i];
+                            const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : msg.role === 'jarvis' ? 'jarvis' : 'user';
+                            appendChatMessage(msg.text, role);
+                        }
+                        lastMessageCount = messages.length;
+                    }
+
                     if (data.ui_action && data.ui_action.type === 'navigate' && data.ui_action.url) {
                         window.location.href = data.ui_action.url;
                     } else if (data.ui_action && data.ui_action.type === 'control_interface') {
