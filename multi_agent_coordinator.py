@@ -247,10 +247,10 @@ async def run_execution_phase(
     }
 
 
-def save_agent_plan_file(plan_id: str, agent_plan: dict):
+def save_agent_plan_file(plan_id: str, agent_plan: dict, project_name: str = "Default Project"):
     if not plan_id:
         return
-    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Implementation plan", "Agents")
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Agents")
     os.makedirs(dir_path, exist_ok=True)
     file_path = os.path.join(dir_path, f"agent_plan_{plan_id}.md")
     
@@ -281,10 +281,10 @@ def save_agent_plan_file(plan_id: str, agent_plan: dict):
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-def save_research_findings_file(plan_id: str, agent_id: str, findings: dict):
+def save_research_findings_file(plan_id: str, agent_id: str, findings: dict, project_name: str = "Default Project"):
     if not plan_id or not agent_id:
         return
-    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Implementation plan", "Agents")
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Agents")
     os.makedirs(dir_path, exist_ok=True)
     file_path = os.path.join(dir_path, f"research_{agent_id}_{plan_id}.md")
     
@@ -313,10 +313,10 @@ def save_research_findings_file(plan_id: str, agent_id: str, findings: dict):
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-def save_cycle_blueprint_file(plan_id: str, cycle_id: int, blueprint: dict):
+def save_cycle_blueprint_file(plan_id: str, cycle_id: int, blueprint: dict, project_name: str = "Default Project"):
     if not plan_id:
         return
-    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Implementation plan", "Agents")
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Agents")
     os.makedirs(dir_path, exist_ok=True)
     file_path = os.path.join(dir_path, f"cycle_blueprint_{cycle_id}_{plan_id}.md")
     
@@ -327,10 +327,10 @@ def save_cycle_blueprint_file(plan_id: str, cycle_id: int, blueprint: dict):
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-def save_master_blueprint_file(plan_id: str, master_blueprint: dict):
+def save_master_blueprint_file(plan_id: str, master_blueprint: dict, project_name: str = "Default Project"):
     if not plan_id:
         return
-    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Implementation plan", "Final Plans")
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans")
     os.makedirs(dir_path, exist_ok=True)
     file_path = os.path.join(dir_path, f"master_blueprint_{plan_id}.md")
     
@@ -349,15 +349,15 @@ def save_master_blueprint_file(plan_id: str, master_blueprint: dict):
             content += f"- **Alternatives:** {', '.join(tool.get('alternatives', []))}\n\n"
             
     content += "## Compiled Blueprint Details\n"
-    content += "```json\n" + json.dumps({k: v for k, v in master_blueprint.items() if k != "tool_recommendations"}, indent=2) + "\n```\n"
+    content += "```json\n" + json.dumps(master_blueprint, indent=2) + "\n```\n"
     
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-def save_execution_output_file(plan_id: str, agent_id: str, output: dict):
+def save_execution_output_file(plan_id: str, agent_id: str, output: dict, project_name: str = "Default Project"):
     if not plan_id or not agent_id:
         return
-    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Implementation plan", "Agents")
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Agents")
     os.makedirs(dir_path, exist_ok=True)
     file_path = os.path.join(dir_path, f"execution_{agent_id}_{plan_id}.md")
     
@@ -372,10 +372,10 @@ def save_execution_output_file(plan_id: str, agent_id: str, output: dict):
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-def save_final_report_file(plan_id: str, report: dict):
+def save_final_report_file(plan_id: str, report: dict, project_name: str = "Default Project"):
     if not plan_id:
         return
-    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Implementation plan", "Final Plans")
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans")
     os.makedirs(dir_path, exist_ok=True)
     file_path = os.path.join(dir_path, f"final_report_{plan_id}.md")
     
@@ -403,6 +403,7 @@ async def run_full_pipeline(
     gate_approve_fn,        # async fn(gate_id: str, data: dict) -> {approved, redirect_note}
     event_logger=None,      # callable(event_dict) for observability — Step 11
     plan_id: str | None = None,
+    project_name: str = "Default Project"
 ) -> dict:
     """
     Runs the complete multi-agent pipeline with ordered cycles.
@@ -420,23 +421,84 @@ async def run_full_pipeline(
     event_logger = local_logger
 
     try:
-        # Phase 1: Brain builds cycle plan
-        print("[Pipeline] Phase 1: Central Brain generating multi-cycle agent plan...")
-        agent_plan = build_agent_plan(task)
-        if "error" in agent_plan:
-            return agent_plan
-        save_agent_plan_file(plan_id, agent_plan)
+        # Check if we are resuming an existing plan
+        existing_plan = None
+        if plan_id:
+            try:
+                pipelines = db.get_pipelines(conn)
+                for p in pipelines:
+                    if p["id"] == plan_id:
+                        existing_plan = p
+                        break
+            except Exception as e:
+                print(f"[Pipeline] Error checking for existing plan: {e}")
+
+        agent_plan = None
+        approved_blueprints = []
+
+        if existing_plan:
+            # Check if agent plan exists on disk and load it to support user edits
+            plan_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Agents")
+            plan_file = os.path.join(plan_dir, f"agent_plan_{plan_id}.md")
+            if os.path.exists(plan_file):
+                try:
+                    with open(plan_file, "r", encoding="utf-8") as f:
+                        file_content = f.read()
+                    if "```json" in file_content:
+                        parts = file_content.split("```json")
+                        json_part = parts[-1].split("```")[0].strip()
+                        agent_plan = json.loads(json_part)
+                        print(f"[Pipeline] Successfully read and updated agent plan from disk: {plan_file}")
+                except Exception as e:
+                    print(f"[Pipeline] Error reading agent plan from disk: {e}")
+                    agent_plan = existing_plan.get("agent_plan")
+            else:
+                agent_plan = existing_plan.get("agent_plan")
+            
+            approved_blueprints = existing_plan.get("approved_blueprints", [])
+            
+            # Fallback: if approved_blueprints is empty in DB, reconstruct it from cycle blueprint files on disk
+            if not approved_blueprints:
+                for i in range(1, 10):
+                    cb_file = os.path.join(plan_dir, f"cycle_blueprint_{i}_{plan_id}.md")
+                    if os.path.exists(cb_file):
+                        try:
+                            with open(cb_file, "r", encoding="utf-8") as f:
+                                cb_content = f.read()
+                            if "```json" in cb_content:
+                                cb_json_part = cb_content.split("```json")[-1].split("```")[0].strip()
+                                cb_data = json.loads(cb_json_part)
+                                approved_blueprints.append(cb_data)
+                                print(f"[Pipeline] Reconstructed approved blueprint for Cycle {i} from disk.")
+                        except Exception as e:
+                            print(f"[Pipeline] Error reading cycle blueprint {i} from disk: {e}")
+
+            print(f"[Pipeline] Resuming existing plan '{plan_id}'. Approved blueprints so far: {len(approved_blueprints)}")
+
+        if not agent_plan:
+            # Phase 1: Brain builds cycle plan
+            print("[Pipeline] Phase 1: Central Brain generating multi-cycle agent plan...")
+            agent_plan = build_agent_plan(task)
+            if "error" in agent_plan:
+                return agent_plan
+            save_agent_plan_file(plan_id, agent_plan, project_name)
+            if event_logger:
+                event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
 
         cycles = agent_plan.get("cycles", [])
         if len(cycles) < 3:
             return {"error": "Brain must plan at least 3 research cycles"}
 
-        approved_blueprints = []
-
         # Phase 2: Ordered research cycle loop
         for cycle in cycles:
             cycle_id = cycle["cycle_id"]
             domain = cycle.get("domain", f"Cycle {cycle_id}")
+
+            cycle_index = cycle_id - 1
+            if cycle_index < len(approved_blueprints):
+                print(f"[Pipeline] Cycle {cycle_id} ({domain}) is already approved. Skipping research.")
+                continue
+
             print(f"[Pipeline] Starting Cycle {cycle_id}: {domain}")
             retry_count = 0
 
@@ -454,7 +516,7 @@ async def run_full_pipeline(
                 # Save each research agent's findings
                 for r in research_output.get("agent_results", []):
                     if r.get("status") == "ok":
-                        save_research_findings_file(plan_id, r.get("agent_id"), r)
+                        save_research_findings_file(plan_id, r.get("agent_id"), r, project_name)
 
                 # 2a: Lead Specialist review (Pass 2)
                 lead_config = cycle["lead_specialist"]
@@ -488,7 +550,7 @@ async def run_full_pipeline(
                     continue
 
                 # Save cycle blueprint
-                save_cycle_blueprint_file(plan_id, cycle_id, synthesis_result.get("blueprint", {}))
+                save_cycle_blueprint_file(plan_id, cycle_id, synthesis_result.get("blueprint", {}), project_name)
 
                 # 2c: Per-cycle approval gate
                 print(f"[Pipeline] Waiting for human approval of Cycle {cycle_id} research...")
@@ -507,6 +569,14 @@ async def run_full_pipeline(
                 if gate_result.get("approved"):
                     if event_logger:
                         event_logger({"event_type": "gate_resolved", "source": f"cycle_{cycle_id}_research", "data": gate_result})
+                        event_logger({
+                            "event_type": "cycle_approved",
+                            "source": f"cycle_{cycle_id}_research",
+                            "data": {
+                                "cycle_id": cycle_id,
+                                "blueprint": synthesis_result.get("blueprint", {})
+                            }
+                        })
                     approved_blueprints.append(synthesis_result.get("blueprint", {}))
                     break  # advance to next cycle
                 else:
@@ -537,185 +607,278 @@ async def run_full_pipeline(
                 }
 
         # Phase 3: Master Blueprint Compilation
-        print("[Pipeline] Phase 3: Compiling Master Blueprint from all cycles...")
-        master_blueprint = await run_master_synthesis(approved_blueprints)
-        save_master_blueprint_file(plan_id, master_blueprint)
-        if event_logger:
-            event_logger({"event_type": "blueprint_compiled", "source": "synthesis", "data": master_blueprint})
+        master_blueprint = None
+        if existing_plan:
+            blueprint_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Final Plans")
+            blueprint_file = os.path.join(blueprint_dir, f"master_blueprint_{plan_id}.md")
+            if os.path.exists(blueprint_file):
+                try:
+                    with open(blueprint_file, "r", encoding="utf-8") as f:
+                        file_content = f.read()
+                    if "```json" in file_content:
+                        parts = file_content.split("```json")
+                        json_part = parts[-1].split("```")[0].strip()
+                        disk_bp = json.loads(json_part)
+                        
+                        if "tool_recommendations" not in disk_bp or not disk_bp["tool_recommendations"]:
+                            db_bp = existing_plan.get("master_blueprint", {})
+                            disk_bp["tool_recommendations"] = db_bp.get("tool_recommendations", [])
+                        
+                        master_blueprint = disk_bp
+                        print(f"[Pipeline] Successfully read and updated master blueprint from disk: {blueprint_file}")
+                except Exception as e:
+                    print(f"[Pipeline] Error reading master blueprint from disk: {e}")
+                    master_blueprint = existing_plan.get("master_blueprint")
+            else:
+                master_blueprint = existing_plan.get("master_blueprint")
 
-        # Phase 5: Gate — Review Execution Blueprint
-        print("[Pipeline] Phase 5: Waiting for human approval of execution blueprint...")
-        exec_retry = 0
-        while exec_retry < MAX_RETRIES:
+        if not master_blueprint or not master_blueprint.get("tool_recommendations"):
+            print("[Pipeline] Phase 3: Compiling Master Blueprint from all cycles...")
+            master_blueprint = await run_master_synthesis(approved_blueprints)
+            save_master_blueprint_file(plan_id, master_blueprint, project_name)
             if event_logger:
-                event_logger({"event_type": "gate_waiting", "source": "execution_blueprint", "data": {"master_blueprint": master_blueprint, "execution_agents": agent_plan["execution_agents"]}})
-            
-            gate2 = await gate_approve_fn(
-                gate_id="execution_blueprint",
-                data={"master_blueprint": master_blueprint, "execution_agents": agent_plan["execution_agents"]}
-            )
-            if gate2.get("approved"):
+                event_logger({"event_type": "blueprint_compiled", "source": "synthesis", "data": master_blueprint})
+        else:
+            print("[Pipeline] Resuming: Found existing Master Blueprint. Skipping compilation.")
+
+        # Check if the execution blueprint gate was already approved
+        skip_exec_gate = False
+        if existing_plan and existing_plan.get("phase") in ('execution', 'qa', 'deploy', 'complete'):
+            skip_exec_gate = True
+
+        if not skip_exec_gate:
+            # Phase 5: Gate — Review Execution Blueprint
+            print("[Pipeline] Phase 5: Waiting for human approval of execution blueprint...")
+            exec_retry = 0
+            while exec_retry < MAX_RETRIES:
+                if event_logger:
+                    event_logger({"event_type": "gate_waiting", "source": "execution_blueprint", "data": {"master_blueprint": master_blueprint, "execution_agents": agent_plan["execution_agents"]}})
+                
+                gate2 = await gate_approve_fn(
+                    gate_id="execution_blueprint",
+                    data={"master_blueprint": master_blueprint, "execution_agents": agent_plan["execution_agents"]}
+                )
+                if gate2.get("approved"):
+                    if event_logger:
+                        event_logger({"event_type": "gate_resolved", "source": "execution_blueprint", "data": gate2})
+                    break
+                redirect_note = gate2.get("redirect_note", "")
+                rejected_steps = gate2.get("rejected_steps")
+                print(f"[Pipeline] Execution Blueprint gate rejected. Re-planning. Note: {redirect_note}")
+                retry_history.append(f"Execution Blueprint rejection retry {exec_retry + 1}. Feedback: {redirect_note}")
                 if event_logger:
                     event_logger({"event_type": "gate_resolved", "source": "execution_blueprint", "data": gate2})
-                break
-            redirect_note = gate2.get("redirect_note", "")
-            rejected_steps = gate2.get("rejected_steps")
-            print(f"[Pipeline] Execution Blueprint gate rejected. Re-planning. Note: {redirect_note}")
-            retry_history.append(f"Execution Blueprint rejection retry {exec_retry + 1}. Feedback: {redirect_note}")
+                agent_plan = build_agent_plan(
+                    task, redirect_note=redirect_note, approved_blueprints=approved_blueprints,
+                    rejected_steps=rejected_steps
+                )
+                exec_retry += 1
+
+            if exec_retry >= MAX_RETRIES:
+                return {
+                    "status": "escalated_to_human",
+                    "message": f"Failed after {MAX_RETRIES} retries at Execution Blueprint gate.",
+                    "retry_history": retry_history,
+                }
+
+        # Check if plugging gate was already approved
+        skip_plugging_gate = False
+        if existing_plan and existing_plan.get("phase") in ('execution', 'qa', 'deploy', 'complete'):
+            # Only skip if all recommended APIs/MCPs are configured
+            from connectors.api_connector import load_registry, get_service_status
+            load_registry()
+            tool_recs = master_blueprint.get("tool_recommendations", [])
+            
+            def is_api_or_mcp(service_name):
+                if not service_name:
+                    return False
+                s = str(service_name).lower()
+                libraries = [
+                    "react", "react.js", "next.js", "nextjs", "tailwind", "tailwind css", "tailwindcss", "typescript", "styled-components", 
+                    "styled_components", "css", "html", "javascript", "webpack", "babel", 
+                    "vite", "eslint", "prettier", "jest", "cypress", "playwright",
+                    "npm", "yarn", "pip", "python", "node.js", "nodejs", "express", "django",
+                    "laravel", "spring", "flask", "fastapi", "redux", "redux toolkit", "redux-toolkit", "git"
+                ]
+                for lib in libraries:
+                    if s == lib or s.startswith(lib + " ") or s.endswith(" " + lib):
+                        return False
+                return True
+                
+            unconfigured_apis = [
+                rec for rec in tool_recs 
+                if is_api_or_mcp(rec["service"]) and get_service_status(rec["service"]) == "unknown"
+            ]
+            if not unconfigured_apis:
+                skip_plugging_gate = True
+
+        if not skip_plugging_gate:
+            # Phase 5.5: API/MCP Plugging Gate
+            from connectors.api_connector import load_registry, get_service_status
+            load_registry()
+
+            tool_recs = master_blueprint.get("tool_recommendations", [])
+            for rec in tool_recs:
+                rec["configured"] = get_service_status(rec["service"]) != "unknown"
+                rec["current_status"] = get_service_status(rec["service"])
+
+            print("[Pipeline] Phase 5.5: Waiting for human confirmation of API/MCP tools...")
             if event_logger:
-                event_logger({"event_type": "gate_resolved", "source": "execution_blueprint", "data": gate2})
-            agent_plan = build_agent_plan(
-                task, redirect_note=redirect_note, approved_blueprints=approved_blueprints,
-                rejected_steps=rejected_steps
+                event_logger({"event_type": "gate_waiting", "source": "api_mcp_plugging", "data": {"tool_recommendations": tool_recs}})
+            
+            plugging_gate = await gate_approve_fn(
+                gate_id="api_mcp_plugging",
+                data={
+                    "tool_recommendations": tool_recs,
+                    "message": (
+                        "Your agents researched and recommend the following APIs/MCPs. "
+                        "Select the ones you want to use. Unconfigured services will need API keys."
+                    ),
+                    "registry": load_registry(),
+                }
             )
-            exec_retry += 1
+            if not plugging_gate.get("approved"):
+                if event_logger:
+                    event_logger({"event_type": "gate_resolved", "source": "api_mcp_plugging", "data": plugging_gate})
+                return {"status": "blocked", "message": "User did not confirm API/MCP configuration."}
 
-        if exec_retry >= MAX_RETRIES:
-            return {
-                "status": "escalated_to_human",
-                "message": f"Failed after {MAX_RETRIES} retries at Execution Blueprint gate.",
-                "retry_history": retry_history,
-            }
-
-        # Phase 5.5: API/MCP Plugging Gate
-        from connectors.api_connector import load_registry, get_service_status
-        load_registry()
-
-        tool_recs = master_blueprint.get("tool_recommendations", [])
-        for rec in tool_recs:
-            rec["configured"] = get_service_status(rec["service"]) != "unknown"
-            rec["current_status"] = get_service_status(rec["service"])
-
-        print("[Pipeline] Phase 5.5: Waiting for human confirmation of API/MCP tools...")
-        if event_logger:
-            event_logger({"event_type": "gate_waiting", "source": "api_mcp_plugging", "data": {"tool_recommendations": tool_recs}})
-        
-        plugging_gate = await gate_approve_fn(
-            gate_id="api_mcp_plugging",
-            data={
-                "tool_recommendations": tool_recs,
-                "message": (
-                    "Your agents researched and recommend the following APIs/MCPs. "
-                    "Select the ones you want to use. Unconfigured services will need API keys."
-                ),
-                "registry": load_registry(),
-            }
-        )
-        if not plugging_gate.get("approved"):
             if event_logger:
                 event_logger({"event_type": "gate_resolved", "source": "api_mcp_plugging", "data": plugging_gate})
-            return {"status": "blocked", "message": "User did not confirm API/MCP configuration."}
 
-        if event_logger:
-            event_logger({"event_type": "gate_resolved", "source": "api_mcp_plugging", "data": plugging_gate})
-            
-        selected_tools = plugging_gate.get("selected_tools", [t["service"] for t in tool_recs])
+        # Check if execution phase completed
+        skip_execution = False
+        exec_results = []
+        if existing_plan and existing_plan.get("phase") in ('qa', 'deploy', 'complete'):
+            skip_execution = True
+            exec_results = existing_plan.get("exec_results", [])
+            print("[Pipeline] Resuming: Execution deliverables already completed. Skipping execution agents.")
 
-        # Phase 6: Execution + Quality Check
-        print("[Pipeline] Phase 6: Parallel execution agents...")
-        exec_output = await run_execution_phase(agent_plan, master_blueprint, event_logger=event_logger)
-        exec_results = exec_output.get("agent_results", [])
-        for r in exec_results:
-            if r.get("status") == "ok":
-                save_execution_output_file(plan_id, r.get("agent_id"), r)
-
-        qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint)
-
-        qa_retry = 0
-        while not qa_result["all_passed"] and qa_retry < MAX_RETRIES:
-            failed_ids = qa_result["failed_agents"]
-            print(f"[Pipeline] Quality check failed for: {failed_ids}. Re-running those agents...")
-            for res in qa_result["results"]:
-                if not res["passed"]:
-                    print(f"  - Agent {res['agent_id']} issues: {res['issues']}")
-            
-            retry_history.append(f"QA verification failure retry {qa_retry + 1} for agents {failed_ids}.")
-            exec_output = await run_execution_phase(
-                agent_plan, master_blueprint, agent_ids_to_run=failed_ids, event_logger=event_logger
-            )
-            retry_map = {r["agent_id"]: r for r in exec_output["agent_results"]}
-            exec_results = [retry_map.get(r["agent_id"], r) for r in exec_results]
+        if not skip_execution:
+            # Phase 6: Execution + Quality Check
+            print("[Pipeline] Phase 6: Parallel execution agents...")
+            exec_output = await run_execution_phase(agent_plan, master_blueprint, event_logger=event_logger)
+            exec_results = exec_output.get("agent_results", [])
             for r in exec_results:
                 if r.get("status") == "ok":
-                    save_execution_output_file(plan_id, r.get("agent_id"), r)
+                    save_execution_output_file(plan_id, r.get("agent_id"), r, project_name)
+
             qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint)
-            qa_retry += 1
 
-        if qa_retry >= MAX_RETRIES:
-            return {
-                "status": "escalated_to_human",
-                "message": f"Failed after {MAX_RETRIES} retries at Quality Checker verification.",
-                "retry_history": retry_history,
-            }
+            qa_retry = 0
+            while not qa_result["all_passed"] and qa_retry < MAX_RETRIES:
+                failed_ids = qa_result["failed_agents"]
+                print(f"[Pipeline] Quality check failed for: {failed_ids}. Re-running those agents...")
+                for res in qa_result["results"]:
+                    if not res["passed"]:
+                        print(f"  - Agent {res['agent_id']} issues: {res['issues']}")
+                
+                retry_history.append(f"QA verification failure retry {qa_retry + 1} for agents {failed_ids}.")
+                exec_output = await run_execution_phase(
+                    agent_plan, master_blueprint, agent_ids_to_run=failed_ids, event_logger=event_logger
+                )
+                retry_map = {r["agent_id"]: r for r in exec_output["agent_results"]}
+                exec_results = [retry_map.get(r["agent_id"], r) for r in exec_results]
+                for r in exec_results:
+                    if r.get("status") == "ok":
+                        save_execution_output_file(plan_id, r.get("agent_id"), r, project_name)
+                qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint)
+                qa_retry += 1
 
-        if event_logger:
-            event_logger({"event_type": "execution_completed", "source": "execution", "data": exec_results})
+            if qa_retry >= MAX_RETRIES:
+                return {
+                    "status": "escalated_to_human",
+                    "message": f"Failed after {MAX_RETRIES} retries at Quality Checker verification.",
+                    "retry_history": retry_history,
+                }
 
-        # Phase 7: Gate — Final QA
-        print("[Pipeline] Phase 7: Waiting for final human QA gate...")
-        final_retry = 0
-        while final_retry < MAX_RETRIES:
             if event_logger:
-                event_logger({"event_type": "gate_waiting", "source": "final_qa", "data": exec_results})
-            
-            gate3 = await gate_approve_fn(
-                gate_id="final_qa",
-                data={"exec_results": exec_results}
-            )
-            if gate3.get("approved"):
+                event_logger({"event_type": "execution_completed", "source": "execution", "data": exec_results})
+
+        # Check if Final QA was approved
+        skip_final_qa = False
+        if existing_plan and (existing_plan.get("status") == "complete" or existing_plan.get("phase") in ('deploy', 'complete')):
+            skip_final_qa = True
+
+        if not skip_final_qa:
+            # Phase 7: Gate — Final QA
+            print("[Pipeline] Phase 7: Waiting for final human QA gate...")
+            final_retry = 0
+            while final_retry < MAX_RETRIES:
+                if event_logger:
+                    event_logger({"event_type": "gate_waiting", "source": "final_qa", "data": exec_results})
+                
+                gate3 = await gate_approve_fn(
+                    gate_id="final_qa",
+                    data={"exec_results": exec_results}
+                )
+                if gate3.get("approved"):
+                    if event_logger:
+                        event_logger({"event_type": "gate_resolved", "source": "final_qa", "data": gate3})
+                    break
+                redirect_note = gate3.get("redirect_note", "")
+                rejected_steps = gate3.get("rejected_steps")
+                print(f"[Pipeline] Final QA gate rejected. Re-running target agents. Note: {redirect_note}")
+                retry_history.append(f"Final QA rejection retry {final_retry + 1}. Feedback: {redirect_note}")
                 if event_logger:
                     event_logger({"event_type": "gate_resolved", "source": "final_qa", "data": gate3})
-                break
-            redirect_note = gate3.get("redirect_note", "")
-            rejected_steps = gate3.get("rejected_steps")
-            print(f"[Pipeline] Final QA gate rejected. Re-running target agents. Note: {redirect_note}")
-            retry_history.append(f"Final QA rejection retry {final_retry + 1}. Feedback: {redirect_note}")
+                if rejected_steps:
+                    rejected_ids = rejected_steps
+                else:
+                    rejected_ids = await identify_rejected_agents(redirect_note, agent_plan)
+                exec_output = await run_execution_phase(
+                    agent_plan, master_blueprint,
+                    agent_ids_to_run=rejected_ids, gate_redirect_note=redirect_note, event_logger=event_logger
+                )
+                retry_map = {r["agent_id"]: r for r in exec_output["agent_results"]}
+                exec_results = [retry_map.get(r["agent_id"], r) for r in exec_results]
+                for r in exec_results:
+                    if r.get("status") == "ok":
+                        save_execution_output_file(plan_id, r.get("agent_id"), r, project_name)
+                final_retry += 1
+
+            if final_retry >= MAX_RETRIES:
+                return {
+                    "status": "escalated_to_human",
+                    "message": f"Failed after {MAX_RETRIES} retries at Final human QA gate.",
+                    "retry_history": retry_history,
+                }
+
+        # Check if deployment completed
+        skip_deploy = False
+        if existing_plan and existing_plan.get("status") == "complete":
+            skip_deploy = True
+
+        if not skip_deploy:
+            # Phase 8: Deployment
+            print("[Pipeline] Phase 8: Calling deployment agent...")
             if event_logger:
-                event_logger({"event_type": "gate_resolved", "source": "final_qa", "data": gate3})
-            if rejected_steps:
-                rejected_ids = rejected_steps
-            else:
-                rejected_ids = await identify_rejected_agents(redirect_note, agent_plan)
-            exec_output = await run_execution_phase(
-                agent_plan, master_blueprint,
-                agent_ids_to_run=rejected_ids, gate_redirect_note=redirect_note, event_logger=event_logger
-            )
-            retry_map = {r["agent_id"]: r for r in exec_output["agent_results"]}
-            exec_results = [retry_map.get(r["agent_id"], r) for r in exec_results]
-            for r in exec_results:
-                if r.get("status") == "ok":
-                    save_execution_output_file(plan_id, r.get("agent_id"), r)
-            final_retry += 1
+                event_logger({"event_type": "running", "source": "DeploymentAgent"})
+            deploy_result = await run_deployment_agent(exec_results, master_blueprint)
+            if event_logger:
+                event_logger({"event_type": "completed", "source": "DeploymentAgent", "data": deploy_result})
 
-        if final_retry >= MAX_RETRIES:
-            return {
-                "status": "escalated_to_human",
-                "message": f"Failed after {MAX_RETRIES} retries at Final human QA gate.",
-                "retry_history": retry_history,
+            final_rep = {
+                "task": task,
+                "master_blueprint": master_blueprint,
+                "exec_results": exec_results,
+                "deploy_result": deploy_result,
             }
+            save_final_report_file(plan_id, final_rep, project_name)
 
-        # Phase 8: Deployment
-        print("[Pipeline] Phase 8: Calling deployment agent...")
-        if event_logger:
-            event_logger({"event_type": "running", "source": "DeploymentAgent"})
-        deploy_result = await run_deployment_agent(exec_results, master_blueprint)
-        if event_logger:
-            event_logger({"event_type": "completed", "source": "DeploymentAgent", "data": deploy_result})
-
-        final_rep = {
-            "task": task,
-            "master_blueprint": master_blueprint,
-            "exec_results": exec_results,
-            "deploy_result": deploy_result,
-        }
-        save_final_report_file(plan_id, final_rep)
+            return {
+                "status": "complete",
+                "task": task,
+                "master_blueprint": master_blueprint,
+                "exec_results": exec_results,
+                "deploy_result": deploy_result,
+            }
 
         return {
             "status": "complete",
             "task": task,
             "master_blueprint": master_blueprint,
             "exec_results": exec_results,
-            "deploy_result": deploy_result,
+            "deploy_result": existing_plan.get("deploy_result", {}),
         }
 
     finally:

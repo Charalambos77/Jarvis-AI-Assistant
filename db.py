@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS memory_patterns (
     outcome     TEXT NOT NULL DEFAULT 'win',  -- 'win' | 'loss'
     created_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS pipelines (
+    id TEXT PRIMARY KEY,
+    task TEXT NOT NULL,
+    project_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    current_gate TEXT,
+    gate_status TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    timestamp REAL NOT NULL,
+    data TEXT NOT NULL
+);
 """
 
 
@@ -83,6 +95,22 @@ def get_connection(db_path: str) -> sqlite3.Connection:
                 metric_value REAL,
                 outcome TEXT NOT NULL DEFAULT 'win',
                 created_at TEXT NOT NULL
+            )""")
+            conn.commit()
+
+        # Pipelines table migration
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pipelines'")
+        if not cursor.fetchone():
+            conn.execute("""CREATE TABLE pipelines (
+                id TEXT PRIMARY KEY,
+                task TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                current_gate TEXT,
+                gate_status TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                timestamp REAL NOT NULL,
+                data TEXT NOT NULL
             )""")
             conn.commit()
     except Exception as e:
@@ -372,3 +400,56 @@ def search_memory_patterns(conn: sqlite3.Connection, query: str, task_type: str 
     # [FIX #2] COALESCE handles NULL metric_value — patterns without a metric
     # (qualitative insights) would otherwise sink to the bottom in DESC sort.
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+# ---------- pipelines ----------
+
+def save_pipeline(conn: sqlite3.Connection, plan: dict):
+    import json
+    data_dict = {
+        "cycles": plan.get("cycles", []),
+        "master_blueprint": plan.get("master_blueprint", {}),
+        "exec_results": plan.get("exec_results", []),
+        "deploy_result": plan.get("deploy_result", {}),
+        "agent_plan": plan.get("agent_plan", {}),
+        "approved_blueprints": plan.get("approved_blueprints", [])
+    }
+    data_str = json.dumps(data_dict, ensure_ascii=False)
+    
+    conn.execute(
+        """INSERT OR REPLACE INTO pipelines (id, task, project_name, status, current_gate, gate_status, phase, timestamp, data)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            plan["id"],
+            plan["task"],
+            plan["project_name"],
+            plan["status"],
+            plan.get("current_gate"),
+            plan["gate_status"],
+            plan["phase"],
+            plan["timestamp"],
+            data_str
+        )
+    )
+    conn.commit()
+
+def get_pipelines(conn: sqlite3.Connection) -> list[dict]:
+    import json
+    rows = conn.execute("SELECT * FROM pipelines ORDER BY timestamp DESC").fetchall()
+    pipelines = []
+    for r in rows:
+        plan = dict(r)
+        try:
+            data_dict = json.loads(plan["data"])
+        except Exception:
+            data_dict = {}
+        plan.update(data_dict)
+        plan.pop("data", None)
+        pipelines.append(plan)
+    return pipelines
+
+def delete_pipeline(conn: sqlite3.Connection, plan_id: str):
+    conn.execute("DELETE FROM pipelines WHERE id = ?", (plan_id,))
+    conn.commit()
+
+

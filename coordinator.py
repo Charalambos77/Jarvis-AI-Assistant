@@ -523,8 +523,35 @@ TOOLS = [
         }
     },
     {
+        "name": "resume_pipeline",
+        "description": "Resume a paused, active, or unfinished pipeline using its plan_id.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "string", "description": "The unique 8-character ID of the pipeline plan to resume"}
+            },
+            "required": ["plan_id"]
+        }
+    },
+    {
+        "name": "delete_pipeline",
+        "description": "Delete a pipeline project permanently by its ID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "string", "description": "The unique ID of the pipeline plan to delete"}
+            },
+            "required": ["plan_id"]
+        }
+    },
+    {
         "name": "get_gate_status",
         "description": "Check the current pipeline gate status: which gate is active, waiting/approved/rejected, and the pipeline phase.",
+        "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "get_pipelines",
+        "description": "Retrieve all active and past pipeline projects, including their IDs, tasks, project names, phases, and statuses.",
         "parameters": {"type": "object", "properties": {}}
     },
     {
@@ -619,10 +646,24 @@ TOOL_IMPL = {
         json=kw,
         timeout=2
     ).json() if requests else {}),
+    "resume_pipeline":    lambda conn, **kw: _state_providers["resume_pipeline"](kw) if "resume_pipeline" in _state_providers else (requests.post(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/pipeline/resume",
+        json=kw,
+        timeout=2
+    ).json() if requests else {}),
+    "delete_pipeline":    lambda conn, **kw: _state_providers["delete_pipeline"](kw) if "delete_pipeline" in _state_providers else (requests.post(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/pipeline/delete",
+        json=kw,
+        timeout=2
+    ).json() if requests else {}),
     "get_gate_status":    lambda conn, **kw: _state_providers["get_gate_status"]() if "get_gate_status" in _state_providers else (requests.get(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/gate/status",
         timeout=2
     ).json() if requests else {}),
+    "get_pipelines":      lambda conn, **kw: _state_providers["get_pipelines"]() if "get_pipelines" in _state_providers else (requests.get(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/plans",
+        timeout=2
+    ).json().get("plans", []) if requests else {}),
     "update_metric":      lambda conn, **kw: _state_providers["update_metric"](kw) if "update_metric" in _state_providers else (requests.post(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/metrics/update",
         json=kw,
@@ -681,7 +722,10 @@ UI_MAP = (
     "  'save these 3 notes...' → batch_create_notes\n"
     "  'delete notes 1, 2, and 3' → batch_delete_notes\n"
     "  'start a pipeline for X' → start_pipeline\n"
+    "  'resume project Y' / 'resume pipeline Y' → resume_pipeline\n"
+    "  'delete project Y' / 'delete pipeline Y' → delete_pipeline\n"
     "  'check pipeline status' → get_gate_status\n"
+    "  'show all projects' / 'list pipelines' → get_pipelines\n"
     "  'what are my current settings?' → read_settings\n"
     "  'track youtube CTR at 0.03' → update_metric\n"
     "  'show all metrics' → read_metrics\n"
@@ -709,6 +753,8 @@ SYSTEM_PROMPT = (
     "11. If the user refers to a task by name, alias, or description (e.g. 'delete the beta task'), ALWAYS check `get_tasks` or `read_app_snapshot` first to find its ID. Do not ask the user for the ID unless it is not present in the list.\n"
     "12. If the user says 'switch to gem' or references 'gem', interpret it as 'switch to gemini' and invoke `change_settings` with provider='gemini' (always ask 'Shall I switch from Ollama to Gemini, Sir?' first to confirm settings change).\n"
     "13. If the user refers to you as 'Jar' or says 'Jar', understand that they are addressing you as 'Jarvis'.\n"
+    "14. If the user asks to resume, track, delete, or check a pipeline by project name or task, ALWAYS check `get_pipelines` first to identify its ID.\n"
+    "15. Before deleting a pipeline (delete_pipeline), you MUST request double confirmation from the user conversationally. First ask: 'Are you sure you want to delete pipeline Y, Sir?'. If they confirm, ask a second time: 'Please confirm once more, Sir: this action is permanent. Should I delete Y?'. Do NOT invoke the delete_pipeline tool until they have confirmed BOTH times.\n"
 )
 
 

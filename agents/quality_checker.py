@@ -120,7 +120,10 @@ MASTER BLUEPRINT:
 EXECUTION OUTPUTS:
 {json.dumps(execution_results, indent=2)}
 
-Do these outputs fit together coherently as a single product? Are there any contradictions or missing parts?
+Do these outputs fit together coherently as a single product? Are there any structural contradictions, API mismatches, design conflicts, or missing components between the designs, code, database schemas, and other deliverables?
+
+NOTE: The QA/Testing deliverables are expected to log simulated bugs or defects (e.g. BUG-001, BUG-002, etc.) and state that release criteria are not met. Do NOT treat these logged bugs/defects as integration failures or contradictions. That is normal QA reporting. Only mark "integrates" as false if there are actual structural, architectural, or API alignment conflicts between the different deliverables.
+
 Return a JSON object:
 {{
   "integrates": true/false,
@@ -148,9 +151,13 @@ Return a JSON object:
         except Exception as e:
             print(f"[Quality Checker] Global integration check failed: {e}")
 
+    failed_agents = [r["agent_id"] for r in results if not r["passed"]]
+    if not integration_passed and not failed_agents:
+        failed_agents = [r.get("agent_id") for r in execution_results]
+
     return {
         "all_passed": all_passed,
         "results": results,
-        "failed_agents": [r["agent_id"] for r in results if not r["passed"]],
+        "failed_agents": failed_agents,
         "integration_check": {"passed": integration_passed, "issues": integration_issues}
     }

@@ -137,6 +137,25 @@ AGENT_OBS_LOCK = threading.Lock()
 PLAN_STORE: list[dict] = []            # list of all active/past plans
 PLAN_STORE_LOCK = threading.Lock()
 
+ACTIVE_PIPELINE_THREADS = set()
+ACTIVE_PIPELINE_LOCK = threading.Lock()
+
+def load_pipelines_from_db():
+    global PLAN_STORE
+    conn = db.get_connection(DB_PATH)
+    try:
+        loaded = db.get_pipelines(conn)
+        with PLAN_STORE_LOCK:
+            PLAN_STORE = loaded
+    except Exception as e:
+        print(f"Error loading pipelines from DB: {e}")
+    finally:
+        conn.close()
+
+# Load persisted plans on startup
+load_pipelines_from_db()
+
+
 # --- Jarvis User & Identity Layer ---
 import collections
 JARVIS_SESSION_TOKEN = os.getenv("JARVIS_SESSION_TOKEN", "jarvis-auth-token-xyz-789")
@@ -409,9 +428,32 @@ def change_settings_local(settings_dict):
     save_settings(current)
     return current
 
-def create_initial_task_log(plan_id: str, task: str):
+def get_project_name(task: str) -> str:
+    import re
+    if GEMINI_API_KEY:
+        try:
+            prompt = (
+                "Given this task description, generate a short, clean, descriptive project name "
+                "(2-4 words maximum, capitalize the first letter of each word, do not use special characters or punctuation, simple spaces only). "
+                f"Task: {task}\nProject Name:"
+            )
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            name = response.text.strip().replace("\"", "").replace("'", "").replace("/", "_").replace("\\", "_")
+            name = re.sub(r'[^a-zA-Z0-9\s_-]', '', name).strip()
+            if name:
+                return name
+        except Exception as e:
+            print(f"Failed to generate project name via LLM: {e}")
+    # Fallback to cleaning the task name
+    cleaned = re.sub(r'[^a-zA-Z0-9\s_-]', '', task[:40]).strip()
+    return cleaned if cleaned else "Default Project"
+
+def create_initial_task_log(plan_id: str, task: str, project_name: str):
     import time
-    log_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Task Logs")
+    log_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Task Logs")
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"pipeline_{plan_id}.md")
     
@@ -434,9 +476,6 @@ def update_task_log_file(plan_id: str, event: dict):
     if not plan_id:
         return
     import time
-    log_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", "Task Logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"pipeline_{plan_id}.md")
     
     plan_data = None
     with PLAN_STORE_LOCK:
@@ -447,6 +486,11 @@ def update_task_log_file(plan_id: str, event: dict):
                 
     if not plan_data:
         return
+
+    project_name = plan_data.get("project_name", "Default Project")
+    log_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Task Logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"pipeline_{plan_id}.md")
 
     plan_events = []
     with AGENT_OBS_LOCK:
@@ -502,14 +546,34 @@ def update_task_log_file(plan_id: str, event: dict):
         print(f"Failed to update task log file: {e}")
 
 def initiate_pipeline(task: str) -> str:
-    import uuid
     import time
-    plan_id = str(uuid.uuid4())[:8]
+    
+    conn = db.get_connection(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM pipelines")
+        ids = [row[0] for row in cursor.fetchall()]
+        int_ids = []
+        for val in ids:
+            try:
+                int_ids.append(int(val))
+            except ValueError:
+                pass
+        next_id = max(int_ids) + 1 if int_ids else 1
+        plan_id = str(next_id)
+    except Exception as e:
+        print(f"Error generating integer ID: {e}")
+        plan_id = str(len(PLAN_STORE) + 1)
+    finally:
+        conn.close()
+    
+    project_name = get_project_name(task)
 
     with PLAN_STORE_LOCK:
-        PLAN_STORE.append({
+        plan_entry = {
             "id": plan_id,
             "task": task,
+            "project_name": project_name,
             "status": "running",
             "current_gate": None,
             "gate_status": "idle",
@@ -519,10 +583,21 @@ def initiate_pipeline(task: str) -> str:
             "master_blueprint": {},
             "exec_results": [],
             "deploy_result": {}
-        })
+        }
+        PLAN_STORE.append(plan_entry)
+        
+        # Save to database
+        conn = db.get_connection(DB_PATH)
+        try:
+            db.save_pipeline(conn, plan_entry)
+        except Exception as e:
+            print(f"Error persisting initial pipeline: {e}")
+        finally:
+            conn.close()
+
 
     push_message("system", f"Pipeline started [Plan ID: {plan_id}]: {task[:80]}...")
-    create_initial_task_log(plan_id, task)
+    create_initial_task_log(plan_id, task, project_name)
 
     async def gate_fn(gate_id: str, data: dict) -> dict:
         with PIPELINE_LOCK:
@@ -550,18 +625,32 @@ def initiate_pipeline(task: str) -> str:
     def run_pipeline():
         import asyncio
         from multi_agent_coordinator import run_full_pipeline
+        with ACTIVE_PIPELINE_LOCK:
+            ACTIVE_PIPELINE_THREADS.add(plan_id)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id))
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
             push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
         except Exception as e:
             push_message("system", f"Pipeline error: {e}")
         finally:
             loop.close()
+            with ACTIVE_PIPELINE_LOCK:
+                ACTIVE_PIPELINE_THREADS.discard(plan_id)
 
     threading.Thread(target=run_pipeline, daemon=True).start()
     return plan_id
+
+def normalize_spoken_id(plan_id: str) -> str:
+    cleaned = str(plan_id).lower().strip()
+    if cleaned.startswith("id"):
+        cleaned = cleaned[2:].strip()
+    number_map = {
+        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10"
+    }
+    return number_map.get(cleaned, cleaned)
 
 def start_pipeline_local(settings_dict):
     task = settings_dict.get("task", "").strip()
@@ -569,6 +658,101 @@ def start_pipeline_local(settings_dict):
         return {"error": "task is required"}
     plan_id = initiate_pipeline(task)
     return {"status": "pipeline_started", "task": task, "plan_id": plan_id}
+
+def resume_pipeline_local(settings_dict):
+    plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
+    if not plan_id:
+        return {"error": "plan_id is required"}
+    
+    plan_entry = None
+    with PLAN_STORE_LOCK:
+        for plan in PLAN_STORE:
+            if plan["id"] == plan_id:
+                plan_entry = plan
+                break
+                
+    if not plan_entry:
+        load_pipelines_from_db()
+        with PLAN_STORE_LOCK:
+            for plan in PLAN_STORE:
+                if plan["id"] == plan_id:
+                    plan_entry = plan
+                    break
+                    
+    if not plan_entry:
+        return {"error": f"Pipeline plan '{plan_id}' not found"}
+
+    task = plan_entry.get("task")
+    project_name = plan_entry.get("project_name", "Default Project")
+    
+    with PLAN_STORE_LOCK:
+        plan_entry["status"] = "running"
+    
+    conn = db.get_connection(DB_PATH)
+    try:
+        db.save_pipeline(conn, plan_entry)
+    except Exception as e:
+        print(f"Error saving pipeline status on resume: {e}")
+    finally:
+        conn.close()
+
+    # Automatically reopen the task log file on resumption
+    log_dir = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Task Logs")
+    log_file = os.path.join(log_dir, f"pipeline_{plan_id}.md")
+    if os.path.exists(log_file):
+        try:
+            os.startfile(log_file)
+        except Exception as e:
+            print(f"Failed to automatically open log file: {e}")
+
+    push_message("system", f"Resuming pipeline [Plan ID: {plan_id}]: {task[:80]}...")
+
+    async def gate_fn(gate_id: str, data: dict) -> dict:
+        with PIPELINE_LOCK:
+            PIPELINE_STATE["current_gate"] = gate_id
+            PIPELINE_STATE["gate_status"] = "waiting"
+            PIPELINE_STATE["redirect_note"] = None
+            PIPELINE_STATE["gate_data"] = data
+            PIPELINE_STATE["rejected_steps"] = None
+        push_message("system", f"Gate {gate_id} is open. Waiting for your approval.")
+        import asyncio
+        while True:
+            await asyncio.sleep(2)
+            with PIPELINE_LOCK:
+                status = PIPELINE_STATE["gate_status"]
+                note = PIPELINE_STATE["redirect_note"]
+                rejected = PIPELINE_STATE["rejected_steps"]
+            if status in ("approved", "rejected"):
+                with PIPELINE_LOCK:
+                    PIPELINE_STATE["current_gate"] = None
+                    PIPELINE_STATE["gate_status"] = "idle"
+                    PIPELINE_STATE["gate_data"] = None
+                    PIPELINE_STATE["rejected_steps"] = None
+                return {"approved": status == "approved", "redirect_note": note, "rejected_steps": rejected}
+
+    with ACTIVE_PIPELINE_LOCK:
+        if plan_id in ACTIVE_PIPELINE_THREADS:
+            return {"status": "already_running", "plan_id": plan_id}
+
+    def run_pipeline():
+        import asyncio
+        from multi_agent_coordinator import run_full_pipeline
+        with ACTIVE_PIPELINE_LOCK:
+            ACTIVE_PIPELINE_THREADS.add(plan_id)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
+            push_message("ai", f"Pipeline complete. {result.get('status', 'done')}.")
+        except Exception as e:
+            push_message("system", f"Pipeline error: {e}")
+        finally:
+            loop.close()
+            with ACTIVE_PIPELINE_LOCK:
+                ACTIVE_PIPELINE_THREADS.discard(plan_id)
+
+    threading.Thread(target=run_pipeline, daemon=True).start()
+    return {"status": "pipeline_resumed", "plan_id": plan_id}
 
 def get_gate_status_local():
     with PIPELINE_LOCK:
@@ -588,10 +772,44 @@ def read_metrics_local():
     with TRACKED_METRICS_LOCK:
         return dict(TRACKED_METRICS)
 
+def get_pipelines_local():
+    with PLAN_STORE_LOCK:
+        return list(PLAN_STORE)
+
+def delete_pipeline_local(settings_dict):
+    plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
+    if not plan_id:
+        return {"error": "plan_id is required"}
+    
+    deleted = False
+    with PLAN_STORE_LOCK:
+        for i, plan in enumerate(PLAN_STORE):
+            if plan["id"] == plan_id:
+                PLAN_STORE.pop(i)
+                deleted = True
+                break
+                
+    if not deleted:
+        return {"error": f"Pipeline plan '{plan_id}' not found"}
+        
+    conn = db.get_connection(DB_PATH)
+    try:
+        db.delete_pipeline(conn, plan_id)
+    except Exception as e:
+        print(f"Error deleting pipeline from DB: {e}")
+    finally:
+        conn.close()
+        
+    push_message("system", f"Deleted pipeline project [Plan ID: {plan_id}].")
+    return {"status": "pipeline_deleted", "plan_id": plan_id}
+
 coordinator.register_state_provider("read_app_snapshot", get_snapshot_local)
 coordinator.register_state_provider("read_settings", load_settings)
 coordinator.register_state_provider("change_settings", change_settings_local)
 coordinator.register_state_provider("start_pipeline", start_pipeline_local)
+coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
+coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
+coordinator.register_state_provider("get_pipelines", get_pipelines_local)
 coordinator.register_state_provider("get_gate_status", get_gate_status_local)
 coordinator.register_state_provider("update_metric", update_metric_local)
 coordinator.register_state_provider("read_metrics", read_metrics_local)
@@ -936,6 +1154,7 @@ def pipeline_event_logger(event: dict):
     # Sync with PLAN_STORE
     plan_id = event.get("plan_id")
     if plan_id:
+        plan_to_save = None
         with PLAN_STORE_LOCK:
             for plan in PLAN_STORE:
                 if plan["id"] == plan_id:
@@ -963,7 +1182,26 @@ def pipeline_event_logger(event: dict):
                             plan["cycles"].append(cycle_name)
                     elif event_type == "conflict":
                         plan["phase"] = "conflict"
+                    elif event_type == "agent_plan_compiled":
+                        plan["agent_plan"] = event.get("data")
+                    elif event_type == "cycle_approved":
+                        if "approved_blueprints" not in plan:
+                            plan["approved_blueprints"] = []
+                        bp = event.get("data", {}).get("blueprint", {})
+                        if bp not in plan["approved_blueprints"]:
+                            plan["approved_blueprints"].append(bp)
+                    plan_to_save = plan.copy()
                     break
+
+        if plan_to_save:
+            conn = db.get_connection(DB_PATH)
+            try:
+                db.save_pipeline(conn, plan_to_save)
+            except Exception as e:
+                print(f"Error persisting pipeline update: {e}")
+            finally:
+                conn.close()
+
 
     if plan_id:
         update_task_log_file(plan_id, event)
@@ -971,9 +1209,20 @@ def pipeline_event_logger(event: dict):
 
 @app.route("/plans", methods=["GET"])
 def get_plans():
-    """Returns the full plans store."""
+    """Returns the full plans store with active thread status."""
     with PLAN_STORE_LOCK:
-        return jsonify({"plans": list(PLAN_STORE)})
+        plans = list(PLAN_STORE)
+    
+    with ACTIVE_PIPELINE_LOCK:
+        active_ids = list(ACTIVE_PIPELINE_THREADS)
+        
+    decorated_plans = []
+    for plan in plans:
+        p_copy = plan.copy()
+        p_copy["active"] = p_copy["id"] in active_ids
+        decorated_plans.append(p_copy)
+        
+    return jsonify({"plans": decorated_plans})
 
 
 @app.route("/plans/<plan_id>", methods=["GET"])
@@ -1067,6 +1316,32 @@ def start_pipeline():
         return jsonify({"error": "task is required"}), 400
     plan_id = initiate_pipeline(task)
     return jsonify({"status": "pipeline_started", "task": task, "plan_id": plan_id})
+
+
+@app.route("/pipeline/resume", methods=["POST"])
+def resume_pipeline_route():
+    """Resumes a paused or incomplete pipeline."""
+    data = request.get_json(force=True) or {}
+    plan_id = data.get("plan_id", "").strip()
+    if not plan_id:
+        return jsonify({"error": "plan_id is required"}), 400
+    res = resume_pipeline_local({"plan_id": plan_id})
+    if "error" in res:
+        return jsonify(res), 404
+    return jsonify(res)
+
+
+@app.route("/pipeline/delete", methods=["POST"])
+def delete_pipeline_route():
+    """Deletes a pipeline project permanently."""
+    data = request.get_json(force=True) or {}
+    plan_id = data.get("plan_id", "").strip()
+    if not plan_id:
+        return jsonify({"error": "plan_id is required"}), 400
+    res = delete_pipeline_local({"plan_id": plan_id})
+    if "error" in res:
+        return jsonify(res), 404
+    return jsonify(res)
 
 
 def run_server():

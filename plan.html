@@ -591,6 +591,22 @@
             color: #22c55e;
         }
 
+        .plan-status-badge.paused {
+            background: rgba(249, 115, 22, 0.2);
+            border: 1px solid rgba(249, 115, 22, 0.6);
+            color: #f97316;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 0 10px rgba(249, 115, 22, 0.1);
+        }
+
+        .plan-status-badge.paused:hover {
+            background: #f97316;
+            color: #000;
+            box-shadow: 0 0 15px rgba(249, 115, 22, 0.5);
+            transform: scale(1.05);
+        }
+
         .plan-status-badge.waiting {
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.3);
@@ -813,6 +829,24 @@
     <div class="jarvis-toast">Hello. I am Jarvis. How can I help you coordinate the pipeline plan today?</div>
 
     <script>
+        function isApiOrMcp(serviceName) {
+            if (!serviceName) return false;
+            const s = serviceName.toLowerCase();
+            const libraries = [
+                "react", "react.js", "next.js", "nextjs", "tailwind", "tailwind css", "tailwindcss", "typescript", "styled-components", 
+                "styled_components", "css", "html", "javascript", "webpack", "babel", 
+                "vite", "eslint", "prettier", "jest", "cypress", "playwright",
+                "npm", "yarn", "pip", "python", "node.js", "nodejs", "express", "django",
+                "laravel", "spring", "flask", "fastapi", "redux", "redux toolkit", "redux-toolkit", "git"
+            ];
+            for (let lib of libraries) {
+                if (s === lib || s.startsWith(lib + " ") || s.endsWith(" " + lib)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         let selectedPlanId = "";
         let plansCache = [];
         let activeGateData = null;
@@ -882,7 +916,13 @@
                 
                 let statusText = plan.status;
                 let badgeClass = plan.status;
-                if (plan.current_gate && plan.gate_status === 'waiting') {
+                let badgeOnclick = "";
+                
+                if (plan.status === 'running' && plan.active === false) {
+                    statusText = "CONTINUE";
+                    badgeClass = "paused";
+                    badgeOnclick = `onclick="event.stopPropagation(); resumePipeline('${plan.id}')"`;
+                } else if (plan.current_gate && plan.gate_status === 'waiting') {
                     statusText = `${plan.current_gate.replace(/_/g, ' ')} Pending`;
                     badgeClass = 'waiting';
                 }
@@ -891,7 +931,7 @@
                 card.innerHTML = `
                     <div class="plan-card-header">
                         <span class="plan-id-badge">ID: ${plan.id}</span>
-                        <span class="plan-status-badge ${badgeClass}">${statusText}</span>
+                        <span class="plan-status-badge ${badgeClass}" ${badgeOnclick}>${statusText}</span>
                     </div>
                     <div class="plan-task">${plan.task}</div>
                     <div class="plan-meta">
@@ -909,6 +949,30 @@
             updateViewToggles();
             fetchPlans();
             setTimeout(drawConnectors, 100);
+        }
+
+        async function resumePipeline(planId) {
+            try {
+                const toast = document.querySelector('.jarvis-toast');
+                toast.innerText = `Jarvis is resuming pipeline [ID: ${planId}]...`;
+                toast.classList.add('show');
+                
+                const res = await fetch('/pipeline/resume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ plan_id: planId })
+                });
+                const data = await res.json();
+                if (data.status === 'pipeline_resumed') {
+                    toast.innerText = `Pipeline [ID: ${planId}] resumed successfully.`;
+                    selectPlan(planId);
+                } else {
+                    toast.innerText = `Failed to resume pipeline: ${data.error || 'Unknown error'}`;
+                }
+                setTimeout(() => toast.classList.remove('show'), 4000);
+            } catch (err) {
+                console.error("Error resuming pipeline:", err);
+            }
         }
 
         function toggleMainView() {
@@ -1014,23 +1078,52 @@
             const stage3Dot = document.getElementById('stage-3-dot');
             stage3Dot.className = `status-dot ${plan.phase === 'synthesis' ? 'orange' : (plan.master_blueprint && Object.keys(plan.master_blueprint).length > 0 ? 'green' : '')}`;
             let bpHTML = "";
+            
+            // Capture scroll positions of existing code boxes in Stage 3 before rendering
+            const bpEl = document.getElementById('stage-3-blueprint');
+            const codeBoxes = bpEl ? bpEl.querySelectorAll('.code-box') : [];
+            const scrollTops = Array.from(codeBoxes).map(el => el.scrollTop);
+
             if (plan.master_blueprint && Object.keys(plan.master_blueprint).length > 0) {
-                const tools = plan.master_blueprint.tool_recommendations || [];
+                const allTools = plan.master_blueprint.tool_recommendations || [];
+                const devTools = allTools.filter(t => !isApiOrMcp(t.service));
+                const connectionTools = allTools.filter(t => isApiOrMcp(t.service));
+
                 bpHTML += `
                     <div class="item-row">
                         <span class="item-icon">🔧</span>
-                        <span class="item-text">${tools.length} Tools Recommended</span>
+                        <span class="item-text">${devTools.length} Tools Recommended</span>
                     </div>
                 `;
-                if (tools.length > 0) {
-                    bpHTML += `<div class="code-box" style="font-size: 10px; max-height: 120px;">` + 
-                        tools.map(t => `${t.service} (${t.agent_consensus} consensus)`).join('\n') + 
+                if (devTools.length > 0) {
+                    bpHTML += `<div class="code-box" style="font-size: 10px; max-height: 90px; margin-bottom: 12px;">` + 
+                        devTools.map(t => `${t.service} (${t.agent_consensus || t.consensus_strength || 'strong'} consensus)`).join('\n') + 
+                        `</div>`;
+                }
+
+                bpHTML += `
+                    <div class="item-row">
+                        <span class="item-icon">🔌</span>
+                        <span class="item-text">${connectionTools.length} We Need to Connect</span>
+                    </div>
+                `;
+                if (connectionTools.length > 0) {
+                    bpHTML += `<div class="code-box" style="font-size: 10px; max-height: 90px;">` + 
+                        connectionTools.map(t => `${t.service} (${t.agent_consensus || t.consensus_strength || 'strong'} consensus)`).join('\n') + 
                         `</div>`;
                 }
             } else {
                 bpHTML = '<div style="font-size:11px; color:var(--text-muted); text-align:center;">Compiling blueprint...</div>';
             }
             document.getElementById('stage-3-blueprint').innerHTML = bpHTML;
+
+            // Restore scroll positions
+            const newCodeBoxes = document.getElementById('stage-3-blueprint').querySelectorAll('.code-box');
+            newCodeBoxes.forEach((el, idx) => {
+                if (scrollTops[idx] !== undefined) {
+                    el.scrollTop = scrollTops[idx];
+                }
+            });
 
             // Stage 4: Execution agents
             const stage4Dot = document.getElementById('stage-4-dot');
@@ -1087,8 +1180,8 @@
                          `;
                      });
                  } else if (gateId === "api_mcp_plugging") {
-                     const recs = data.tool_recommendations || [];
-                     recs.forEach((r, idx) => {
+                      const recs = (data.tool_recommendations || []).filter(r => isApiOrMcp(r.service));
+                      recs.forEach((r, idx) => {
                          const isChecked = previouslyCheckedPanel.has(r.service) ? "checked" : "";
                          itemsHtml += `
                              <div class="step-row" style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 8px;">
@@ -1261,16 +1354,55 @@
                     `;
                 });
             } else if (gateId === "api_mcp_plugging") {
-                const recs = data.tool_recommendations || [];
+                const recs = (data.tool_recommendations || []).filter(r => isApiOrMcp(r.service));
                 recs.forEach((r, idx) => {
                     const isChecked = currentlyChecked.has(r.service) ? "checked" : "";
+                    const prosText = (r.pros && r.pros.length > 0) ? r.pros.join(', ') : "None";
+                    const consText = (r.cons && r.cons.length > 0) ? r.cons.join(', ') : "None";
+                    const purposeText = r.purpose || "No purpose provided.";
+                    
+                    // Map common services to credentials/setup URL
+                    let url = "";
+                    const sLower = r.service.toLowerCase();
+                    if (sLower.includes("stripe")) url = "https://dashboard.stripe.com/apikeys";
+                    else if (sLower.includes("google_maps") || sLower.includes("google-maps")) url = "https://console.cloud.google.com/google/maps-apis/credentials";
+                    else if (sLower.includes("aws") || sLower.includes("amazon web services")) url = "https://console.aws.amazon.com/";
+                    else if (sLower.includes("github")) url = "https://github.com/settings/tokens";
+                    else if (sLower.includes("paypal")) url = "https://developer.paypal.com/dashboard/applications/sandbox";
+                    else if (sLower.includes("google_search") || sLower.includes("google-search")) url = "https://developers.google.com/custom-search/v1/overview";
+                    else if (sLower.includes("youtube")) url = "https://console.cloud.google.com/apis/credentials";
+                    else if (sLower.includes("supadata")) url = "https://supadata.ai/";
+                    else if (sLower.includes("kafka")) url = "https://kafka.apache.org/";
+                    else if (sLower.includes("apache")) url = "https://apache.org/";
+                    else if (sLower.includes("redis")) url = "https://redis.io/";
+                    else if (sLower.includes("postgres")) url = "https://www.postgresql.org/";
+                    else if (sLower.includes("mysql")) url = "https://www.mysql.com/";
+                    else if (sLower.includes("mongodb") || sLower.includes("mongo")) url = "https://www.mongodb.com/";
+                    else if (sLower.includes("docker")) url = "https://www.docker.com/";
+                    else if (sLower.includes("kubernetes") || sLower.includes("k8s")) url = "https://kubernetes.io/";
+                    else if (sLower.includes("react")) url = "https://react.dev/";
+                    else if (sLower.includes("next.js") || sLower.includes("nextjs")) url = "https://nextjs.org/";
+                    else if (sLower.includes("tailwind")) url = "https://tailwindcss.com/";
+                    else if (sLower.includes("typescript")) url = "https://www.typescriptlang.org/";
+                    else if (sLower.includes("styled-components") || sLower.includes("styled_components")) url = "https://styled-components.com/";
+                    else if (sLower.includes("sqlite")) url = "https://sqlite.org/";
+                    else if (sLower.includes("openai")) url = "https://platform.openai.com/api-keys";
+                    else if (sLower.includes("anthropic") || sLower.includes("claude")) url = "https://console.anthropic.com/";
+                    else if (sLower.includes("gemini") || sLower.includes("google-ai")) url = "https://aistudio.google.com/";
+                    else url = `https://duckduckgo.com/?q=%5C${encodeURIComponent(r.service)}`;
+
+                    const urlHtml = url ? `<br><a href="${url}" target="_blank" style="color: #06b6d4; text-decoration: underline; font-weight: 500; display: inline-block; margin-top: 4px;">Get API key / Credentials ↗</a>` : "";
+
                     html += `
-                        <div class="step-row">
+                        <div class="step-row" style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.05);">
                             <input type="checkbox" id="check-${idx}" value="${r.service}" ${isChecked}>
                             <label for="check-${idx}">
                                 <strong>Tool: ${r.service}</strong> (Recommended by: ${r.recommended_by.join(', ')})<br>
-                                Pros: ${r.pros.join(', ')}<br>
-                                Current Status: ${r.current_status === 'up' ? '✅ Up' : '❌ Unconfigured'}
+                                <span style="color: #a7f3d0; font-size: 11px;">Status: ${r.current_status === 'up' ? '✅ Up' : '❌ Unconfigured'}</span><br>
+                                <strong style="color: var(--text-muted);">What we'll use it for:</strong> ${purposeText}<br>
+                                <strong style="color: var(--text-muted);">Pros:</strong> ${prosText}<br>
+                                <strong style="color: var(--text-muted);">Cons:</strong> <span style="color: #fca5a5;">${consText}</span>
+                                ${urlHtml}
                             </label>
                         </div>
                     `;
