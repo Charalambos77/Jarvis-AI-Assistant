@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jarvis Execution & Constellation Map</title>
+    <title>Jarvis Execution & Constellation Map — Preview & Simulation Controller</title>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Cytoscape.js -->
@@ -66,6 +66,65 @@
             z-index: 0;
         }
 
+        /* Simulation Controller Top Bar */
+        #sim-controller-bar {
+            position: fixed;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 999999;
+            background: rgba(15, 17, 28, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(20px);
+            padding: 10px 20px;
+            border-radius: 40px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .sim-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .sim-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .sim-btn.primary {
+            background: #60A5FA;
+            color: #000;
+            font-weight: 700;
+            border-color: #93C5FD;
+        }
+
+        .sim-btn.primary:hover {
+            background: #93C5FD;
+        }
+
+        .sim-btn.success {
+            background: #34D399;
+            color: #000;
+            font-weight: 700;
+            border-color: #6EE7B7;
+        }
+
+        .sim-btn.success:hover {
+            background: #6EE7B7;
+        }
+
         /* Fullscreen Core Flash Bloom Overlay */
         #core-flash-overlay {
             position: fixed;
@@ -124,7 +183,7 @@
             box-shadow: 0 0 25px rgba(255, 255, 255, 0.2);
         }
 
-        /* Live Execution Status Pill */
+        /* Status Pill */
         #execution-status-pill {
             position: absolute;
             top: 30px;
@@ -182,7 +241,7 @@
             pointer-events: none;
         }
 
-        /* ================= IDLE VIEW STYLES ================= */
+        /* IDLE VIEW STYLES */
         #idle-globe-container {
             position: absolute;
             top: 50%;
@@ -222,9 +281,7 @@
             overflow-y: auto;
         }
 
-        #idle-side-panel.open {
-            left: 0;
-        }
+        #idle-side-panel.open { left: 0; }
 
         .close-btn {
             position: absolute;
@@ -238,9 +295,7 @@
             transition: color 0.2s;
         }
 
-        .close-btn:hover {
-            color: #fff;
-        }
+        .close-btn:hover { color: #fff; }
 
         .panel-header {
             display: flex;
@@ -301,141 +356,48 @@
         .task-card.priority-medium { border-left-color: var(--medium-color); }
         .task-card.priority-low { border-left-color: var(--low-color); }
 
-        .task-card-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: #E2E8F0;
-            margin-bottom: 6px;
-        }
-
-        .task-card-meta {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            font-size: 10px;
-            flex-wrap: wrap;
-        }
-
-        .badge {
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 9px;
-            font-weight: 700;
-            text-transform: uppercase;
-        }
+        .task-card-title { font-size: 13px; font-weight: 600; color: #E2E8F0; margin-bottom: 6px; }
+        .task-card-meta { display: flex; gap: 8px; align-items: center; font-size: 10px; flex-wrap: wrap; }
+        .badge { padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
 
         .badge-high { background: rgba(251, 113, 133, 0.15); color: #FB7185; border: 1px solid rgba(251, 113, 133, 0.3); }
         .badge-medium { background: rgba(252, 211, 77, 0.15); color: #FCD34D; border: 1px solid rgba(252, 211, 77, 0.3); }
         .badge-low { background: rgba(96, 165, 250, 0.15); color: #60A5FA; border: 1px solid rgba(96, 165, 250, 0.3); }
 
         .subtasks-container {
-            margin-top: 10px;
-            margin-left: 10px;
-            border-left: 1px dashed rgba(255, 255, 255, 0.15);
-            padding-left: 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
+            margin-top: 10px; margin-left: 10px; border-left: 1px dashed rgba(255, 255, 255, 0.15); padding-left: 10px; display: flex; flex-direction: column; gap: 6px;
         }
 
-        .subtask-item {
-            font-size: 11px;
-            color: #94A3B8;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
+        .subtask-item { font-size: 11px; color: #94A3B8; display: flex; align-items: center; gap: 6px; }
 
         .action-box {
-            background: var(--glass-bg);
-            border: 1px solid var(--glass-border);
-            border-radius: 8px;
-            padding: 16px;
-            margin-top: auto;
+            background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 8px; padding: 16px; margin-top: auto;
         }
 
         .action-btn {
-            width: 100%;
-            padding: 12px;
-            background: #fff;
-            color: #000;
-            border: none;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: 0.2s;
+            width: 100%; padding: 12px; background: #fff; color: #000; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s;
         }
-
         .action-btn:hover { background: #E2E8F0; }
 
-        /* ================= ACTIVE VIEW STYLES ================= */
+        /* ACTIVE VIEW STYLES */
         #active-globe-container {
-            position: absolute;
-            top: calc(50% + 40px);
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 600px;
-            height: 600px;
-            z-index: 1;
-            pointer-events: none;
+            position: absolute; top: calc(50% + 40px); left: 50%; transform: translate(-50%, -50%); width: 600px; height: 600px; z-index: 1; pointer-events: none;
         }
 
         #cy-active {
-            width: 100%;
-            height: 100%;
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 2;
+            width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 2;
         }
 
         .department-label {
-            position: absolute;
-            transform: translate(-50%, -50%);
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 15px;
-            font-weight: 600;
-            letter-spacing: 5px;
-            text-transform: uppercase;
-            z-index: 5;
-            pointer-events: none;
-            text-shadow: 0 0 15px rgba(0, 0, 0, 0.8);
+            position: absolute; transform: translate(-50%, -50%); color: rgba(255, 255, 255, 0.9); font-size: 15px; font-weight: 600; letter-spacing: 5px; text-transform: uppercase; z-index: 5; pointer-events: none; text-shadow: 0 0 15px rgba(0, 0, 0, 0.8);
         }
 
         #watermark {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 15vw;
-            font-weight: 800;
-            color: rgba(255, 255, 255, 0.03);
-            pointer-events: none;
-            z-index: 1;
-            display: none;
-            text-transform: uppercase;
-            letter-spacing: -5px;
-            white-space: nowrap;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 15vw; font-weight: 800; color: rgba(255, 255, 255, 0.03); pointer-events: none; z-index: 1; display: none; text-transform: uppercase; letter-spacing: -5px; white-space: nowrap;
         }
 
         #active-side-panel {
-            position: absolute;
-            top: 0;
-            left: -550px;
-            width: 500px;
-            height: 100%;
-            background: var(--panel-bg);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-right: 1px solid var(--border-color);
-            z-index: 20;
-            transition: left 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            padding: 40px;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 20px 0 50px rgba(0, 0, 0, 0.5);
-            overflow-y: auto;
+            position: absolute; top: 0; left: -550px; width: 500px; height: 100%; background: var(--panel-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-right: 1px solid var(--border-color); z-index: 20; transition: left 0.4s cubic-bezier(0.16, 1, 0.3, 1); padding: 40px; display: flex; flex-direction: column; box-shadow: 20px 0 50px rgba(0, 0, 0, 0.5); overflow-y: auto;
         }
 
         #active-side-panel.open { left: 0; }
@@ -453,12 +415,21 @@
         <span id="status-text-label">Task Constellation (Idle)</span>
     </div>
 
-    <!-- Navigation buttons -->
+    <!-- Top Navigation -->
     <div class="top-right-nav">
         <button class="nav-btn active" id="btn-execution">Execution</button>
-        <button class="nav-btn" id="btn-logs" onclick="window.location.href='agent_talk.task_log.html'">Task Logs/Chat</button>
+        <button class="nav-btn" id="btn-logs" onclick="window.location.href='../agent_talk.task_log.html'">Task Logs/Chat</button>
         <button class="nav-btn" id="btn-plan">Plan</button>
         <button class="nav-btn" id="btn-apis">APIs/MCPs</button>
+    </div>
+
+    <!-- Floating Preview Simulation Controller -->
+    <div id="sim-controller-bar">
+        <span style="font-size: 11px; font-weight: 700; color: #9CA3AF; text-transform: uppercase; letter-spacing: 1px;">Preview Controls:</span>
+        <button class="sim-btn" onclick="simulateState('idle')">Task Constellation (Idle)</button>
+        <button class="sim-btn primary" onclick="simulateState('start_flash')">⚡ Flash Transition (Start Pipeline)</button>
+        <button class="sim-btn success" onclick="simulateState('running')">Department Execution (Running)</button>
+        <button class="sim-btn" onclick="simulateState('complete_flash')">↩ Flash Return (Complete Task)</button>
     </div>
 
     <!-- ========================================== -->
@@ -521,7 +492,7 @@
             <div class="section-title">WHAT IT REPLACES</div>
             <div class="replace-box" id="active-panel-replaces">Manual execution...</div>
             <div class="action-box">
-                <button class="action-btn" id="active-action-btn" onclick="window.location.href='agent_talk.task_log.html'">Open Live Agent Console</button>
+                <button class="action-btn" id="active-action-btn">Open Live Agent Console</button>
             </div>
         </div>
     </div>
@@ -529,9 +500,8 @@
 
     <script>
         // =========================================================
-        // GLOBAL CONTROLLER & FLASH TRANSITION LOGIC
+        // CONTROLLER & PREVIEW SIMULATION LOGIC
         // =========================================================
-        let isCurrentPipelineRunning = false;
         let isTransitioningState = false;
 
         function triggerFlashTransition(onPeakCallback) {
@@ -539,15 +509,12 @@
             isTransitioningState = true;
             const flash = document.getElementById('core-flash-overlay');
 
-            // 1. Expand white-out radial bloom over center core
             flash.style.opacity = '1.0';
 
-            // 2. Swapping layers at peak brightness
             setTimeout(() => {
                 if (typeof onPeakCallback === 'function') {
                     onPeakCallback();
                 }
-                // 3. Smooth dissolve to reveal new active layout
                 setTimeout(() => {
                     flash.style.opacity = '0';
                     isTransitioningState = false;
@@ -571,36 +538,25 @@
             document.getElementById('status-text-label').innerText = 'Task Constellation (Idle)';
         }
 
-        async function pollPipelineStatus() {
-            try {
-                const res = await fetch('/api/pipeline_status');
-                if (res.ok) {
-                    const data = await res.json();
-                    const shouldBeRunning = !!data.active;
-
-                    if (shouldBeRunning && !isCurrentPipelineRunning) {
-                        isCurrentPipelineRunning = true;
-                        triggerFlashTransition(() => {
-                            switchToActiveView();
-                        });
-                    } else if (!shouldBeRunning && isCurrentPipelineRunning) {
-                        isCurrentPipelineRunning = false;
-                        triggerFlashTransition(() => {
-                            switchToIdleView();
-                        });
-                    }
-                }
-            } catch (e) {
-                console.error("Status poll error:", e);
+        function simulateState(stateName) {
+            if (stateName === 'idle') {
+                switchToIdleView();
+            } else if (stateName === 'running') {
+                switchToActiveView();
+            } else if (stateName === 'start_flash') {
+                triggerFlashTransition(() => {
+                    switchToActiveView();
+                });
+            } else if (stateName === 'complete_flash') {
+                triggerFlashTransition(() => {
+                    switchToIdleView();
+                });
             }
         }
 
-        setInterval(pollPipelineStatus, 1500);
-        pollPipelineStatus();
-
 
         // =========================================================
-        // IDLE VIEW LOGIC (Three.js Stardust + Cytoscape Tasks)
+        // IDLE VIEW LOGIC
         // =========================================================
         (function initIdleView() {
             const container = document.getElementById('idle-globe-container');
@@ -713,9 +669,7 @@
                     const startDist = 0.15;
                     const pColor = getPriorityColor(t.priority);
 
-                    const points = [];
-                    points.push(new THREE.Vector3(Math.cos(angle) * startDist, Math.sin(angle) * startDist, 0));
-                    points.push(new THREE.Vector3(tx, ty, 0));
+                    const points = [new THREE.Vector3(Math.cos(angle) * startDist, Math.sin(angle) * startDist, 0), new THREE.Vector3(tx, ty, 0)];
                     const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
                     const lineMat = new THREE.LineBasicMaterial({
                         color: pColor, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending
@@ -784,7 +738,7 @@
             // Cytoscape Task Constellation
             const CENTER_X = window.innerWidth / 2;
             const CENTER_Y = window.innerHeight / 2;
-            let liveTasks = [];
+            let liveTasks = getFallbackTasks();
             let nodesPositions = {};
 
             const cyIdle = cytoscape({
@@ -829,18 +783,6 @@
                     { id: 106, content: 'Develop the frontend using custom code', priority: 'high', status: 'open', effort_estimate: 'large', parent_id: 103 },
                     { id: 107, content: 'Develop backend logic for booking system', priority: 'high', status: 'open', effort_estimate: 'large', parent_id: 103 }
                 ];
-            }
-
-            async function fetchTasks() {
-                try {
-                    const res = await fetch('/tasks');
-                    if (res.ok) {
-                        const data = await res.json();
-                        liveTasks = data.tasks || [];
-                    } else { liveTasks = getFallbackTasks(); }
-                } catch (err) { liveTasks = getFallbackTasks(); }
-                renderTaskConstellation(liveTasks);
-                renderTaskDatabaseList(liveTasks);
             }
 
             function renderTaskConstellation(tasks) {
@@ -968,7 +910,6 @@
                         <span class="badge" style="background:rgba(255,255,255,0.1); color:#fff;">${task.status || 'open'}</span>
                     </div>
                     ${task.effort_estimate ? `<div><strong>Effort Estimate:</strong> ${task.effort_estimate}</div>` : ''}
-                    ${task.due_date ? `<div><strong>Deadline:</strong> ${task.due_date}</div>` : ''}
                 `;
 
                 const childrenEl = document.getElementById('specific-task-children');
@@ -1014,13 +955,13 @@
                 wrapper.style.transform = 'translate(0px, 0px) scale(1.0)';
             };
 
-            fetchTasks();
-            setInterval(fetchTasks, 3000);
+            renderTaskConstellation(liveTasks);
+            renderTaskDatabaseList(liveTasks);
         })();
 
 
         // =========================================================
-        // ACTIVE VIEW LOGIC (Department & Agent Constellation)
+        // ACTIVE VIEW LOGIC
         // =========================================================
         (function initActiveView() {
             const departments = [
@@ -1160,7 +1101,6 @@
             }
             animateActiveGlobe();
 
-            // Cytoscape Active Departments Setup
             let elements = [];
             let nodesPositions = {};
             let labelsHTML = '';
@@ -1294,26 +1234,6 @@
                 document.getElementById('active-side-panel').classList.remove('open');
             };
         })();
-
-        // Navigation Buttons Event Listeners
-        document.getElementById('btn-execution').addEventListener('click', () => { window.location.href = 'execution.html'; });
-        document.getElementById('btn-plan').addEventListener('click', () => { window.location.href = 'plan.html?from=execution'; });
-        document.getElementById('btn-apis').addEventListener('click', () => { window.location.href = 'provider_comparison.html?from=execution'; });
-
-        // Voice navigation listener
-        setInterval(async () => {
-            try {
-                const res = await fetch('/state');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.ui_action && data.ui_action.type === 'navigate' && data.ui_action.url) {
-                        window.location.href = data.ui_action.url;
-                    } else if (data.ui_action && data.ui_action.type === 'control_interface') {
-                        if (data.ui_action.action === 'go_back') { window.history.back(); }
-                    }
-                }
-            } catch (e) { }
-        }, 800);
     </script>
 </body>
 

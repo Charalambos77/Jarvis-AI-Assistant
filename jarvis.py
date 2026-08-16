@@ -957,6 +957,12 @@ def execution_page():
     return send_from_directory(BASE_DIR, "execution.html")
 
 
+@app.route("/execution_preview.html")
+def execution_preview_page():
+    return send_from_directory(os.path.join(BASE_DIR, "Previews"), "execution_preview.html")
+
+
+
 @app.route("/agent_talk.task_log.html")
 def agent_talk_task_log_page():
     return send_from_directory(BASE_DIR, "agent_talk.task_log.html")
@@ -1347,6 +1353,23 @@ def get_plans():
         decorated_plans.append(p_copy)
         
     return jsonify({"plans": decorated_plans})
+
+
+@app.route("/api/pipeline_status", methods=["GET"])
+def get_pipeline_status():
+    """Returns whether any pipeline is currently active and details about running plans."""
+    with ACTIVE_PIPELINE_LOCK:
+        active_ids = list(ACTIVE_PIPELINE_THREADS)
+    with PLAN_STORE_LOCK:
+        running_plans = [p for p in PLAN_STORE if p["id"] in active_ids]
+    return jsonify({
+        "active": len(active_ids) > 0,
+        "active_ids": active_ids,
+        "running_count": len(running_plans),
+        "plans": running_plans
+    })
+
+
 
 
 @app.route("/plans/<plan_id>", methods=["GET"])
