@@ -28,7 +28,7 @@ When given a task, output a JSON object with this exact structure:
       "domain": "Brand & Identity",
       "goal": "Understand company positioning, voice, and competitive landscape",
       "lead_specialist": {
-        "agent_id": "cycle1_lead",
+        "agent_id": "brand_strategist_cycle1_lead",
         "role": "Brand Strategist",
         "brief": "Analyze brand positioning and determine key voice elements.",
         "tools_needed": ["google_search", "search_memory_patterns"],
@@ -36,7 +36,7 @@ When given a task, output a JSON object with this exact structure:
       },
       "advisory_agents": [
         {
-          "agent_id": "cycle1_adv_1",
+          "agent_id": "competitor_analyst_cycle1_adv_1",
           "role": "Competitor Analyst",
           "brief": "Research direct competitors and identify positioning gaps.",
           "tools_needed": ["google_search"],
@@ -50,7 +50,7 @@ When given a task, output a JSON object with this exact structure:
       "service": "youtube_api",
       "purpose": "Upload final video to YouTube channel",
       "doc_url": "official developer website or documentation URL",
-      "recommended_by": ["cycle1_lead", "cycle1_adv_1"],
+      "recommended_by": ["brand_strategist_cycle1_lead", "competitor_analyst_cycle1_adv_1"],
       "pros": ["Direct upload", "Metadata control", "Playlist management"],
       "cons": ["Requires OAuth setup", "Rate limited"],
       "alternatives": ["manual_upload"],
@@ -73,7 +73,7 @@ When given a task, output a JSON object with this exact structure:
   ],
   "execution_agents": [
     {
-      "agent_id": "agent_exec_1",
+      "agent_id": "script_writer_exec_1",
       "role": "Script Writer",
       "brief": "Write a full YouTube script based on the approved research blueprint.",
       "tools_needed": ["google_search"],
@@ -89,9 +89,10 @@ Enforce the following rules:
 1. Generate at least 3 research cycles.
 2. Each cycle must target a distinct domain or layer of the task (e.g. Domain 1: Target Audience/Identity, Domain 2: Content Strategy/Structuring, Domain 3: Virality/SEO).
 3. Each cycle must have exactly 1 `lead_specialist` and at least 1 `advisory_agents`.
-4. Agent IDs for research agents must follow the pattern `cycle{N}_lead` and `cycle{N}_adv_{M}` (e.g. cycle1_lead, cycle1_adv_1, cycle2_lead, cycle2_adv_1).
-5. `execution_agents` remains a flat list of agents that will execute based on the final synthesized blueprint.
-6. Provide specific recommendations in the `recommended_tools` section based on tools that research agents might need.
+4. ROLE-FIRST AGENT IDENTIFIERS: Always put the descriptive role name FIRST, followed by the cycle/execution tag (e.g. `brand_strategist_cycle1_lead`, `competitor_analyst_cycle1_adv_1`, `script_writer_exec_1`). The `role` field must be the exact human-readable name of the specialist (e.g. "Brand Strategist", "Competitor Analyst").
+5. STRICT SINGLE-PURPOSE AGENT ROLES: Every agent (both research specialists and execution agents) MUST have exactly ONE focused role and function. NEVER bundle multiple tasks or responsibilities into compound agent roles (e.g. DO NOT create "SEO & Virality Specialist" or "Metadata & Description Writer"). Split them into separate, dedicated individual agents (e.g. "SEO Specialist" and "Virality Researcher", or "Metadata Tag Specialist" and "Description Writer").
+6. `execution_agents` remains a flat list of distinct, single-purpose agents that will execute based on the final synthesized blueprint.
+7. Provide specific recommendations in the `recommended_tools` section based on tools that research agents might need.
 """
 
 

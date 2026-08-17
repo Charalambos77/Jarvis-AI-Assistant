@@ -1271,14 +1271,37 @@ def pipeline_event_logger(event: dict):
     timestamp = time.time()
     event["timestamp"] = timestamp
 
-    source = event.get("source") or event.get("agent_id") or "TaskConsole"
+    raw_source = event.get("source") or event.get("agent_id") or "TaskConsole"
     target = event.get("target") or event.get("receiver") or "All Agents"
     event_type = event.get("event_type", "info")
     data_val = event.get("data") or event.get("message") or ""
 
+    # Store spawned agent configs first so role is available immediately
+    agent_id = event.get("agent_id") or event.get("source")
+    if agent_id and agent_id not in ("Brain", "System"):
+        with AGENT_OBS_LOCK:
+            if agent_id not in AGENT_REGISTRY:
+                AGENT_REGISTRY[agent_id] = {}
+            if event_type == "spawned" and isinstance(data_val, dict):
+                AGENT_REGISTRY[agent_id]["config"] = data_val
+
+    # Resolve human-readable Role Name for UI display
+    role_name = None
+    if isinstance(data_val, dict) and data_val.get("role"):
+        role_name = data_val.get("role")
+    elif agent_id and agent_id in AGENT_REGISTRY and AGENT_REGISTRY[agent_id].get("config", {}).get("role"):
+        role_name = AGENT_REGISTRY[agent_id]["config"].get("role")
+
+    if role_name and raw_source not in ("Brain", "System", "TaskConsole"):
+        if role_name.lower() in raw_source.lower():
+            source = raw_source
+        else:
+            source = f"{role_name} ({raw_source})"
+    else:
+        source = raw_source
+
     if event_type == "thinking_stream":
         with AGENT_OBS_LOCK:
-            agent_id = event.get("agent_id")
             if agent_id:
                 if agent_id not in AGENT_REGISTRY:
                     AGENT_REGISTRY[agent_id] = {}

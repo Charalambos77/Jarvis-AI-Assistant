@@ -104,14 +104,16 @@ Output format:
         if tool_name == "google_search":
             tools_list.append({"google_search": {}})
         # Other tool types will be added by the API/Provider Registry (Step 6)
-    if not tools_list:
-        tools_list = [{"google_search": {}}]  # fallback
+    # [FIX] Gemini API does not allow response_mime_type="application/json" when tools are present
+    config_args = {
+        "system_instruction": system_prompt,
+    }
+    if tools_list:
+        config_args["tools"] = tools_list
+    else:
+        config_args["response_mime_type"] = "application/json"
 
-    config = types.GenerateContentConfig(
-        system_instruction=system_prompt,
-        tools=tools_list,
-        response_mime_type="application/json",
-    )
+    config = types.GenerateContentConfig(**config_args)
 
     try:
         # [FIX #3] Use get_running_loop(), not get_event_loop() — required in Python 3.10+
