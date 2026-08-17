@@ -2,15 +2,14 @@
 :: Navigate to the directory of this script
 cd /d "%~dp0"
 
-:: Activate the virtual environment
-if exist venv\Scripts\activate.bat (
-    call venv\Scripts\activate.bat
-) else if exist ven\Scripts\activate.bat (
-    call ven\Scripts\activate.bat
+:: Run Jarvis using virtual environment python if it exists
+if exist "venv\Scripts\python.exe" (
+    "venv\Scripts\python.exe" jarvis.py
+) else if exist "ven\Scripts\python.exe" (
+    "ven\Scripts\python.exe" jarvis.py
 ) else (
     echo Virtual environment not found. Starting with system python...
+    python jarvis.py
 )
-
-:: Run Jarvis
-python jarvis.py
 pause
+
