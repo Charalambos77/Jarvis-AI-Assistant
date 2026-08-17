@@ -13,7 +13,7 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
-async def run_synthesis_agent(authoritative_output: dict | list) -> dict:
+async def run_synthesis_agent(authoritative_output: dict | list, event_logger=None) -> dict:
     """
     Takes the Lead Specialist's authoritative cycle output.
     1. Runs LLM conflict detection for internal contradictions.
@@ -33,6 +33,34 @@ async def run_synthesis_agent(authoritative_output: dict | list) -> dict:
         response_mime_type="application/json",
     )
     
+    if event_logger:
+        event_logger({
+            "event_type": "thinking",
+            "source": "SynthesisAgent",
+            "data": {
+                "thinking_type": "system_prompt",
+                "role": "Synthesis Conflict Detector",
+                "content": "You are a Conflict Detector. Output valid JSON only."
+            }
+        })
+        event_logger({
+            "event_type": "thinking",
+            "source": "SynthesisAgent",
+            "data": {
+                "thinking_type": "user_prompt",
+                "role": "Synthesis Conflict Detector",
+                "content": conflict_prompt
+            }
+        })
+        event_logger({
+            "event_type": "prompt_sent",
+            "source": "SynthesisAgent",
+            "data": {
+                "role": "Synthesis Conflict Detector",
+                "content": conflict_prompt
+            }
+        })
+
     try:
         response = await loop.run_in_executor(
             None,
@@ -42,6 +70,16 @@ async def run_synthesis_agent(authoritative_output: dict | list) -> dict:
                 config=conflict_config
             )
         )
+        if event_logger:
+            event_logger({
+                "event_type": "response_received",
+                "source": "SynthesisAgent",
+                "data": {
+                    "role": "Synthesis Conflict Detector",
+                    "content": response.text
+                }
+            })
+
         conflict_res = json.loads(response.text)
         if conflict_res.get("has_conflicts", False):
             return {
@@ -60,6 +98,34 @@ async def run_synthesis_agent(authoritative_output: dict | list) -> dict:
         response_mime_type="application/json",
     )
     
+    if event_logger:
+        event_logger({
+            "event_type": "thinking",
+            "source": "SynthesisAgent",
+            "data": {
+                "thinking_type": "system_prompt",
+                "role": "Synthesis Compactor",
+                "content": "You are a Synthesis Agent. Output valid JSON only."
+            }
+        })
+        event_logger({
+            "event_type": "thinking",
+            "source": "SynthesisAgent",
+            "data": {
+                "thinking_type": "user_prompt",
+                "role": "Synthesis Compactor",
+                "content": compress_prompt
+            }
+        })
+        event_logger({
+            "event_type": "prompt_sent",
+            "source": "SynthesisAgent",
+            "data": {
+                "role": "Synthesis Compactor",
+                "content": compress_prompt
+            }
+        })
+
     try:
         response = await loop.run_in_executor(
             None,
@@ -69,6 +135,16 @@ async def run_synthesis_agent(authoritative_output: dict | list) -> dict:
                 config=compress_config
             )
         )
+        if event_logger:
+            event_logger({
+                "event_type": "response_received",
+                "source": "SynthesisAgent",
+                "data": {
+                    "role": "Synthesis Compactor",
+                    "content": response.text
+                }
+            })
+
         blueprint = json.loads(response.text)
         return {
             "status": "ok",
@@ -92,7 +168,7 @@ async def run_synthesis_agent(authoritative_output: dict | list) -> dict:
         }
 
 
-async def run_master_synthesis(approved_blueprints: list[dict]) -> dict:
+async def run_master_synthesis(approved_blueprints: list[dict], event_logger=None) -> dict:
     """
     Takes N approved cycle blueprints and produces one unified Master Research Blueprint.
     This is the document that feeds into the Execution Plan.
@@ -128,6 +204,34 @@ Return a single flat JSON blueprint containing "tool_recommendations" and the un
         response_mime_type="application/json",
     )
     
+    if event_logger:
+        event_logger({
+            "event_type": "thinking",
+            "source": "MasterSynthesisAgent",
+            "data": {
+                "thinking_type": "system_prompt",
+                "role": "Master Synthesis",
+                "content": "You are a Master Synthesis Orchestrator. Output valid JSON only."
+            }
+        })
+        event_logger({
+            "event_type": "thinking",
+            "source": "MasterSynthesisAgent",
+            "data": {
+                "thinking_type": "user_prompt",
+                "role": "Master Synthesis",
+                "content": prompt
+            }
+        })
+        event_logger({
+            "event_type": "prompt_sent",
+            "source": "MasterSynthesisAgent",
+            "data": {
+                "role": "Master Synthesis",
+                "content": prompt
+            }
+        })
+
     try:
         response = await loop.run_in_executor(
             None,
@@ -137,6 +241,16 @@ Return a single flat JSON blueprint containing "tool_recommendations" and the un
                 config=config
             )
         )
+        if event_logger:
+            event_logger({
+                "event_type": "response_received",
+                "source": "MasterSynthesisAgent",
+                "data": {
+                    "role": "Master Synthesis",
+                    "content": response.text
+                }
+            })
+
         return json.loads(response.text)
     except Exception as e:
         print(f"[Master Synthesis] Error compiling blueprint: {e}")

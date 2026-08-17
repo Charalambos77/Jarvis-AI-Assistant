@@ -79,7 +79,7 @@ async def run_research_phase_for_cycle(
         if physical_memories:
             combined_mem = "\n\nPHYSICAL PROJECT MEMORY FILES:\n" + "\n".join(physical_memories) + "\n\n" + combined_mem
         
-        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context, on_chunk_callback=on_chunk))
+        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context, on_chunk_callback=on_chunk, event_logger=event_logger))
 
     print(f"[Multi-Agent] Spawning {len(tasks)} research agents in parallel...")
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -108,6 +108,7 @@ async def run_lead_review(
     lead_result: dict,
     advisory_results: list[dict],
     approved_blueprints: list[dict],
+    event_logger=None,                  # NEW
 ) -> list[dict]:
     """
     Pass 2 — Lead Specialist LLM call reviewing advisory findings and merging them.
@@ -163,7 +164,48 @@ The output format must be JSON matching your original format:
         response_mime_type="application/json",
     )
 
+    if event_logger:
+        event_logger({
+            "event_type": "thinking",
+            "source": lead_id,
+            "data": {
+                "thinking_type": "system_prompt",
+                "role": lead_role,
+                "content": f"You are the {lead_role}. Output valid JSON only."
+            }
+        })
+        event_logger({
+            "event_type": "thinking",
+            "source": lead_id,
+            "data": {
+                "thinking_type": "user_prompt",
+                "role": lead_role,
+                "content": prompt
+            }
+        })
+        event_logger({
+            "event_type": "narrative",
+            "source": lead_id,
+            "data": {
+                "phase": "research",
+                "message": f"Lead Specialist {lead_role} ({lead_id}) is reviewing advisor findings...",
+                "icon": "⚖️"
+            }
+        })
+
     loop = asyncio.get_running_loop()
+
+    # Emit prompt_sent
+    if event_logger:
+        event_logger({
+            "event_type": "prompt_sent",
+            "source": lead_id,
+            "data": {
+                "role": lead_role,
+                "content": prompt
+            }
+        })
+
     try:
         response = await loop.run_in_executor(
             None,
@@ -173,6 +215,17 @@ The output format must be JSON matching your original format:
                 config=config
             )
         )
+        # Emit response_received
+        if event_logger:
+            event_logger({
+                "event_type": "response_received",
+                "source": lead_id,
+                "data": {
+                    "role": lead_role,
+                    "content": response.text
+                }
+            })
+
         final_lead_result = json.loads(response.text)
         final_lead_result["agent_id"] = lead_id
         return [final_lead_result]
@@ -255,7 +308,7 @@ async def run_execution_phase(
             event_logger({"event_type": "running", "agent_id": agent_id})
 
     tasks = [
-        run_execution_agent(cfg, blueprint, gate_redirect_note)
+        run_execution_agent(cfg, blueprint, gate_redirect_note, event_logger=event_logger)
         for cfg in execution_agents
     ]
 
@@ -542,7 +595,7 @@ async def run_full_pipeline(
         if not agent_plan:
             # Phase 1: Brain builds cycle plan
             print("[Pipeline] Phase 1: Central Brain generating multi-cycle agent plan...")
-            agent_plan = build_agent_plan(task)
+            agent_plan = build_agent_plan(task, event_logger=event_logger)
             if "error" in agent_plan:
                 return agent_plan
             save_agent_plan_file(plan_id, agent_plan, project_name)
@@ -579,6 +632,11 @@ async def run_full_pipeline(
                 continue
 
             print(f"[Pipeline] Starting Cycle {cycle_id}: {domain}")
+            
+            # Emit narrative cycle start event
+            if event_logger:
+                event_logger({"event_type": "narrative", "data": {"phase": "research", "message": f"Starting Cycle {cycle_id}: {domain}...", "icon": "🔄"}})
+
             retry_count = 0
 
             while retry_count < MAX_RETRIES:
@@ -623,7 +681,7 @@ async def run_full_pipeline(
                                    if r["agent_id"] == lead_config["agent_id"])
 
                 authoritative_output = await run_lead_review(
-                    lead_config, lead_result, advisory_results, approved_blueprints
+                    lead_config, lead_result, advisory_results, approved_blueprints, event_logger=event_logger
                 )
                 
                 # Extract and merge tools from authoritative_output into apis_mcps.json
@@ -652,7 +710,11 @@ async def run_full_pipeline(
                     save_apis_mcps_file(plan_id, existing_data, project_name)
 
                 # 2b: Synthesis (per-cycle)
-                synthesis_result = await run_synthesis_agent(authoritative_output)
+                # Emit narrative synthesis event
+                if event_logger:
+                    event_logger({"event_type": "narrative", "data": {"phase": "synthesis", "message": f"Synthesizing Cycle {cycle_id} research into blueprint...", "icon": "🔬"}})
+
+                synthesis_result = await run_synthesis_agent(authoritative_output, event_logger=event_logger)
 
                 if synthesis_result.get("has_conflicts"):
                     # Route conflicts to Brain for adjudication
@@ -663,7 +725,7 @@ async def run_full_pipeline(
                         event_logger({"event_type": "conflict", "source": "synthesis", "data": synthesis_result})
                     agent_plan_update = build_agent_plan(
                         task, redirect_note=f"Conflicts in cycle {cycle_id}: {conflict_note}",
-                        cycle_id=cycle_id, approved_blueprints=approved_blueprints
+                        cycle_id=cycle_id, approved_blueprints=approved_blueprints, event_logger=event_logger
                     )
                     updated_cycles = agent_plan_update.get("cycles", [])
                     if updated_cycles:
@@ -678,7 +740,8 @@ async def run_full_pipeline(
                 print(f"[Pipeline] Waiting for human approval of Cycle {cycle_id} research...")
                 if event_logger:
                     event_logger({"event_type": "gate_waiting", "source": f"cycle_{cycle_id}_research", "data": cycle})
-                
+                    event_logger({"event_type": "narrative", "data": {"phase": "gate", "message": f"Waiting for your approval of Cycle {cycle_id} research...", "icon": "🚧"}})
+
                 gate_result = await gate_approve_fn(
                     gate_id=f"cycle_{cycle_id}_research",
                     data={
@@ -714,7 +777,7 @@ async def run_full_pipeline(
                         agent_plan_update = build_agent_plan(
                             task, redirect_note=redirect_note,
                             cycle_id=cycle_id, approved_blueprints=approved_blueprints,
-                            rejected_steps=rejected_steps
+                            rejected_steps=rejected_steps, event_logger=event_logger
                         )
                         if "error" in agent_plan_update:
                             raise ValueError(agent_plan_update["error"])
@@ -778,7 +841,7 @@ async def run_full_pipeline(
 
         if not master_blueprint or not master_blueprint.get("tool_recommendations"):
             print("[Pipeline] Phase 3: Compiling Master Blueprint from all cycles...")
-            master_blueprint = await run_master_synthesis(approved_blueprints)
+            master_blueprint = await run_master_synthesis(approved_blueprints, event_logger=event_logger)
             tools_data = load_apis_mcps_file(plan_id, project_name)
             combined = tools_data.get("brain", []) + tools_data.get("agents", [])
             master_blueprint["tool_recommendations"] = combined
@@ -909,11 +972,17 @@ async def run_full_pipeline(
         if not skip_execution:
             # Phase 6: Execution + Quality Check
             print("[Pipeline] Phase 6: Parallel execution agents...")
+            if event_logger:
+                event_logger({"event_type": "narrative", "data": {"phase": "execution", "message": "Execution agents producing deliverables...", "icon": "⚡"}})
+
             exec_output = await run_execution_phase(agent_plan, master_blueprint, event_logger=event_logger)
             exec_results = exec_output.get("agent_results", [])
             for r in exec_results:
                 if r.get("status") == "ok":
                     save_execution_output_file(plan_id, r.get("agent_id"), r, project_name)
+
+            if event_logger:
+                event_logger({"event_type": "narrative", "data": {"phase": "qa", "message": "Quality checker validating agent outputs...", "icon": "✅"}})
 
             qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint)
 

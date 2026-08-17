@@ -263,6 +263,148 @@
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
         }
 
+        /* Narrative/Timeline Styling */
+        .timeline-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            position: relative;
+            padding-left: 10px;
+        }
+
+        .timeline-container::before {
+            content: '';
+            position: absolute;
+            top: 4px;
+            bottom: 4px;
+            left: 17px;
+            width: 2px;
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        .timeline-entry {
+            display: flex;
+            gap: 16px;
+            position: relative;
+            align-items: flex-start;
+        }
+
+        .timeline-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--bg-color);
+            border: 2px solid var(--accent-blue);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            z-index: 2;
+            position: relative;
+        }
+
+        .timeline-entry.research .timeline-icon { border-color: var(--accent-blue); }
+        .timeline-entry.synthesis .timeline-icon { border-color: var(--accent-purple); }
+        .timeline-entry.gate .timeline-icon { border-color: #F59E0B; }
+        .timeline-entry.execution .timeline-icon { border-color: var(--accent-green); }
+        .timeline-entry.qa .timeline-icon { border-color: var(--accent-cyan); }
+        .timeline-entry.planning .timeline-icon { border-color: #EC4899; }
+
+        .timeline-content {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 10px 14px;
+            flex-grow: 1;
+            font-size: 12px;
+        }
+
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        /* Bubble details for Real Chat */
+        .chat-bubble.sent {
+            border-left: 3px solid var(--accent-cyan);
+            background: rgba(34, 211, 238, 0.02);
+        }
+
+        .chat-bubble.received {
+            border-left: 3px solid var(--accent-purple);
+            background: rgba(167, 139, 250, 0.02);
+        }
+
+        .badge-role {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 8px;
+        }
+        .chat-bubble.sent .badge-role {
+            background: rgba(34, 211, 238, 0.15);
+            color: var(--accent-cyan);
+        }
+        .chat-bubble.received .badge-role {
+            background: rgba(167, 139, 250, 0.15);
+            color: var(--accent-purple);
+        }
+
+        /* Monospace Thinking styling */
+        .thinking-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 12px;
+            font-family: 'Fira Code', monospace;
+            font-size: 11px;
+        }
+
+        .thinking-label {
+            color: var(--accent-cyan);
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .thinking-pulse-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            animation: pulse 1.0s infinite;
+        }
+
+        .collapsible-header {
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .collapsible-content {
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 4px;
+            margin-bottom: 10px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+            max-height: 250px;
+        }
+
         /* Agent Card Styles */
         .thoughts-container {
             display: flex;
@@ -379,15 +521,8 @@
         }
 
         @keyframes blink {
-
-            0%,
-            100% {
-                opacity: 1;
-            }
-
-            50% {
-                opacity: 0;
-            }
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
         }
 
         .cursor-blink {
@@ -543,11 +678,9 @@
             </div>
             <div class="top-right-nav">
                 <button class="nav-btn" onclick="window.location.href='execution.html'">Execution</button>
-                <button class="nav-btn active" onclick="window.location.href='agent_talk.task_log.html'">Task
-                    Logs/Chat</button>
+                <button class="nav-btn active" onclick="window.location.href='agent_talk.task_log.html'">Task Logs/Chat</button>
                 <button class="nav-btn" onclick="window.location.href='plan.html?from=execution'">Plan</button>
-                <button class="nav-btn"
-                    onclick="window.location.href='provider_comparison.html?from=execution'">APIs/MCPs</button>
+                <button class="nav-btn" onclick="window.location.href='provider_comparison.html?from=execution'">APIs/MCPs</button>
             </div>
         </div>
 
@@ -588,6 +721,7 @@
                 <div class="tab-buttons">
                     <button class="tab-btn active" id="chat-tab-btn" onclick="switchRightTab('chat')">Chat</button>
                     <button class="tab-btn" id="thoughts-tab-btn" onclick="switchRightTab('thoughts')">Thoughts</button>
+                    <button class="tab-btn" id="narrative-tab-btn" onclick="switchRightTab('narrative')">Narrative</button>
                 </div>
             </div>
             <div class="panel-body" id="agent-chat-body">
@@ -599,12 +733,14 @@
                                 <span class="receiver-tag">&rarr; All Agents</span>
                             </div>
                         </div>
-                        <div class="chat-message">Inter-agent communication stream online. Monitoring dialogue
-                            channels...</div>
+                        <div class="chat-message">Inter-agent communication stream online. Monitoring dialogue channels...</div>
                     </div>
                 </div>
                 <div id="thoughts-stream-view" class="thoughts-container" style="display: none;">
                     <!-- Dynamically rendered thoughts list -->
+                </div>
+                <div id="narrative-stream-view" class="timeline-container" style="display: none;">
+                    <!-- Dynamically rendered timeline -->
                 </div>
             </div>
         </div>
@@ -670,7 +806,28 @@
         // ==========================================
         let activeRightTab = 'chat';
         let lastChatData = [];
+        let lastThinkingData = [];
+        let lastNarrativeData = [];
         const expandedMessages = new Set();
+        const collapsedSections = new Set();
+
+        // Track if user has manually scrolled up in agent-chat-body
+        let userHasScrolledUp = false;
+        const panelBody = document.getElementById('agent-chat-body');
+
+        if (panelBody) {
+            panelBody.addEventListener('scroll', () => {
+                const threshold = 15; // px from bottom to count as "at bottom"
+                const position = panelBody.scrollTop + panelBody.clientHeight;
+                const totalHeight = panelBody.scrollHeight;
+                // If the user scrolls up past threshold, don't force auto-scroll down
+                if (totalHeight - position > threshold) {
+                    userHasScrolledUp = true;
+                } else {
+                    userHasScrolledUp = false;
+                }
+            });
+        }
 
         function toggleFullscreen(panelId) {
             const panel = document.getElementById(panelId);
@@ -690,25 +847,39 @@
             activeRightTab = tabId;
             const chatBtn = document.getElementById('chat-tab-btn');
             const thoughtsBtn = document.getElementById('thoughts-tab-btn');
+            const narrativeBtn = document.getElementById('narrative-tab-btn');
+
             const chatView = document.getElementById('chat-stream-view');
             const thoughtsView = document.getElementById('thoughts-stream-view');
+            const narrativeView = document.getElementById('narrative-stream-view');
+
+            chatBtn.classList.remove('active');
+            thoughtsBtn.classList.remove('active');
+            narrativeBtn.classList.remove('active');
+
+            chatView.style.display = 'none';
+            thoughtsView.style.display = 'none';
+            narrativeView.style.display = 'none';
+
+            // Reset scroll lock when switching tabs so it snaps down initially
+            userHasScrolledUp = false;
 
             if (tabId === 'chat') {
                 chatBtn.classList.add('active');
-                thoughtsBtn.classList.remove('active');
                 chatView.style.display = 'block';
-                thoughtsView.style.display = 'none';
-
-                // Scroll to bottom of chat logs
-                const panelBody = document.getElementById('agent-chat-body');
-                panelBody.scrollTop = panelBody.scrollHeight;
-            } else {
-                chatBtn.classList.remove('active');
+            } else if (tabId === 'thoughts') {
                 thoughtsBtn.classList.add('active');
-                chatView.style.display = 'none';
                 thoughtsView.style.display = 'block';
-                fetchAgents();
+            } else if (tabId === 'narrative') {
+                narrativeBtn.classList.add('active');
+                narrativeView.style.display = 'block';
             }
+
+            // Scroll tab contents to bottom
+            if (panelBody) {
+                panelBody.scrollTop = panelBody.scrollHeight;
+            }
+            fetchLogs();
         }
 
         function toggleMessageExpansion(msgId) {
@@ -720,233 +891,169 @@
             renderChatLogs(lastChatData);
         }
 
+        function toggleSection(sectionId) {
+            if (collapsedSections.has(sectionId)) {
+                collapsedSections.delete(sectionId);
+            } else {
+                collapsedSections.add(sectionId);
+            }
+            renderThinkingLogs(lastThinkingData);
+        }
+
         function renderChatLogs(chatData) {
             const chatStreamView = document.getElementById('chat-stream-view');
             if (!chatStreamView) return;
+
+            if (chatData.length === 0) {
+                chatStreamView.innerHTML = `
+                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 16px 0;">
+                        No agent conversations recorded yet. Waiting for pipeline execution...
+                    </div>
+                `;
+                return;
+            }
 
             chatStreamView.innerHTML = chatData.map((msg, index) => {
                 const time = new Date(msg.timestamp * 1000).toLocaleTimeString();
                 const msgId = msg.timestamp + '_' + index;
 
-                const truncateLimit = 250;
-                const isLong = msg.message.length > truncateLimit;
+                const directionClass = msg.direction === 'prompt_sent' ? 'sent' : 'received';
+                const prefix = msg.direction === 'prompt_sent' ? '&rarr; Prompt Sent' : '&larr; Response Received';
+
+                const truncateLimit = 350;
+                const isLong = msg.content && msg.content.length > truncateLimit;
                 const isExpanded = expandedMessages.has(msgId);
 
-                let messageHtml = '';
+                let contentHtml = '';
                 if (isLong) {
                     if (isExpanded) {
-                        messageHtml = `
-                            <div class="chat-message">${msg.message}</div>
-                            <button class="view-more-btn" onclick="toggleMessageExpansion('${msgId}')">View Less</button>
+                        contentHtml = `
+                            <pre class="chat-message" style="white-space: pre-wrap; font-family: 'Fira Code', monospace;">${msg.content}</pre>
+                            <button class="view-more-btn" onclick="toggleMessageExpansion('${msgId}')">Collapse Content</button>
                         `;
                     } else {
-                        const snippet = msg.message.substring(0, truncateLimit) + '...';
-                        messageHtml = `
-                            <div class="chat-message">${snippet}</div>
-                            <button class="view-more-btn" onclick="toggleMessageExpansion('${msgId}')">View More</button>
+                        const snippet = msg.content.substring(0, truncateLimit) + '\n...';
+                        contentHtml = `
+                            <pre class="chat-message" style="white-space: pre-wrap; font-family: 'Fira Code', monospace;">${snippet}</pre>
+                            <button class="view-more-btn" onclick="toggleMessageExpansion('${msgId}')">Expand Content</button>
                         `;
                     }
                 } else {
-                    messageHtml = `<div class="chat-message">${msg.message}</div>`;
+                    contentHtml = `<pre class="chat-message" style="white-space: pre-wrap; font-family: 'Fira Code', monospace;">${msg.content || '(Empty)'}</pre>`;
                 }
 
-                return `<div class="chat-bubble">
+                return `<div class="chat-bubble ${directionClass}">
                     <div class="chat-header">
                         <div>
-                            <span class="sender-tag">${msg.sender}</span>
-                            <span class="receiver-tag">&rarr; ${msg.receiver}</span>
+                            <span class="sender-tag" style="font-weight: bold; color: var(--accent-cyan);">${msg.agent_id}</span>
+                            <span class="badge-role">${msg.role}</span>
+                            <span class="receiver-tag" style="margin-left: 8px; color: var(--text-muted); font-size:10px;">${prefix}</span>
                         </div>
                         <span style="color:var(--text-muted); font-size:10px;">${time}</span>
                     </div>
-                    ${messageHtml}
+                    <div style="margin-top: 6px; background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 6px;">
+                        ${contentHtml}
+                    </div>
                 </div>`;
             }).join('');
 
-            if (activeRightTab === 'chat') {
-                const panelBody = document.getElementById('agent-chat-body');
+            if (activeRightTab === 'chat' && !userHasScrolledUp && panelBody) {
                 panelBody.scrollTop = panelBody.scrollHeight;
             }
         }
 
-        let lastAgentsData = {};
-        let selectedThoughtAgentId = null;
-
-        function selectAgentForThoughtChat(agentId) {
-            selectedThoughtAgentId = agentId;
-            renderThoughts(lastAgentsData);
-        }
-
-        function clearSelectedThoughtAgent() {
-            selectedThoughtAgentId = null;
-            renderThoughts(lastAgentsData);
-        }
-
-        async function fetchAgents() {
-            try {
-                const res = await fetch(apiBase + '/agents');
-                if (res.ok) {
-                    const data = await res.json();
-                    lastAgentsData = data.agents || {};
-                    renderThoughts(lastAgentsData);
-                }
-            } catch (e) {
-                console.error("Error fetching agents:", e);
-            }
-        }
-
-        function renderThoughts(agents) {
+        function renderThinkingLogs(thinkingData) {
             const thoughtsStreamView = document.getElementById('thoughts-stream-view');
             if (!thoughtsStreamView) return;
 
-            let html = '';
-
-            // MODE 2: Full-Section Dedicated Thought Chat View for selected agent
-            if (selectedThoughtAgentId !== null) {
-                const agent = selectedThoughtAgentId === 'Brain' ? {
-                    status: 'active',
-                    config: { role: 'Brain Core Coordinator' },
-                    output: { thought_process: 'Central intelligence engine coordinating multi-agent loops, evaluating syntheses, and routing tasks.' }
-                } : (agents[selectedThoughtAgentId] || { status: 'active', config: { role: 'Specialized Agent' } });
-
-                const roleStr = (agent.config && agent.config.role) ? agent.config.role : ((agent.output && agent.output.role) ? agent.output.role : 'Specialized Agent');
-
-                // Top bar with Back Button on the right
-                html += `
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.08);">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span style="font-size:14px; font-weight:700; color:var(--accent-cyan);">${selectedThoughtAgentId === 'Brain' ? 'Brain Core Coordinator' : selectedThoughtAgentId}</span>
-                            <span style="font-size:9px; background:rgba(34,211,238,0.15); color:var(--accent-cyan); padding:2px 6px; border-radius:4px; font-weight:600;">${roleStr}</span>
-                        </div>
-                        <button class="back-nav-btn" onclick="clearSelectedThoughtAgent()">
-                            &larr; Back to Agents
-                        </button>
+            if (thinkingData.length === 0) {
+                thoughtsStreamView.innerHTML = `
+                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 16px 0;">
+                        No reasoning logs recorded yet. Monitoring thinking channels...
                     </div>
                 `;
-
-                // Stream of Thought Chat Bubbles for this selected agent
-                let thoughtText = agent.streamed_thoughts || (agent.output && agent.output.thought_process ? agent.output.thought_process : null);
-
-                if (!thoughtText && agent.output && agent.output.findings) {
-                    if (typeof agent.output.findings === 'object') {
-                        thoughtText = Object.entries(agent.output.findings).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
-                    } else {
-                        thoughtText = String(agent.output.findings);
-                    }
-                }
-
-                if (!thoughtText && agent.config && agent.config.brief) {
-                    thoughtText = `[Research Brief]: ${agent.config.brief}`;
-                }
-
-                if (!thoughtText) {
-                    thoughtText = `Agent initialized and monitoring pipeline step (${agent.status || 'active'}).`;
-                }
-
-                const steps = thoughtText.split('\n\n').filter(s => s.trim().length > 0);
-
-                if (steps.length > 0) {
-                    steps.forEach((step, idx) => {
-                        const timeStr = agent.last_update ? new Date(agent.last_update * 1000).toLocaleTimeString() : 'Live';
-                        html += `
-                            <div class="chat-bubble" style="margin-bottom:10px;">
-                                <div class="chat-header">
-                                    <div>
-                                        <span class="sender-tag">${selectedThoughtAgentId}</span>
-                                        <span class="receiver-tag">&rarr; Thought Step #${idx + 1}</span>
-                                    </div>
-                                    <span style="color:var(--text-muted); font-size:10px;">${timeStr}</span>
-                                </div>
-                                <div class="chat-message" style="white-space: pre-wrap; font-family: 'Fira Code', monospace; color: var(--accent-cyan); margin-top: 4px;">${step}${agent.status === 'thinking' && idx === steps.length - 1 ? '<span class="cursor-blink">█</span>' : ''}</div>
-                            </div>
-                        `;
-                    });
-                } else {
-                    html += `
-                        <div class="chat-bubble">
-                            <div class="chat-header">
-                                <div>
-                                    <span class="sender-tag">${selectedThoughtAgentId}</span>
-                                    <span class="receiver-tag">&rarr; Thought Stream</span>
-                                </div>
-                                <span style="color:var(--text-muted); font-size:10px;">Live</span>
-                            </div>
-                            <div class="chat-message" style="white-space: pre-wrap; font-family: 'Fira Code', monospace; color: var(--accent-cyan);">Initializing logical thought stream...</div>
-                        </div>
-                    `;
-                }
-
-                thoughtsStreamView.innerHTML = html;
                 return;
             }
 
-            // MODE 1: Grid / List Overview of Agent Cards
-            const agentIds = Object.keys(agents);
-
-            // 1. Brain Card (Always present)
-            html += `
-                <div class="agent-card" onclick="selectAgentForThoughtChat('Brain')" style="border-left: 3px solid var(--accent-cyan);">
-                    <div class="agent-card-header">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span class="agent-card-title">Brain Core Coordinator</span>
-                            <span style="font-size:9px; background:rgba(34,211,238,0.15); color:var(--accent-cyan); padding:2px 6px; border-radius:4px; font-weight:600;">ORCHESTRATOR</span>
-                        </div>
-                        <span class="agent-card-status">Active</span>
-                    </div>
-                    <div class="agent-card-body">
-                        <div style="font-size:11px; color:#9CA3AF; line-height:1.4;">The central intelligence engine coordinating multi-agent loops and routing tasks.</div>
-                        <div class="agent-card-preview">
-                            Spawns specialized researchers, orchestrates execution threads, and evaluates syntheses.
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            // 2. Active Agents Cards
-            if (agentIds.length > 0) {
-                agentIds.forEach(id => {
-                    const agent = agents[id];
-                    const statusClass = agent.status === 'offline' ? 'offline' : '';
-                    const statusText = (agent.status || 'active').toUpperCase();
-                    const roleStr = (agent.config && agent.config.role) ? agent.config.role : ((agent.output && agent.output.role) ? agent.output.role : 'Specialized Agent');
-
-                    let snippet = agent.streamed_thoughts || (agent.output && agent.output.thought_process ? agent.output.thought_process : null);
-                    if (!snippet && agent.config && agent.config.brief) {
-                        snippet = agent.config.brief;
+            // Deduplicate static system prompts (only show the first unique system prompt, or only the most recent)
+            const seenSystemPrompts = new Set();
+            const filteredData = [];
+            for (let i = 0; i < thinkingData.length; i++) {
+                const item = thinkingData[i];
+                if (item.thinking_type === 'system_prompt') {
+                    const sample = item.content.substring(0, 100);
+                    if (seenSystemPrompts.has(sample)) {
+                        continue; // Skip rendering identical static prompts repeatedly
                     }
-                    if (!snippet) {
-                        snippet = `Monitoring pipeline execution step...`;
-                    }
-                    snippet = snippet.replace(/\n/g, ' ').trim();
-                    if (snippet.length > 90) {
-                        snippet = snippet.substring(0, 87) + '...';
-                    }
-
-                    html += `
-                        <div class="agent-card" onclick="selectAgentForThoughtChat('${id}')" style="border-left: 3px solid var(--accent-purple);">
-                            <div class="agent-card-header">
-                                <div style="display:flex; align-items:center; gap:8px;">
-                                    <span class="agent-card-title">${id}</span>
-                                    <span style="font-size:9px; background:rgba(167,139,250,0.15); color:var(--accent-purple); padding:2px 6px; border-radius:4px; font-weight:600;">${roleStr}</span>
-                                </div>
-                                <span class="agent-card-status ${statusClass}">${statusText}</span>
-                            </div>
-                            <div class="agent-card-body">
-                                <div class="agent-card-preview">
-                                    ${snippet}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-            } else {
-                html += `
-                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 16px 0;">
-                        No active pipeline agents. Click the Brain card above to view core coordinator thoughts.
-                    </div>
-                `;
+                    seenSystemPrompts.add(sample);
+                }
+                filteredData.push(item);
             }
 
-            thoughtsStreamView.innerHTML = html;
+            thoughtsStreamView.innerHTML = filteredData.map((item, index) => {
+                const time = new Date(item.timestamp * 1000).toLocaleTimeString();
+                const sectionId = 'think_' + index;
+                const isCollapsed = collapsedSections.has(sectionId);
+                const title = item.thinking_type === 'system_prompt' ? 'System Instructions' : 'Input Brief Construction';
+
+                return `
+                    <div class="thinking-card">
+                        <div class="thinking-label">
+                            <div class="thinking-pulse-dot"></div>
+                            <span>${item.agent_id} (${item.role}) &mdash; ${title}</span>
+                            <span style="margin-left:auto; color: var(--text-muted); font-size:10px;">${time}</span>
+                        </div>
+                        <div class="collapsible-header" onclick="toggleSection('${sectionId}')">
+                            <span>${isCollapsed ? 'Show Section' : 'Hide Section'} (${item.thinking_type})</span>
+                            <span>${isCollapsed ? '▼' : '▲'}</span>
+                        </div>
+                        <div class="collapsible-content" style="display: ${isCollapsed ? 'none' : 'block'};">
+${item.content}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            if (activeRightTab === 'thoughts' && !userHasScrolledUp && panelBody) {
+                panelBody.scrollTop = panelBody.scrollHeight;
+            }
+        }
+
+        function renderNarrativeLogs(narrativeData) {
+            const narrativeStreamView = document.getElementById('narrative-stream-view');
+            if (!narrativeStreamView) return;
+
+            if (narrativeData.length === 0) {
+                narrativeStreamView.innerHTML = `
+                    <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 16px 0;">
+                        Timeline narrative initializing. Progressive milestones will display here.
+                    </div>
+                `;
+                return;
+            }
+
+            narrativeStreamView.innerHTML = narrativeData.map(entry => {
+                const time = new Date(entry.timestamp * 1000).toLocaleTimeString();
+                const phaseClass = entry.phase ? entry.phase.toLowerCase() : 'research';
+                const icon = entry.icon || '➡️';
+
+                return `
+                    <div class="timeline-entry ${phaseClass}">
+                        <div class="timeline-icon">${icon}</div>
+                        <div class="timeline-content">
+                            <div class="timeline-header">
+                                <span style="font-weight: 700; text-transform: uppercase;">${entry.phase}</span>
+                                <span>${time}</span>
+                            </div>
+                            <div style="color: #FFFFFF; font-weight: 500;">${entry.message}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            if (activeRightTab === 'narrative' && !userHasScrolledUp && panelBody) {
+                panelBody.scrollTop = panelBody.scrollHeight;
+            }
         }
 
         // ==========================================
@@ -974,18 +1081,34 @@
                     }
                 }
 
-                // Fetch Agent Chat Logs
-                const chatRes = await fetch(apiBase + '/api/agent_chat');
-                if (chatRes.ok) {
-                    const data = await chatRes.json();
-                    if (data.chat && data.chat.length > 0) {
-                        lastChatData = data.chat;
-                        renderChatLogs(lastChatData);
+                // Poll based on active tab to conserve requests
+                if (activeRightTab === 'chat') {
+                    const chatRes = await fetch(apiBase + '/api/agent_conversations');
+                    if (chatRes.ok) {
+                        const data = await chatRes.json();
+                        if (data.conversations) {
+                            lastChatData = data.conversations;
+                            renderChatLogs(lastChatData);
+                        }
                     }
-                }
-
-                if (activeRightTab === 'thoughts') {
-                    await fetchAgents();
+                } else if (activeRightTab === 'thoughts') {
+                    const thinkRes = await fetch(apiBase + '/api/agent_thinking');
+                    if (thinkRes.ok) {
+                        const data = await thinkRes.json();
+                        if (data.thinking) {
+                            lastThinkingData = data.thinking;
+                            renderThinkingLogs(lastThinkingData);
+                        }
+                    }
+                } else if (activeRightTab === 'narrative') {
+                    const narrRes = await fetch(apiBase + '/api/narrative');
+                    if (narrRes.ok) {
+                        const data = await narrRes.json();
+                        if (data.narrative) {
+                            lastNarrativeData = data.narrative;
+                            renderNarrativeLogs(lastNarrativeData);
+                        }
+                    }
                 }
             } catch (e) {
                 // Ignore network errors during reload/navigation

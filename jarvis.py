@@ -175,12 +175,65 @@ CONSOLE_LOGS_LOCK = threading.Lock()
 AGENT_CHAT_LOGS = []
 AGENT_CHAT_LOGS_LOCK = threading.Lock()
 
+# --- Actual Agent Conversation Logs (prompts sent + responses received) ---
+AGENT_CONVERSATION_LOGS = []
+AGENT_CONVERSATION_LOGS_LOCK = threading.Lock()
+
+# --- Brain/Agent Thinking Logs (system prompts + input construction) ---
+AGENT_THINKING_LOGS = []
+AGENT_THINKING_LOGS_LOCK = threading.Lock()
+
+# --- Narrative Progress Log (human-readable pipeline story) ---
+NARRATIVE_LOGS = []
+NARRATIVE_LOGS_LOCK = threading.Lock()
+
+
 def append_console_log(level: str, text: str, source: str = "System"):
     entry = {"timestamp": time.time(), "level": level, "text": text, "source": source}
     with CONSOLE_LOGS_LOCK:
         CONSOLE_LOGS.append(entry)
         if len(CONSOLE_LOGS) > 500:
             CONSOLE_LOGS.pop(0)
+
+def append_agent_conversation(agent_id: str, direction: str, role: str, content: str):
+    """direction: 'prompt_sent' or 'response_received'"""
+    entry = {
+        "timestamp": time.time(),
+        "agent_id": agent_id,
+        "role": role,
+        "direction": direction,
+        "content": content
+    }
+    with AGENT_CONVERSATION_LOGS_LOCK:
+        AGENT_CONVERSATION_LOGS.append(entry)
+        if len(AGENT_CONVERSATION_LOGS) > 500:
+            AGENT_CONVERSATION_LOGS.pop(0)
+
+def append_agent_thinking(agent_id: str, role: str, thinking_type: str, content: str):
+    """thinking_type: 'system_prompt' | 'user_prompt' | 'config_construction' | 'decision'"""
+    entry = {
+        "timestamp": time.time(),
+        "agent_id": agent_id,
+        "role": role,
+        "thinking_type": thinking_type,
+        "content": content
+    }
+    with AGENT_THINKING_LOGS_LOCK:
+        AGENT_THINKING_LOGS.append(entry)
+        if len(AGENT_THINKING_LOGS) > 500:
+            AGENT_THINKING_LOGS.pop(0)
+
+def append_narrative(phase: str, message: str, icon: str = "➡️"):
+    entry = {
+        "timestamp": time.time(),
+        "phase": phase,
+        "message": message,
+        "icon": icon
+    }
+    with NARRATIVE_LOGS_LOCK:
+        NARRATIVE_LOGS.append(entry)
+        if len(NARRATIVE_LOGS) > 200:
+            NARRATIVE_LOGS.pop(0)
 
 def append_agent_chat(sender: str, receiver: str, message: str):
     entry = {"timestamp": time.time(), "sender": sender, "receiver": receiver, "message": message}
@@ -1253,7 +1306,6 @@ def get_agent_events():
             events = list(AGENT_EVENT_LOG)
         return jsonify({"events": events})
 
-
 @app.route("/agents/interactions", methods=["GET"])
 def get_agent_interactions():
     """Returns the interaction log (all prompts sent and results received)."""
@@ -1264,6 +1316,20 @@ def get_agent_interactions():
         ]
         return jsonify({"interactions": interactions})
 
+@app.route("/api/agent_conversations", methods=["GET"])
+def get_agent_conversations():
+    with AGENT_CONVERSATION_LOGS_LOCK:
+        return jsonify({"conversations": list(AGENT_CONVERSATION_LOGS)})
+
+@app.route("/api/agent_thinking", methods=["GET"])
+def get_agent_thinking():
+    with AGENT_THINKING_LOGS_LOCK:
+        return jsonify({"thinking": list(AGENT_THINKING_LOGS)})
+
+@app.route("/api/narrative", methods=["GET"])
+def get_narrative():
+    with NARRATIVE_LOGS_LOCK:
+        return jsonify({"narrative": list(NARRATIVE_LOGS)})
 
 def pipeline_event_logger(event: dict):
     """Called by multi_agent_coordinator at each agent lifecycle point."""
@@ -1275,6 +1341,19 @@ def pipeline_event_logger(event: dict):
     target = event.get("target") or event.get("receiver") or "All Agents"
     event_type = event.get("event_type", "info")
     data_val = event.get("data") or event.get("message") or ""
+
+    # Route new event types into their correct store
+    if event_type == "prompt_sent":
+        append_agent_conversation(raw_source, "prompt_sent", data_val.get("role", "Agent"), data_val.get("content", ""))
+    elif event_type == "response_received":
+        append_agent_conversation(raw_source, "response_received", data_val.get("role", "Agent"), data_val.get("content", ""))
+    elif event_type == "thinking":
+        # Skip user_prompt thinking — that content is already in CHAT tab as prompt_sent
+        t_type = data_val.get("thinking_type", "thought") if isinstance(data_val, dict) else "thought"
+        if t_type != "user_prompt":
+            append_agent_thinking(raw_source, data_val.get("role", "Agent"), t_type, data_val.get("content", ""))
+    elif event_type == "narrative":
+        append_narrative(data_val.get("phase", "running"), data_val.get("message", ""), data_val.get("icon", "➡️"))
 
     # Store spawned agent configs first so role is available immediately
     agent_id = event.get("agent_id") or event.get("source")
@@ -1331,7 +1410,6 @@ def pipeline_event_logger(event: dict):
     with AGENT_OBS_LOCK:
         AGENT_EVENT_LOG.append(event)
         # Also update registry if this is an agent event
-        agent_id = event.get("source") or event.get("agent_id")
         if agent_id and agent_id not in ("Brain", "System"):
             if agent_id not in AGENT_REGISTRY:
                 AGENT_REGISTRY[agent_id] = {}

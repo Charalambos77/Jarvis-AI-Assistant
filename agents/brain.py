@@ -102,6 +102,7 @@ def build_agent_plan(
     cycle_id: int | None = None,          # NEW: if set, re-plan only this cycle
     approved_blueprints: list[dict] | None = None,  # NEW: context from prior cycles
     rejected_steps: list[str] | None = None,  # NEW: steps explicitly rejected by the user
+    event_logger=None,                     # NEW
 ) -> dict:
     """
     Ask the Brain to produce an agent spawn plan for the given task.
@@ -138,16 +139,68 @@ def build_agent_plan(
                 f"Do not restart from scratch — only modify what the note targets."
             )
 
+    # NEW: Emit thinking event (what Brain is considering) and Narrative
+    if event_logger:
+        event_logger({
+            "event_type": "thinking",
+            "source": "Brain",
+            "data": {
+                "thinking_type": "system_prompt",
+                "role": "Brain Orchestrator",
+                "content": BRAIN_SYSTEM_PROMPT
+            }
+        })
+        event_logger({
+            "event_type": "thinking",
+            "source": "Brain",
+            "data": {
+                "thinking_type": "user_prompt",
+                "role": "Brain Orchestrator",
+                "content": user_input
+            }
+        })
+        event_logger({
+            "event_type": "narrative",
+            "source": "Brain",
+            "data": {
+                "phase": "planning",
+                "message": "Brain is analyzing the task and deciding which specialists to hire...",
+                "icon": "🧠"
+            }
+        })
+
     config = types.GenerateContentConfig(
         system_instruction=BRAIN_SYSTEM_PROMPT,
         response_mime_type="application/json",
     )
+
+    # NEW: Emit prompt_sent
+    if event_logger:
+        event_logger({
+            "event_type": "prompt_sent",
+            "source": "Brain",
+            "data": {
+                "role": "Brain Orchestrator",
+                "content": user_input
+            }
+        })
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=user_input,
         config=config
     )
+
+    # NEW: Emit response_received
+    if event_logger:
+        event_logger({
+            "event_type": "response_received",
+            "source": "Brain",
+            "data": {
+                "role": "Brain Orchestrator",
+                "content": response.text
+            }
+        })
 
     try:
         return json.loads(response.text)

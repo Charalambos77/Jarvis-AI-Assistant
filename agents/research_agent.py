@@ -16,7 +16,8 @@ async def run_research_agent(
     agent_config: dict,
     memory_context: str | None = None,
     prior_context: str | None = None,   # approved blueprints from prior cycles
-    on_chunk_callback=None
+    on_chunk_callback=None,
+    event_logger=None                   # NEW
 ) -> dict:
     """
     Runs a single research agent asynchronously.
@@ -95,6 +96,26 @@ Output format:
 }}
 """
 
+    if event_logger:
+        event_logger({
+            "event_type": "thinking",
+            "source": agent_id,
+            "data": {
+                "thinking_type": "system_prompt",
+                "role": role,
+                "content": system_prompt
+            }
+        })
+        event_logger({
+            "event_type": "narrative",
+            "source": agent_id,
+            "data": {
+                "phase": "research",
+                "message": f"{role} ({agent_id}) is now investigating: {brief[:100]}...",
+                "icon": "🔍"
+            }
+        })
+
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     # Build tools list dynamically from agent config
@@ -119,6 +140,17 @@ Output format:
         # [FIX #3] Use get_running_loop(), not get_event_loop() — required in Python 3.10+
         loop = asyncio.get_running_loop()
 
+        # Emit prompt_sent
+        if event_logger:
+            event_logger({
+                "event_type": "prompt_sent",
+                "source": agent_id,
+                "data": {
+                    "role": role,
+                    "content": f"Execute your research brief now. Task context: {brief}"
+                }
+            })
+
         def run_stream():
             full_text = ""
             for chunk in client.models.generate_content_stream(
@@ -133,6 +165,18 @@ Output format:
             return full_text
 
         response_text = await loop.run_in_executor(None, run_stream)
+
+        # Emit response_received
+        if event_logger:
+            event_logger({
+                "event_type": "response_received",
+                "source": agent_id,
+                "data": {
+                    "role": role,
+                    "content": response_text
+                }
+            })
+
         result = json.loads(response_text)
         result["agent_id"] = agent_id  # ensure it's always set
         result["status"] = "ok"

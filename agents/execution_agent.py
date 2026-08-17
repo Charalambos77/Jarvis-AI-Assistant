@@ -16,6 +16,7 @@ async def run_execution_agent(
     agent_config: dict,
     blueprint: dict,
     gate_redirect_note: str | None = None,
+    event_logger=None,                  # NEW
 ) -> dict:
     """
     Runs a single execution agent asynchronously.
@@ -52,6 +53,26 @@ RULES:
 Output valid JSON only.
 """
 
+    if event_logger:
+        event_logger({
+            "event_type": "thinking",
+            "source": agent_id,
+            "data": {
+                "thinking_type": "system_prompt",
+                "role": role,
+                "content": system_prompt
+            }
+        })
+        event_logger({
+            "event_type": "narrative",
+            "source": agent_id,
+            "data": {
+                "phase": "execution",
+                "message": f"Execution Agent {role} ({agent_id}) is producing deliverable...",
+                "icon": "⚡"
+            }
+        })
+
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     config = types.GenerateContentConfig(
@@ -62,6 +83,18 @@ Output valid JSON only.
     try:
         # [FIX #3] Use get_running_loop(), not get_event_loop() — required in Python 3.10+
         loop = asyncio.get_running_loop()
+
+        # Emit prompt_sent
+        if event_logger:
+            event_logger({
+                "event_type": "prompt_sent",
+                "source": agent_id,
+                "data": {
+                    "role": role,
+                    "content": "Execute your deliverable now according to your brief and blueprint."
+                }
+            })
+
         response = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
@@ -70,6 +103,18 @@ Output valid JSON only.
                 config=config
             )
         )
+
+        # Emit response_received
+        if event_logger:
+            event_logger({
+                "event_type": "response_received",
+                "source": agent_id,
+                "data": {
+                    "role": role,
+                    "content": response.text
+                }
+            })
+
         result = json.loads(response.text)
         result["agent_id"] = agent_id
         result.setdefault("status", "ok")
