@@ -760,6 +760,9 @@
         // ==========================================
         // 1. THREE.JS BACKGROUND NEBULA
         // ==========================================
+        // Pipeline persistence: read stored pipeline ID across page navigations
+        const STORED_PIPELINE_ID = localStorage.getItem('jarvis_active_pipeline_id');
+
         const container = document.getElementById('globe-container');
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);

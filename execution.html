@@ -440,6 +440,38 @@
 
         #active-side-panel.open { left: 0; }
 
+        .recalled-badge {
+            display: inline-block;
+            background: rgba(167, 139, 250, 0.2);
+            border: 1px solid rgba(167, 139, 250, 0.4);
+            color: #A78BFA;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin: 0 6px;
+        }
+
+        .finding-item, .memory-item {
+            padding: 8px;
+            margin-bottom: 6px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 11px;
+        }
+
+        .panel-section {
+            margin-bottom: 16px;
+        }
+
+        .panel-field {
+            padding: 4px 0;
+            font-size: 12px;
+            color: #D1D5DB;
+        }
+
         /* Bottom Right Chat Box */
         .chat-container {
             position: fixed;
@@ -638,13 +670,40 @@
             <button class="close-btn" onclick="closeActivePanel()">×</button>
             <div class="panel-header">
                 <h2 id="active-panel-title">Agent Node</h2>
-                <span class="panel-tag" id="active-panel-type">AGENT</span>
+                <span class="panel-tag" id="active-panel-status">PENDING</span>
             </div>
-            <p id="active-panel-desc">Agent description goes here.</p>
-            <div class="section-title">WHAT IT REPLACES</div>
-            <div class="replace-box" id="active-panel-replaces">Manual execution...</div>
+
+            <!-- 1. Config -->
+            <div class="section-title">AGENT CONFIG</div>
+            <div id="panel-config" class="panel-section">
+                <div id="panel-role" class="panel-field"></div>
+                <div id="panel-brief" class="panel-field"></div>
+                <div id="panel-tools" class="panel-field"></div>
+            </div>
+
+            <!-- 2. Findings (magnifying glass items) -->
+            <div class="section-title">FINDINGS</div>
+            <div id="panel-findings" class="panel-section"></div>
+
+            <!-- 3. Live Thinking -->
+            <div class="section-title">LIVE THINKING</div>
+            <div id="panel-thinking" class="panel-section"
+                 style="max-height: 200px; overflow-y: auto; font-size: 11px; color: #9CA3AF;">
+            </div>
+
+            <!-- 4. Memory (RECALLED only) -->
+            <div class="section-title">MEMORY</div>
+            <div id="panel-memory" class="panel-section"></div>
+
+            <!-- 5. Conversation Log -->
+            <div class="section-title">CONVERSATION LOG</div>
+            <div id="panel-conversation" class="panel-section"
+                 style="max-height: 200px; overflow-y: auto;"></div>
+
             <div class="action-box">
-                <button class="action-btn" id="active-action-btn" onclick="window.location.href='agent_talk.task_log.html'">Open Live Agent Console</button>
+                <button class="action-btn" onclick="window.location.href='agent_talk.task_log.html'">
+                    Open Live Agent Console
+                </button>
             </div>
         </div>
     </div>
@@ -657,6 +716,9 @@
         let isCurrentPipelineRunning = false;
         let isTransitioningState = false;
         let isInitialLoad = true;
+
+        // Pipeline persistence: read stored pipeline ID across page navigations
+        const STORED_PIPELINE_ID = localStorage.getItem('jarvis_active_pipeline_id');
 
         function triggerFlashTransition(onPeakCallback) {
             if (isTransitioningState) return;
@@ -701,6 +763,11 @@
                 if (res.ok) {
                     const data = await res.json();
                     const shouldBeRunning = !!data.active;
+
+                    // Persist pipeline ID across all page navigations
+                    if (data.active_ids && data.active_ids.length > 0) {
+                        localStorage.setItem('jarvis_active_pipeline_id', data.active_ids[0]);
+                    }
 
                     // On initial page navigation/load: set view instantly without flash effect
                     if (isInitialLoad) {
@@ -1190,16 +1257,20 @@
         // ACTIVE VIEW LOGIC (Department & Agent Constellation)
         // =========================================================
         (function initActiveView() {
-            const departments = [
-                { id: 'ops', label: 'OPERATIONS', color: '#22D3EE', agents: [{ id: 'o1', label: 'Client Onboarding' }, { id: 'o2', label: 'Integrations' }, { id: 'o3', label: 'QA' }, { id: 'o4', label: 'Status Reporting' }, { id: 'o5', label: 'Incident Response' }] },
-                { id: 'intel', label: 'INTELLIGENCE', color: '#60A5FA', agents: [{ id: 'i1', label: 'Company Research' }, { id: 'i2', label: 'Competitive Intel' }, { id: 'i3', label: 'Market Mapping' }, { id: 'i4', label: 'Signal Monitoring' }] },
-                { id: 'customer', label: 'CUSTOMER', color: '#34D399', agents: [{ id: 'c1', label: 'Support Deflection' }, { id: 'c2', label: 'Health Scoring' }, { id: 'c3', label: 'Churn Prediction' }, { id: 'c4', label: 'Community' }] },
-                { id: 'finance', label: 'BACK OFFICE', color: '#F87171', agents: [{ id: 'b1', label: 'Invoicing' }, { id: 'b2', label: 'Financial Reporting' }, { id: 'b3', label: 'Contracts' }, { id: 'b4', label: 'Cash-Flow Forecasting' }] },
-                { id: 'sales', label: 'SALES', color: '#FB7185', agents: [{ id: 's1', label: 'ICP Definition' }, { id: 's2', label: 'Lead Sourcing' }, { id: 's3', label: 'Enrichment' }, { id: 's4', label: 'Cold Email' }, { id: 's5', label: 'Sequencing' }, { id: 's6', label: 'Call Prep' }] },
-                { id: 'deals', label: 'DEALS', color: '#FCD34D', agents: [{ id: 'd1', label: 'Reply Triage' }, { id: 'd2', label: 'Meeting Booking' }, { id: 'd3', label: 'Proposal Writing' }, { id: 'd4', label: 'Deal Debriefs' }, { id: 'd5', label: 'Pipeline Reporting' }] },
-                { id: 'marketing', label: 'MARKETING', color: '#A78BFA', agents: [{ id: 'm1', label: 'Performance Analysis' }, { id: 'm2', label: 'Scriptwriting' }, { id: 'm3', label: 'Carousels' }, { id: 'm4', label: 'Repurposing' }, { id: 'm5', label: 'Distribution' }] }
+            // ---- State ----
+            let liveGraphData = null;        // Latest graph from /api/agent_graph
+            let lastEventTimestamp = 0;       // For incremental event polling
+            let renderedNodeIds = new Set();  // Track what's already in the scene
+            let currentPlanId = localStorage.getItem('jarvis_active_pipeline_id');
+            let departments = [];             // Built dynamically from live data
+
+            // ---- Cycle color palette (assigned dynamically) ----
+            const CYCLE_COLORS = [
+                '#22D3EE', '#60A5FA', '#34D399', '#F87171',
+                '#FB7185', '#FCD34D', '#A78BFA', '#818CF8'
             ];
 
+            // ============ Three.js Nebula Core (UNCHANGED — verbatim from existing) ============
             const container = document.getElementById('active-globe-container');
             const scene = new THREE.Scene();
             const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
@@ -1276,24 +1347,33 @@
             const conduitsGroup = new THREE.Group();
             scene.add(conduitsGroup);
 
-            departments.forEach((dept, index) => {
-                let angle = -Math.PI / 2 + (index * (2 * Math.PI / departments.length));
-                let tx = Math.cos(angle) * 0.69;
-                let ty = -Math.sin(angle) * 0.69;
-
-                const points = [new THREE.Vector3(Math.cos(angle) * 0.15, -Math.sin(angle) * 0.15, 0), new THREE.Vector3(tx, ty, 0)];
-                const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-                const lineMat = new THREE.LineBasicMaterial({ color: dept.color, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending });
-                conduitsGroup.add(new THREE.Line(lineGeo, lineMat));
-
-                for (let pIdx = 0; pIdx < 3; pIdx++) {
-                    const spriteMat = new THREE.SpriteMaterial({ map: texture, color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
-                    const sprite = new THREE.Sprite(spriteMat);
-                    sprite.scale.set(0.12, 0.12, 1);
-                    conduitsGroup.add(sprite);
-                    pulses.push({ sprite: sprite, angle: angle, progress: pIdx / 3, speed: 0.0035, color: new THREE.Color(dept.color) });
+            // ---- Conduits are rebuilt when graph changes ----
+            function rebuildConduits() {
+                // Clear existing conduits
+                while (conduitsGroup.children.length > 0) {
+                    conduitsGroup.remove(conduitsGroup.children[0]);
                 }
-            });
+                pulses.length = 0;
+
+                departments.forEach((dept, index) => {
+                    let angle = -Math.PI / 2 + (index * (2 * Math.PI / departments.length));
+                    let tx = Math.cos(angle) * 0.69;
+                    let ty = -Math.sin(angle) * 0.69;
+
+                    const points = [new THREE.Vector3(Math.cos(angle) * 0.15, -Math.sin(angle) * 0.15, 0), new THREE.Vector3(tx, ty, 0)];
+                    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+                    const lineMat = new THREE.LineBasicMaterial({ color: dept.color, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending });
+                    conduitsGroup.add(new THREE.Line(lineGeo, lineMat));
+
+                    for (let pIdx = 0; pIdx < 3; pIdx++) {
+                        const spriteMat = new THREE.SpriteMaterial({ map: texture, color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+                        const sprite = new THREE.Sprite(spriteMat);
+                        sprite.scale.set(0.12, 0.12, 1);
+                        conduitsGroup.add(sprite);
+                        pulses.push({ sprite: sprite, angle: angle, progress: pIdx / 3, speed: 0.0035, color: new THREE.Color(dept.color) });
+                    }
+                });
+            }
 
             const posAttribute = nebula.geometry.attributes.position;
             const colorAttribute = nebula.geometry.attributes.color;
@@ -1327,259 +1407,457 @@
             }
             animateActiveGlobe();
 
-            // Cytoscape Active Departments Setup
+
+            // ============ Dynamic Constellation Builder ============
+            let cyActive = null;
             let elements = [];
             let nodesPositions = {};
-            let labelsHTML = '';
             const CENTER_X = window.innerWidth / 2;
             const CENTER_Y = (window.innerHeight / 2) + 40;
             const GLOBE_RADIUS = 90; const DEPT_RADIUS = 200; const LABEL_RADIUS = 530;
 
-            departments.forEach((dept, index) => {
-                let angle = -Math.PI / 2 + (index * (2 * Math.PI / departments.length));
-                let dx = CENTER_X + DEPT_RADIUS * Math.cos(angle);
-                let dy = CENTER_Y + DEPT_RADIUS * Math.sin(angle);
-
-                let anchorId = 'anchor_' + dept.id;
-                let cx = CENTER_X + GLOBE_RADIUS * Math.cos(angle);
-                let cyPos = CENTER_Y + GLOBE_RADIUS * Math.sin(angle);
-                elements.push({ data: { id: anchorId, type: 'anchor' } });
-                nodesPositions[anchorId] = { x: cx, y: cyPos };
-
-                elements.push({ data: { id: dept.id, label: '', type: 'dept', color: dept.color, deptId: dept.id } });
-                nodesPositions[dept.id] = { x: dx, y: dy };
-
-                let lx = CENTER_X + LABEL_RADIUS * Math.cos(angle);
-                let ly = CENTER_Y + LABEL_RADIUS * Math.sin(angle);
-                labelsHTML += `<div class="department-label" id="label_${dept.id}" style="left: ${lx}px; top: ${ly}px; color: ${dept.color}; transition: opacity 0.3s;">${dept.label}</div>`;
-
-                let currentParent = dept.id;
-                let currentRadius = DEPT_RADIUS + 70;
-
-                dept.agents.forEach((agent, aIdx) => {
-                    let isLarge = aIdx < 2;
-                    let type = isLarge ? 'agent_large' : 'agent_dot';
-                    let branchAngle = angle + (Math.sin(aIdx) * 0.2);
-                    let ax = CENTER_X + currentRadius * Math.cos(branchAngle);
-                    let ay = CENTER_Y + currentRadius * Math.sin(branchAngle);
-
-                    elements.push({ data: { id: agent.id, label: isLarge ? agent.label : '', type: type, deptId: dept.id } });
-                    nodesPositions[agent.id] = { x: ax, y: ay };
-
-                    let cpD = (Math.random() - 0.5) * 30;
-                    elements.push({ data: { source: currentParent, target: agent.id, deptId: dept.id, color: dept.color, cpDist: cpD, cpWeight: 0.5 } });
-
-                    currentParent = agent.id;
-                    currentRadius += 50 + (Math.random() * 20);
-
-                    // Add tiny jagged constellation side branches with spiderweb cross-links
-                    if (Math.random() > 0.35) {
-                        let sideId = agent.id + '_side';
-                        let sideAngle = branchAngle + (Math.random() > 0.5 ? 0.3 : -0.3);
-                        let sx = CENTER_X + (currentRadius - 35) * Math.cos(sideAngle);
-                        let sy = CENTER_Y + (currentRadius - 35) * Math.sin(sideAngle);
-
-                        elements.push({ data: { id: sideId, type: 'agent_dot', deptId: dept.id } });
-                        nodesPositions[sideId] = { x: sx, y: sy };
-
-                        elements.push({ data: { source: agent.id, target: sideId, deptId: dept.id, color: dept.color } });
-
-                        // Web cross-link connecting to previous parent node to form spider-web web structure
-                        if (currentParent && currentParent !== dept.id) {
-                            elements.push({ data: { source: currentParent, target: sideId, deptId: dept.id, type: 'web_cross', color: dept.color } });
-                        }
-                    }
+            function buildConstellationFromGraph(graph) {
+                // Convert live graph cycles into the same departments format
+                departments = graph.cycles.map((cycle, index) => {
+                    const deptId = `cycle_${cycle.cycle_id || index}_${index}`;
+                    return {
+                        id: deptId,
+                        label: (cycle.domain || `Cycle ${index + 1}`).toUpperCase(),
+                        color: CYCLE_COLORS[index % CYCLE_COLORS.length],
+                        agents: (cycle.agents || []).map((a, aIdx) => ({
+                            id: `${deptId}_agent_${a.agent_id || aIdx}`,
+                            label: a.role || a.agent_id,
+                            status: a.status || 'pending',
+                            agentData: a
+                        }))
+                    };
                 });
-            });
 
-            document.getElementById('labels-container').innerHTML = labelsHTML;
+                // Add execution agents as a separate "department" if they exist
+                if (graph.execution_agents && graph.execution_agents.length > 0) {
+                    departments.push({
+                        id: 'execution',
+                        label: 'EXECUTION',
+                        color: '#F472B6',
+                        agents: graph.execution_agents.map((a, aIdx) => ({
+                            id: `execution_agent_${a.agent_id || aIdx}`,
+                            label: a.role || a.agent_id,
+                            status: a.status || 'pending',
+                            agentData: a
+                        }))
+                    });
+                }
 
-            const cyActive = cytoscape({
-                container: document.getElementById('cy-active'),
-                elements: elements,
-                style: [
-                    { selector: 'node[type="anchor"]', style: { 'width': 1, 'height': 1, 'opacity': 0 } },
-                    {
-                        selector: 'node[type="agent_large"]',
-                        style: {
-                            'label': 'data(label)', 'color': '#fff', 'font-size': '10px', 'font-family': 'Inter',
-                            'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': 6,
-                            'background-color': '#EAE6EE', 'width': 22, 'height': 22, 'border-width': 1, 'border-color': '#fff',
-                            'shadow-blur': 10, 'shadow-color': '#EAE6EE', 'shadow-opacity': 0.4
+                // Build elements and positions (same layout logic as original)
+                elements = [];
+                nodesPositions = {};
+                let labelsHTML = '';
+
+                departments.forEach((dept, index) => {
+                    let angle = -Math.PI / 2 + (index * (2 * Math.PI / departments.length));
+                    let dx = CENTER_X + DEPT_RADIUS * Math.cos(angle);
+                    let dy = CENTER_Y + DEPT_RADIUS * Math.sin(angle);
+
+                    let anchorId = 'anchor_' + dept.id;
+                    let cx = CENTER_X + GLOBE_RADIUS * Math.cos(angle);
+                    let cyPos = CENTER_Y + GLOBE_RADIUS * Math.sin(angle);
+                    elements.push({ data: { id: anchorId, type: 'anchor' } });
+                    nodesPositions[anchorId] = { x: cx, y: cyPos };
+
+                    elements.push({ data: { id: dept.id, label: '', type: 'dept', color: dept.color, deptId: dept.id } });
+                    nodesPositions[dept.id] = { x: dx, y: dy };
+
+                    let lx = CENTER_X + LABEL_RADIUS * Math.cos(angle);
+                    let ly = CENTER_Y + LABEL_RADIUS * Math.sin(angle);
+                    labelsHTML += `<div class="department-label" id="label_${dept.id}" style="left: ${lx}px; top: ${ly}px; color: ${dept.color}; transition: opacity 0.3s;">${dept.label}</div>`;
+
+                    let currentParent = dept.id;
+                    let currentRadius = DEPT_RADIUS + 70;
+
+                    // Sector boundary enforcement — keep agents within their own wedge
+                    const sectorHalf = Math.PI / departments.length;
+                    const SECTOR_PADDING = 0.12;
+                    const sectorMin = angle - sectorHalf + SECTOR_PADDING;
+                    const sectorMax = angle + sectorHalf - SECTOR_PADDING;
+                    const MAX_CHAIN_RADIUS = LABEL_RADIUS - 80;
+                    let zigzag = 1;
+
+                    dept.agents.forEach((agent, aIdx) => {
+                        let isLarge = aIdx < 2;
+                        let type = isLarge ? 'agent_large' : 'agent_dot';
+
+                        // Wobble within sector, clamped to boundaries
+                        let branchAngle = angle + (Math.sin(aIdx) * 0.2) * zigzag;
+                        branchAngle = Math.max(sectorMin, Math.min(sectorMax, branchAngle));
+
+                        // If chain exceeds max radius, fold back inward with zigzag
+                        if (currentRadius > MAX_CHAIN_RADIUS) {
+                            currentRadius = DEPT_RADIUS + 90 + ((aIdx * 37) % 80);
+                            zigzag *= -1;
+                            branchAngle = angle + ((aIdx % 2 === 0 ? 1 : -1) * (0.15 + (aIdx * 0.08) % (sectorHalf - SECTOR_PADDING * 2)));
+                            branchAngle = Math.max(sectorMin, Math.min(sectorMax, branchAngle));
                         }
-                    },
-                    {
-                        selector: 'node[type="dept"]',
-                        style: {
-                            'background-color': '#1C1E32', 'width': 44, 'height': 44, 'border-width': 2,
-                            'border-color': 'data(color)', 'shadow-blur': 25, 'shadow-color': 'data(color)', 'shadow-opacity': 0.6
-                        }
-                    },
-                    { selector: 'node[type="agent_dot"]', style: { 'background-color': '#fff', 'width': 6, 'height': 6, 'label': '', 'shadow-blur': 5, 'shadow-color': '#fff', 'shadow-opacity': 0.8 } },
-                    {
-                        selector: 'edge',
-                        style: {
-                            'width': 1.2,
-                            'line-color': 'rgba(255, 255, 255, 0.28)',
-                            'curve-style': 'straight',
-                            'target-arrow-shape': 'none'
-                        }
-                    },
-                    {
-                        selector: 'edge[type="web_cross"]',
-                        style: {
-                            'width': 0.8,
-                            'line-color': 'rgba(255, 255, 255, 0.15)',
-                            'line-style': 'dashed',
-                            'curve-style': 'straight',
-                            'target-arrow-shape': 'none'
-                        }
-                    },
-                    { selector: '.dimmed', style: { 'opacity': 0.15 } },
 
-                    { selector: 'edge.highlighted', style: { 'line-color': 'data(color)', 'width': 2.5, 'shadow-blur': 15, 'shadow-color': 'data(color)', 'shadow-opacity': 0.8, 'z-index': 100 } },
-                    { selector: 'node.highlighted', style: { 'border-color': 'data(color)', 'shadow-blur': 30, 'shadow-color': 'data(color)', 'shadow-opacity': 1, 'z-index': 100 } }
-                ],
-                layout: { name: 'preset', positions: nodesPositions, fit: false },
-                userZoomingEnabled: false, userPanningEnabled: false
-            });
+                        let ax = CENTER_X + currentRadius * Math.cos(branchAngle);
+                        let ay = CENTER_Y + currentRadius * Math.sin(branchAngle);
 
-            cyActive.nodes('[type="dept"]').forEach(n => {
-                const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${n.data('color')}" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
-                n.style('background-image', 'data:image/svg+xml;utf8,' + encodeURIComponent(svg));
-                n.style('background-width', '60%'); n.style('background-height', '60%');
-                n.style('background-position-x', '50%'); n.style('background-position-y', '50%');
-            });
+                        elements.push({ data: {
+                            id: agent.id, agentId: agent.agentData?.agent_id, label: isLarge ? agent.label : '', type: type,
+                            deptId: dept.id, agentData: JSON.stringify(agent.agentData || {})
+                        }});
+                        nodesPositions[agent.id] = { x: ax, y: ay };
 
-            // Sector Mouseover Hover Glow Highlight
+                        let cpD = (Math.random() - 0.5) * 30;
+                        elements.push({ data: { source: currentParent, target: agent.id, deptId: dept.id, color: dept.color, cpDist: cpD, cpWeight: 0.5 } });
+
+                        currentParent = agent.id;
+                        currentRadius += 50 + (Math.random() * 20);
+
+                        // Constellation side branches with web cross-links, clamped to sector
+                        if (Math.random() > 0.35) {
+                            let sideId = agent.id + '_side';
+                            let sideAngle = branchAngle + (Math.random() > 0.5 ? 0.3 : -0.3);
+                            sideAngle = Math.max(sectorMin, Math.min(sectorMax, sideAngle));
+                            let sideRadius = Math.min(currentRadius - 35, MAX_CHAIN_RADIUS);
+                            let sx = CENTER_X + sideRadius * Math.cos(sideAngle);
+                            let sy = CENTER_Y + sideRadius * Math.sin(sideAngle);
+
+                            elements.push({ data: { id: sideId, type: 'agent_dot', deptId: dept.id } });
+                            nodesPositions[sideId] = { x: sx, y: sy };
+                            elements.push({ data: { source: agent.id, target: sideId, deptId: dept.id, color: dept.color } });
+
+                            if (currentParent && currentParent !== dept.id) {
+                                elements.push({ data: { source: currentParent, target: sideId, deptId: dept.id, type: 'web_cross', color: dept.color } });
+                            }
+                        }
+                    });
+                });
+
+                document.getElementById('labels-container').innerHTML = labelsHTML;
+                rebuildConduits();
+
+                // Initialize or recreate Cytoscape
+                if (cyActive) {
+                    cyActive.destroy();
+                }
+
+                cyActive = cytoscape({
+                    container: document.getElementById('cy-active'),
+                    elements: elements,
+                    style: [
+                        { selector: 'node[type="anchor"]', style: { 'width': 1, 'height': 1, 'opacity': 0 } },
+                        {
+                            selector: 'node[type="agent_large"]',
+                            style: {
+                                'label': 'data(label)', 'color': '#fff', 'font-size': '10px', 'font-family': 'Inter',
+                                'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': 6,
+                                'background-color': '#EAE6EE', 'width': 22, 'height': 22, 'border-width': 1, 'border-color': '#fff',
+                                'shadow-blur': 10, 'shadow-color': '#EAE6EE', 'shadow-opacity': 0.4
+                            }
+                        },
+                        {
+                            selector: 'node[type="dept"]',
+                            style: {
+                                'background-color': '#1C1E32', 'width': 44, 'height': 44, 'border-width': 2,
+                                'border-color': 'data(color)', 'shadow-blur': 25, 'shadow-color': 'data(color)', 'shadow-opacity': 0.6
+                            }
+                        },
+                        // Sub-node types: finding, memory, plan_contribution — plain white dots like agent_dot
+                        { selector: 'node[type="agent_dot"]', style: { 'background-color': '#fff', 'width': 6, 'height': 6, 'label': '', 'shadow-blur': 5, 'shadow-color': '#fff', 'shadow-opacity': 0.8 } },
+                        { selector: 'node[type="finding"]', style: { 'background-color': '#FCD34D', 'width': 8, 'height': 8, 'label': 'data(label)', 'color': '#9CA3AF', 'font-size': '8px', 'text-valign': 'bottom', 'text-margin-y': 5, 'shadow-blur': 8, 'shadow-color': '#FCD34D', 'shadow-opacity': 0.6 } },
+                        { selector: 'node[type="memory"]', style: { 'background-color': '#A78BFA', 'width': 8, 'height': 8, 'label': 'data(label)', 'color': '#9CA3AF', 'font-size': '8px', 'text-valign': 'bottom', 'text-margin-y': 5, 'shadow-blur': 8, 'shadow-color': '#A78BFA', 'shadow-opacity': 0.6 } },
+                        { selector: 'node[type="plan_contribution"]', style: { 'background-color': '#34D399', 'width': 8, 'height': 8, 'label': 'data(label)', 'color': '#9CA3AF', 'font-size': '8px', 'text-valign': 'bottom', 'text-margin-y': 5, 'shadow-blur': 8, 'shadow-color': '#34D399', 'shadow-opacity': 0.6 } },
+                        {
+                            selector: 'edge',
+                            style: {
+                                'width': 1.2, 'line-color': 'rgba(255, 255, 255, 0.28)',
+                                'curve-style': 'straight', 'target-arrow-shape': 'none'
+                            }
+                        },
+                        {
+                            selector: 'edge[type="web_cross"]',
+                            style: {
+                                'width': 0.8, 'line-color': 'rgba(255, 255, 255, 0.15)',
+                                'line-style': 'dashed', 'curve-style': 'straight', 'target-arrow-shape': 'none'
+                            }
+                        },
+                        { selector: '.dimmed', style: { 'opacity': 0.15 } },
+                        { selector: 'edge.highlighted', style: { 'line-color': 'data(color)', 'width': 2.5, 'shadow-blur': 15, 'shadow-color': 'data(color)', 'shadow-opacity': 0.8, 'z-index': 100 } },
+                        { selector: 'node.highlighted', style: { 'border-color': 'data(color)', 'shadow-blur': 30, 'shadow-color': 'data(color)', 'shadow-opacity': 1, 'z-index': 100 } }
+                    ],
+                    layout: { name: 'preset', positions: nodesPositions, fit: false },
+                    userZoomingEnabled: false, userPanningEnabled: false
+                });
+
+                // Apply dept SVG icons (same as original)
+                cyActive.nodes('[type="dept"]').forEach(n => {
+                    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${n.data('color')}" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+                    n.style('background-image', 'data:image/svg+xml;utf8,' + encodeURIComponent(svg));
+                    n.style('background-width', '60%'); n.style('background-height', '60%');
+                    n.style('background-position-x', '50%'); n.style('background-position-y', '50%');
+                });
+
+                // Re-attach all event handlers
+                attachCytoscapeHandlers();
+            }
+
+
+            // ============ Polling System ============
+            async function pollAgentGraph() {
+                if (!currentPlanId) {
+                    currentPlanId = localStorage.getItem('jarvis_active_pipeline_id');
+                    if (!currentPlanId) return;
+                }
+                try {
+                    const res = await fetch(`/api/agent_graph/${currentPlanId}`);
+                    if (!res.ok) return;
+                    const graph = await res.json();
+
+                    // Only rebuild if cycle count changed (new cycles added)
+                    const prevCycleCount = liveGraphData ? liveGraphData.cycles.length : 0;
+                    liveGraphData = graph;
+
+                    if (!cyActive || graph.cycles.length !== prevCycleCount) {
+                        buildConstellationFromGraph(graph);
+                    }
+                } catch(e) {
+                    console.error("Agent graph poll error:", e);
+                }
+            }
+
+            // Poll events for real-time node additions (Step 5)
+            async function pollEvents() {
+                try {
+                    const res = await fetch(`/agents/events?since=${lastEventTimestamp}`);
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    for (const evt of data.events) {
+                        lastEventTimestamp = Math.max(lastEventTimestamp, evt.timestamp || 0);
+                        handleLiveEvent(evt);
+                    }
+                } catch(e) {}
+            }
+
+            setInterval(pollAgentGraph, 3000);
+            setInterval(pollEvents, 1500);
+            pollAgentGraph();
+
+
+            // ============ Hover, Drill-Down, Side Panel (PRESERVED — same logic as original) ============
             let activeDeptId = null;
-
-            function applyHoverHighlight(deptId) {
-                activeDeptId = deptId;
-                cyActive.elements().addClass('dimmed');
-                let branch = cyActive.elements(`[deptId = "${deptId}"]`);
-                branch.removeClass('dimmed').addClass('highlighted');
-                cyActive.getElementById('anchor_' + deptId).removeClass('dimmed');
-
-                document.querySelectorAll('#active-view-container .department-label').forEach(el => {
-                    if (el.id !== 'label_' + deptId) {
-                        el.style.opacity = '0.15';
-                    } else {
-                        const deptObj = departments.find(d => d.id === deptId);
-                        el.style.opacity = '1';
-                        el.style.textShadow = `0 0 20px ${deptObj.color}`;
-                    }
-                });
-            }
-
-            function clearHoverHighlight() {
-                if (activeDeptId === null) return;
-                activeDeptId = null;
-                cyActive.elements().removeClass('dimmed highlighted');
-                document.querySelectorAll('#active-view-container .department-label').forEach(el => {
-                    el.style.opacity = '1';
-                    el.style.textShadow = `0 0 15px rgba(0,0,0,0.8)`;
-                });
-            }
-
-            window.addEventListener('mousemove', (e) => {
-                if (isDrillDownMode || isTransitioning || !document.getElementById('idle-view-container').classList.contains('hidden')) return;
-
-                if (document.getElementById('active-side-panel').classList.contains('open') && e.clientX < 500) {
-                    clearHoverHighlight();
-                    return;
-                }
-
-                const cx = window.innerWidth / 2;
-                const cy = (window.innerHeight / 2) + 40;
-                const dx = e.clientX - cx;
-                const dy = e.clientY - cy;
-                const distance = Math.sqrt(dx * dx + dy * dy) / 0.8;
-
-                if (distance < 180 || distance > 550) {
-                    clearHoverHighlight();
-                    return;
-                }
-
-                let mouseAngle = Math.atan2(dy, dx);
-                const sectorSize = (2 * Math.PI) / departments.length;
-                let adjustedAngle = mouseAngle - (-Math.PI / 2) + (sectorSize / 2);
-                while (adjustedAngle < 0) adjustedAngle += 2 * Math.PI;
-                while (adjustedAngle >= 2 * Math.PI) adjustedAngle -= 2 * Math.PI;
-
-                const deptIndex = Math.floor(adjustedAngle / sectorSize) % departments.length;
-                const targetDept = departments[deptIndex];
-
-                if (targetDept && targetDept.id !== activeDeptId) {
-                    applyHoverHighlight(targetDept.id);
-                }
-            });
-
-            document.body.addEventListener('mouseleave', () => {
-                if (!isDrillDownMode && !isTransitioning) clearHoverHighlight();
-            });
-
-            // Department Drill-Down State Management
             let isDrillDownMode = false;
             let isTransitioning = false;
             let currentDrillDept = null;
             let drillDownPositions = {};
 
-            // Breathing float animation
-            let animTime = 0;
-            setInterval(() => {
-                if (isTransitioning) return;
-                animTime += 0.05;
-                cyActive.nodes().forEach((node, i) => {
-                    if (node.data('type') === 'anchor') return;
-                    let basePos = nodesPositions[node.id()];
-                    if (isDrillDownMode) {
-                        if (node.data('deptId') === currentDrillDept && drillDownPositions[node.id()]) {
-                            basePos = drillDownPositions[node.id()];
-                        } else { return; }
+            function attachCytoscapeHandlers() {
+                // Sector Mouseover Hover Glow Highlight
+                function applyHoverHighlight(deptId) {
+                    activeDeptId = deptId;
+                    cyActive.elements().addClass('dimmed');
+                    let branch = cyActive.elements(`[deptId = "${deptId}"]`);
+                    branch.removeClass('dimmed').addClass('highlighted');
+                    cyActive.getElementById('anchor_' + deptId).removeClass('dimmed');
+
+                    document.querySelectorAll('#active-view-container .department-label').forEach(el => {
+                        if (el.id !== 'label_' + deptId) {
+                            el.style.opacity = '0.15';
+                        } else {
+                            const deptObj = departments.find(d => d.id === deptId);
+                            el.style.opacity = '1';
+                            el.style.textShadow = `0 0 20px ${deptObj ? deptObj.color : '#fff'}`;
+                        }
+                    });
+                }
+
+                function clearHoverHighlight() {
+                    if (activeDeptId === null) return;
+                    activeDeptId = null;
+                    cyActive.elements().removeClass('dimmed highlighted');
+                    document.querySelectorAll('#active-view-container .department-label').forEach(el => {
+                        el.style.opacity = '1';
+                        el.style.textShadow = `0 0 15px rgba(0,0,0,0.8)`;
+                    });
+                }
+
+                window.addEventListener('mousemove', (e) => {
+                    if (isDrillDownMode || isTransitioning || !document.getElementById('idle-view-container').classList.contains('hidden')) return;
+
+                    if (document.getElementById('active-side-panel').classList.contains('open') && e.clientX < 500) {
+                        clearHoverHighlight();
+                        return;
                     }
-                    if (!basePos) return;
-                    let offsetX = Math.sin(animTime + i) * 1.5;
-                    let offsetY = Math.cos(animTime + i * 1.5) * 1.5;
-                    node.position({ x: basePos.x + offsetX, y: basePos.y + offsetY });
+
+                    const cx = window.innerWidth / 2;
+                    const cy = (window.innerHeight / 2) + 40;
+                    const dx = e.clientX - cx;
+                    const dy = e.clientY - cy;
+                    const distance = Math.sqrt(dx * dx + dy * dy) / 0.8;
+
+                    if (distance < 180 || distance > 550) {
+                        clearHoverHighlight();
+                        return;
+                    }
+
+                    let mouseAngle = Math.atan2(dy, dx);
+                    const sectorSize = (2 * Math.PI) / departments.length;
+                    let adjustedAngle = mouseAngle - (-Math.PI / 2) + (sectorSize / 2);
+                    while (adjustedAngle < 0) adjustedAngle += 2 * Math.PI;
+                    while (adjustedAngle >= 2 * Math.PI) adjustedAngle -= 2 * Math.PI;
+
+                    const deptIndex = Math.floor(adjustedAngle / sectorSize) % departments.length;
+                    const targetDept = departments[deptIndex];
+
+                    if (targetDept && targetDept.id !== activeDeptId) {
+                        applyHoverHighlight(targetDept.id);
+                    }
                 });
-            }, 30);
 
-            // Node Click: Enter Drill Down OR Open Side Panel + Camera Zoom
-            cyActive.on('tap', 'node', function (evt) {
-                let node = evt.target;
-                let d = node.data();
-                if (d.type === 'anchor') return;
+                document.body.addEventListener('mouseleave', () => {
+                    if (!isDrillDownMode && !isTransitioning) clearHoverHighlight();
+                });
 
-                if (!isDrillDownMode) {
-                    enterDrillDown(d.deptId);
-                    return;
+                // Breathing float animation
+                let animTime = 0;
+                setInterval(() => {
+                    if (isTransitioning || !cyActive) return;
+                    animTime += 0.05;
+                    cyActive.nodes().forEach((node, i) => {
+                        if (node.data('type') === 'anchor') return;
+                        let basePos = nodesPositions[node.id()];
+                        if (isDrillDownMode) {
+                            if (node.data('deptId') === currentDrillDept && drillDownPositions[node.id()]) {
+                                basePos = drillDownPositions[node.id()];
+                            } else { return; }
+                        }
+                        if (!basePos) return;
+                        let offsetX = Math.sin(animTime + i) * 1.5;
+                        let offsetY = Math.cos(animTime + i * 1.5) * 1.5;
+                        node.position({ x: basePos.x + offsetX, y: basePos.y + offsetY });
+                    });
+                }, 30);
+
+                // Node Click: Enter Drill Down OR Open Side Panel + Camera Zoom
+                cyActive.on('tap', 'node', function (evt) {
+                    let node = evt.target;
+                    let d = node.data();
+                    if (d.type === 'anchor') return;
+
+                    if (!isDrillDownMode) {
+                        enterDrillDown(d.deptId);
+                        return;
+                    }
+
+                    // Open side panel with real agent data
+                    openAgentPanel(d);
+
+                    const targetZoom = 2.0;
+                    const targetX = (window.innerWidth / 2) + 150;
+                    const targetY = window.innerHeight / 2;
+                    cyActive.animate({
+                        zoom: targetZoom,
+                        pan: { x: targetX - (node.position().x * targetZoom), y: targetY - (node.position().y * targetZoom) }
+                    }, { duration: 650, easing: 'ease-out-cubic' });
+                });
+
+                cyActive.on('tap', function (evt) {
+                    if (evt.target === cyActive) {
+                        if (!isDrillDownMode && activeDeptId) {
+                            enterDrillDown(activeDeptId);
+                        } else {
+                            closeActivePanel();
+                        }
+                    }
+                });
+            }
+
+            window.openAgentPanel = function(nodeData) {
+                const panel = document.getElementById('active-side-panel');
+                const agentUniqueId = nodeData.id;
+                let agentInfo = {};
+
+                // Parse stored agent data from node
+                try { agentInfo = JSON.parse(nodeData.agentData || '{}'); } catch(e) {}
+
+                const originalAgentId = agentInfo.agent_id || agentUniqueId;
+
+                // 1. Config
+                document.getElementById('active-panel-title').innerText = agentInfo.role || nodeData.label || 'Node';
+                document.getElementById('active-panel-status').innerText = (agentInfo.status || 'PENDING').toUpperCase();
+                document.getElementById('panel-role').innerHTML =
+                    `<strong>Role:</strong> ${agentInfo.role || 'Unknown'}`;
+                document.getElementById('panel-brief').innerHTML =
+                    `<strong>Brief:</strong> ${agentInfo.brief || 'No brief available'}`;
+                document.getElementById('panel-tools').innerHTML =
+                    `<strong>Tools:</strong> ${(agentInfo.tools_needed || []).join(', ') || 'None'}`;
+
+                // 2. Findings
+                const findingsEl = document.getElementById('panel-findings');
+                findingsEl.innerHTML = '';
+                if (agentInfo.output && agentInfo.output.findings) {
+                    const findings = agentInfo.output.findings;
+                    Object.entries(findings).forEach(([key, value]) => {
+                        const item = document.createElement('div');
+                        item.className = 'finding-item';
+                        item.innerHTML = `<span style="color:#FCD34D;">🔍</span> <strong>${key}:</strong>
+                            <span style="color:#9CA3AF;">${typeof value === 'string' ? value.substring(0, 120) : JSON.stringify(value).substring(0, 120)}...</span>`;
+                        findingsEl.appendChild(item);
+                    });
+                } else {
+                    findingsEl.innerHTML = '<span style="color:#4B5563;">No findings yet...</span>';
                 }
 
-                const deptObj = departments.find(dep => dep.id === (d.deptId || d.id)) || { label: d.label || 'Agent Node' };
-                document.getElementById('active-panel-title').innerText = d.label || deptObj.label;
-                document.getElementById('active-panel-type').innerText = d.type.toUpperCase().replace('_', ' ');
-                document.getElementById('active-panel-replaces').innerText = `Active automated execution node for ${deptObj.label}.`;
-                document.getElementById('active-side-panel').classList.add('open');
+                // 3. Live Thinking
+                const thinkingEl = document.getElementById('panel-thinking');
+                thinkingEl.innerText = agentInfo.streamed_thoughts || 'Agent has not started thinking yet...';
 
-                const targetZoom = 2.0;
-                const targetX = (window.innerWidth / 2) + 150;
-                const targetY = window.innerHeight / 2;
-                cyActive.animate({
-                    zoom: targetZoom,
-                    pan: { x: targetX - (node.position().x * targetZoom), y: targetY - (node.position().y * targetZoom) }
-                }, { duration: 650, easing: 'ease-out-cubic' });
-            });
-
-            cyActive.on('tap', function (evt) {
-                if (evt.target === cyActive) {
-                    if (!isDrillDownMode && activeDeptId) {
-                        enterDrillDown(activeDeptId);
+                // 4. Memory (RECALLED only)
+                const memoryEl = document.getElementById('panel-memory');
+                memoryEl.innerHTML = '';
+                if (cyActive) {
+                    const memNodes = cyActive.nodes(`[id ^= "${agentUniqueId}_mem_"]`);
+                    if (memNodes.length > 0) {
+                        memNodes.forEach(memNode => {
+                            let memData = {};
+                            try { memData = JSON.parse(memNode.data('memoryData') || '{}'); } catch(e) {}
+                            const item = document.createElement('div');
+                            item.className = 'memory-item';
+                            item.innerHTML = `
+                                <span style="color:#A78BFA;">🧠</span>
+                                <span class="recalled-badge">RECALLED</span>
+                                <span style="color:#9CA3AF;">${memData.pattern || JSON.stringify(memData).substring(0, 100)}</span>`;
+                            memoryEl.appendChild(item);
+                        });
                     } else {
-                        closeActivePanel();
+                        memoryEl.innerHTML = '<span style="color:#4B5563;">No memories recalled</span>';
                     }
                 }
-            });
+
+                // 5. Conversation Log
+                const convEl = document.getElementById('panel-conversation');
+                convEl.innerHTML = '';
+                fetch(`/api/agent_conversations`)
+                    .then(r => r.json())
+                    .then(data => {
+                        const convs = (data.conversations || []).filter(c =>
+                            c.agent_id === originalAgentId || (c.source && c.source.includes(originalAgentId))
+                        );
+                        if (convs.length === 0) {
+                            convEl.innerHTML = '<span style="color:#4B5563;">No conversation yet...</span>';
+                            return;
+                        }
+                        convs.forEach(c => {
+                            const item = document.createElement('div');
+                            item.style.cssText = 'margin-bottom:8px; padding:6px; background:rgba(255,255,255,0.02); border-radius:4px; font-size:10px;';
+                            item.innerHTML = `<strong style="color:${c.type === 'prompt_sent' ? '#60A5FA' : '#34D399'}">
+                                ${c.type === 'prompt_sent' ? '→ PROMPT' : '← RESPONSE'}</strong>
+                                <div style="color:#9CA3AF; margin-top:4px;">${(c.content || '').substring(0, 200)}...</div>`;
+                            convEl.appendChild(item);
+                        });
+                    });
+
+                panel.classList.add('open');
+            };
 
             function enterDrillDown(deptId) {
                 isDrillDownMode = true;
@@ -1597,7 +1875,7 @@
 
                 let wm = document.getElementById('watermark');
                 let deptObj = departments.find(d => d.id === deptId);
-                wm.innerText = deptObj.label;
+                wm.innerText = deptObj ? deptObj.label : deptId;
                 wm.style.display = 'block';
 
                 cyActive.elements().style('display', 'none');
@@ -1658,7 +1936,7 @@
 
             window.addEventListener('mousemove', (e) => {
                 if (isDrillDownMode && !isTransitioning) {
-                    const deptNode = cyActive.getElementById(currentDrillDept);
+                    const deptNode = cyActive ? cyActive.getElementById(currentDrillDept) : null;
                     if (deptNode && deptNode.length > 0) {
                         const cyCenterY = (window.innerHeight / 2) + 40;
                         const nodeScreenY = (window.innerHeight / 2) + (deptNode.position().y - cyCenterY) * 0.8;
@@ -1700,12 +1978,160 @@
 
             window.closeActivePanel = function() {
                 document.getElementById('active-side-panel').classList.remove('open');
-                if (isDrillDownMode && !isTransitioning) {
+                if (isDrillDownMode && !isTransitioning && cyActive) {
                     cyActive.animate({ zoom: 1.0, pan: { x: 0, y: 0 } }, { duration: 250, easing: 'ease-out-quad' });
                 }
             };
 
+
+            // ============ handleLiveEvent — Step 5 (growth animation) ============
+            function handleLiveEvent(evt) {
+                if (!cyActive || !liveGraphData) return;
+                const agentId = evt.agent_id;
+                if (!agentId) return;
+
+                switch (evt.event_type) {
+                    case 'spawned': {
+                        // Find all nodes representing this agent
+                        const nodes = cyActive.nodes(`[agentId = "${agentId}"]`);
+                        nodes.forEach(node => {
+                            const deptId = node.data('deptId');
+                            const deptNode = cyActive.getElementById(deptId);
+                            if (deptNode && deptNode.length) {
+                                const targetPos = { ...nodesPositions[node.id()] };
+                                node.position(deptNode.position());
+                                node.style('opacity', 0);
+                                node.animate({
+                                    position: targetPos,
+                                    style: { opacity: 1 }
+                                }, { duration: 800, easing: 'ease-out-cubic' });
+                            }
+                        });
+                        break;
+                    }
+
+                    case 'memory_recalled': {
+                        // Add small purple dot nodes extending from the agent
+                        const patterns = evt.data?.patterns || [];
+                        const nodes = cyActive.nodes(`[agentId = "${agentId}"]`);
+                        nodes.forEach(agentNode => {
+                            const agentPos = agentNode.position();
+                            const deptId = agentNode.data('deptId');
+
+                            patterns.forEach((pattern, idx) => {
+                                const memId = `${agentNode.id()}_mem_${idx}`;
+                                if (renderedNodeIds.has(memId)) return;
+                                renderedNodeIds.add(memId);
+
+                                const offsetAngle = (idx * 0.5) - (patterns.length * 0.25);
+                                const targetX = agentPos.x + Math.cos(offsetAngle) * 60;
+                                const targetY = agentPos.y + Math.sin(offsetAngle) * 60;
+
+                                cyActive.add([
+                                    { data: {
+                                        id: memId, label: 'RECALLED',
+                                        type: 'memory', deptId: deptId,
+                                        memoryData: JSON.stringify(pattern)
+                                    }},
+                                    { data: { source: agentNode.id(), target: memId, deptId: deptId } }
+                                ]);
+
+                                // Store position for breathing animation
+                                nodesPositions[memId] = { x: targetX, y: targetY };
+
+                                const memNode = cyActive.getElementById(memId);
+                                memNode.position(agentPos);
+                                memNode.style('opacity', 0);
+                                memNode.animate({
+                                    position: { x: targetX, y: targetY },
+                                    style: { opacity: 1 }
+                                }, { duration: 600, easing: 'ease-out-cubic' });
+                            });
+                        });
+                        break;
+                    }
+
+                    case 'findings_discovered': {
+                        // Add small yellow dot nodes extending from agent
+                        const findings = evt.data;
+                        if (!findings || typeof findings !== 'object') return;
+                        const findingKeys = Object.keys(findings);
+
+                        const nodes = cyActive.nodes(`[agentId = "${agentId}"]`);
+                        nodes.forEach(agentNode => {
+                            const agentPos = agentNode.position();
+                            const deptId = agentNode.data('deptId');
+
+                            findingKeys.forEach((key, idx) => {
+                                const findId = `${agentNode.id()}_find_${idx}`;
+                                if (renderedNodeIds.has(findId)) return;
+                                renderedNodeIds.add(findId);
+
+                                const offsetAngle = Math.PI + (idx * 0.5) - (findingKeys.length * 0.25);
+                                const targetX = agentPos.x + Math.cos(offsetAngle) * 55;
+                                const targetY = agentPos.y + Math.sin(offsetAngle) * 55;
+
+                                cyActive.add([
+                                    { data: {
+                                        id: findId, label: key.substring(0, 15),
+                                        type: 'finding', deptId: deptId,
+                                        findingData: JSON.stringify(findings[key])
+                                    }},
+                                    { data: { source: agentNode.id(), target: findId, deptId: deptId } }
+                                ]);
+
+                                nodesPositions[findId] = { x: targetX, y: targetY };
+
+                                const node = cyActive.getElementById(findId);
+                                node.position(agentPos);
+                                node.style('opacity', 0);
+                                node.animate({
+                                    position: { x: targetX, y: targetY },
+                                    style: { opacity: 1 }
+                                }, { duration: 600, easing: 'ease-out-cubic' });
+                            });
+                        });
+                        break;
+                    }
+
+                    case 'completed': {
+                        // Mark agent as completed + add green plan contribution dot
+                        const nodes = cyActive.nodes(`[agentId = "${agentId}"]`);
+                        nodes.forEach(agentNode => {
+                            const deptId = agentNode.data('deptId');
+                            const planNodeId = `${agentNode.id()}_plan`;
+                            if (!renderedNodeIds.has(planNodeId)) {
+                                renderedNodeIds.add(planNodeId);
+                                const agentPos = agentNode.position();
+                                const targetX = agentPos.x + 50;
+                                const targetY = agentPos.y - 40;
+
+                                cyActive.add([
+                                    { data: {
+                                        id: planNodeId, label: 'Plan',
+                                        type: 'plan_contribution', deptId: deptId
+                                    }},
+                                    { data: { source: agentNode.id(), target: planNodeId, deptId: deptId } }
+                                ]);
+
+                                nodesPositions[planNodeId] = { x: targetX, y: targetY };
+
+                                const node = cyActive.getElementById(planNodeId);
+                                node.position(agentPos);
+                                node.style('opacity', 0);
+                                node.animate({
+                                    position: { x: targetX, y: targetY },
+                                    style: { opacity: 1 }
+                                }, { duration: 600, easing: 'ease-out-cubic' });
+                            }
+                        });
+                        break;
+                    }
+                }
+            }
+
         })();
+
 
     </script>
 

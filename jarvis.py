@@ -110,6 +110,8 @@ ORB_STATE = "idle"     # "idle" | "thinking" | "speaking"
 FOCUS_TASK_IDS = []   # list of task IDs to highlight/focus on in UI
 UI_ACTION = None      # e.g. {"type": "task_created", "task_id": 5, "priority": "high"}
 JARVIS_SLEEPING = False # tracks sleep/wake visual state of UI/nebula
+MIC_MUTED = False # tracks whether microphone is muted
+
 ELEVENLABS_QUOTA_EXCEEDED = False # temporary runtime flag to skip ElevenLabs if quota exceeded
 
 # --- Pipeline Gate State ---
@@ -1090,7 +1092,7 @@ CURRENT_SPOKEN_WORD = ""
 
 @app.route("/state", methods=["GET"])
 def state():
-    global FOCUS_TASK_IDS, UI_ACTION, JARVIS_SLEEPING, CURRENT_SPOKEN_WORD
+    global FOCUS_TASK_IDS, UI_ACTION, JARVIS_SLEEPING, CURRENT_SPOKEN_WORD, MIC_MUTED
     with STATE_LOCK:
         res = jsonify({
             "orb": ORB_STATE,
@@ -1098,6 +1100,7 @@ def state():
             "focus_task_ids": FOCUS_TASK_IDS,
             "ui_action": UI_ACTION,
             "sleeping": JARVIS_SLEEPING,
+            "mic_muted": MIC_MUTED,
             "current_word": CURRENT_SPOKEN_WORD
         })
         # Clear focused task IDs and UI action after serving so they only trigger once
@@ -1105,6 +1108,15 @@ def state():
         UI_ACTION = None
         return res
 
+@app.route("/jarvis/mute-mic", methods=["POST"])
+def mute_mic():
+    global MIC_MUTED
+    data = request.get_json(force=True) or {}
+    if "muted" in data:
+        MIC_MUTED = bool(data["muted"])
+    else:
+        MIC_MUTED = not MIC_MUTED
+    return jsonify({"mic_muted": MIC_MUTED})
 
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -1523,6 +1535,81 @@ def get_plan_detail(plan_id):
         return jsonify({"error": f"Plan '{plan_id}' not found"}), 404
 
 
+@app.route("/api/agent_graph/<plan_id>", methods=["GET"])
+def get_agent_graph(plan_id):
+    """Returns the full live constellation graph for a pipeline run.
+    Structure: { plan_id, phase, task, cycles: [{ cycle_id, domain, goal, agents: [
+        { agent_id, role, brief, tools_needed, memory_query, is_lead, status,
+          streamed_thoughts, output, config }
+    ]}], execution_agents: [...] }
+    """
+    with PLAN_STORE_LOCK:
+        plan = None
+        for p in PLAN_STORE:
+            if p["id"] == plan_id:
+                plan = p
+                break
+        if not plan:
+            return jsonify({"error": "Plan not found"}), 404
+
+    agent_plan = plan.get("agent_plan", {})
+    cycles = agent_plan.get("cycles", [])
+
+    graph_cycles = []
+    for cycle in cycles:
+        cycle_agents = []
+        all_agent_configs = [cycle.get("lead_specialist", {})] + cycle.get("advisory_agents", [])
+
+        for agent_cfg in all_agent_configs:
+            agent_id = agent_cfg.get("agent_id", "")
+            # Get live status from AGENT_REGISTRY
+            with AGENT_OBS_LOCK:
+                registry_entry = AGENT_REGISTRY.get(agent_id, {})
+
+            cycle_agents.append({
+                "agent_id": agent_id,
+                "role": agent_cfg.get("role", ""),
+                "brief": agent_cfg.get("brief", ""),
+                "tools_needed": agent_cfg.get("tools_needed", []),
+                "memory_query": agent_cfg.get("memory_query", ""),
+                "is_lead": agent_cfg == cycle.get("lead_specialist"),
+                "status": registry_entry.get("status", "pending"),
+                "streamed_thoughts": registry_entry.get("streamed_thoughts", ""),
+                "output": registry_entry.get("output"),
+                "config": registry_entry.get("config"),
+            })
+
+        graph_cycles.append({
+            "cycle_id": cycle.get("cycle_id"),
+            "domain": cycle.get("domain", ""),
+            "goal": cycle.get("goal", ""),
+            "agents": cycle_agents,
+        })
+
+    # Execution agents
+    exec_agents_cfg = agent_plan.get("execution_agents", [])
+    exec_agents = []
+    for cfg in exec_agents_cfg:
+        agent_id = cfg.get("agent_id", "")
+        with AGENT_OBS_LOCK:
+            reg = AGENT_REGISTRY.get(agent_id, {})
+        exec_agents.append({
+            "agent_id": agent_id,
+            "role": cfg.get("role", ""),
+            "brief": cfg.get("brief", ""),
+            "status": reg.get("status", "pending"),
+            "output": reg.get("output"),
+        })
+
+    return jsonify({
+        "plan_id": plan_id,
+        "phase": plan.get("phase", "planning"),
+        "task": plan.get("task", ""),
+        "cycles": graph_cycles,
+        "execution_agents": exec_agents,
+    })
+
+
 @app.route("/metrics/update", methods=["POST"])
 def update_metric():
     data = request.get_json(force=True) or {}
@@ -1669,7 +1756,12 @@ def run_server():
 # Speech-to-text
 # ---------------------------------------------------------------------------
 
+
 def record_and_transcribe():
+    global MIC_MUTED
+    if MIC_MUTED:
+        time.sleep(0.5)
+        return None
     mic = sr.Microphone(sample_rate=SAMPLE_RATE)
     with mic as source:
         print("Listening...")

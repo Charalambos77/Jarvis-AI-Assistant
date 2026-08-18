@@ -994,10 +994,10 @@
             return true;
         }
 
-        let selectedPlanId = "";
+        let selectedPlanId = localStorage.getItem('jarvis_active_pipeline_id') || "";
         let plansCache = [];
         let activeGateData = null;
-        let viewMode = "listing"; // "listing" or "detail"
+        let viewMode = selectedPlanId ? "detail" : "listing"; // "listing" or "detail"
         let userClosedModal = true;
         let lastGateId = "";
         // Dynamic navigation context (Brain vs Execution)
@@ -1016,6 +1016,7 @@
                     if (logsBtn) logsBtn.style.display = 'none';
                 }
             }
+            updateViewToggles();
         });
 
         function goFirstNavTarget() {
@@ -1121,6 +1122,7 @@
 
         function selectPlan(planId) {
             selectedPlanId = planId;
+            localStorage.setItem('jarvis_active_pipeline_id', planId);
             viewMode = "detail";
             userClosedModal = true;
             const plan = plansCache.find(p => p.id === planId);

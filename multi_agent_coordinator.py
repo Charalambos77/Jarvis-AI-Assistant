@@ -73,6 +73,12 @@ async def run_research_phase_for_cycle(
                     f"(metric: {p.get('metric_name','?')} = {p.get('metric_value','?')})"
                     for p in patterns
                 )
+                if event_logger:
+                    event_logger({
+                        "event_type": "memory_recalled",
+                        "agent_id": agent_id,
+                        "data": {"patterns": [{"pattern": p["pattern"], "outcome": p["outcome"]} for p in patterns], "query": memory_query}
+                    })
 
         # Combine database patterns with physical project memory files
         combined_mem = memory_context or ""
@@ -95,6 +101,13 @@ async def run_research_phase_for_cycle(
             results.append(r)
             if event_logger:
                 event_logger({"event_type": "completed", "agent_id": agent_id, "data": r})
+                # Emit findings as separate event for constellation leaf nodes
+                if isinstance(r, dict) and r.get("findings"):
+                    event_logger({
+                        "event_type": "findings_discovered",
+                        "agent_id": agent_id,
+                        "data": r["findings"]
+                    })
 
     return {
         "status": "ok",

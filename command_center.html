@@ -300,10 +300,40 @@
             background: rgba(255, 255, 255, 0.15);
             box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
         }
-
-        #send-btn svg {
+        #send-btn svg, #mic-mute-btn svg {
             width: 14px;
             height: 14px;
+        }
+
+        #mic-mute-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #FFFFFF;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        #mic-mute-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+        }
+
+        #mic-mute-btn.muted {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #EF4444;
+        }
+
+        #mic-mute-btn.muted:hover {
+            background: rgba(239, 68, 68, 0.3);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
         }
 
         /* Side Panel */
@@ -649,6 +679,14 @@
         </div>
         <div class="chat-input-wrapper">
             <input type="text" id="chat-input" placeholder="Ask Jarvis..." autocomplete="off">
+            <button id="mic-mute-btn" title="Mute Microphone" style="margin-right: 8px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                    <line x1="12" y1="19" x2="12" y2="23"></line>
+                    <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>
+            </button>
             <button id="send-btn" title="Send">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                     stroke-linejoin="round">
@@ -727,13 +765,16 @@
             <div class="specific-task-actions" style="display: flex; flex-direction: column; gap: 8px;">
                 <button class="action-btn"
                     style="background: rgba(167, 139, 250, 0.15); border-color: #A78BFA; color: #A78BFA; width: 100%;"
-                    onclick="sendToJarvis('Break task #' + currentDetailTaskId + ' down into subtasks')">Break task down</button>
+                    onclick="sendToJarvis('Break task #' + currentDetailTaskId + ' down into subtasks')">Break task
+                    down</button>
                 <button class="action-btn"
                     style="background: rgba(96, 165, 250, 0.15); border-color: #60A5FA; color: #60A5FA; width: 100%;"
-                    onclick="sendToJarvis('Create an implementation plan for task #' + currentDetailTaskId + ' and save it as a note attached to the task')">Create implementation plan</button>
+                    onclick="sendToJarvis('Create an implementation plan for task #' + currentDetailTaskId + ' and save it as a note attached to the task')">Create
+                    implementation plan</button>
                 <button class="action-btn"
                     style="background: rgba(34, 211, 238, 0.15); border-color: #22D3EE; color: #22D3EE; width: 100%;"
-                    onclick="sendToJarvis('Start a pipeline to handle task #' + currentDetailTaskId + ' autonomously')">Let Jarvis handle it</button>
+                    onclick="sendToJarvis('Start a pipeline to handle task #' + currentDetailTaskId + ' autonomously')">Let
+                    Jarvis handle it</button>
             </div>
         </div>
 
@@ -1217,17 +1258,17 @@
                 }
             });
 
-             // 4. Add new subtasks
-             subTasks.forEach((t, index) => {
-                 if (!liveNodeMap.has(t.id) && !isBatchCreatingSubtasks) {
-                     const parentReg = liveNodeMap.get(t.parent_id);
-                     if (parentReg) {
-                         const offset = getSubtaskOffset(index, subTasks.length);
-                         const targetPos = parentReg.position.clone().add(offset);
-                         triggerSubtaskCreatedAnimation(t, t.parent_id, targetPos);
-                     }
-                 }
-             });
+            // 4. Add new subtasks
+            subTasks.forEach((t, index) => {
+                if (!liveNodeMap.has(t.id) && !isBatchCreatingSubtasks) {
+                    const parentReg = liveNodeMap.get(t.parent_id);
+                    if (parentReg) {
+                        const offset = getSubtaskOffset(index, subTasks.length);
+                        const targetPos = parentReg.position.clone().add(offset);
+                        triggerSubtaskCreatedAnimation(t, t.parent_id, targetPos);
+                    }
+                }
+            });
 
             // 5. Add new notes
             activeNotes.forEach((note, index) => {
@@ -2261,7 +2302,7 @@
                     // Phase B (0.5 - 1.5s): Color Morph & Orbiting Particles
                     if (elapsed >= 0.5 && elapsed < 1.5) {
                         const t = (elapsed - 0.5) / 1.0;
-                        
+
                         // Color morphing
                         if (oldColorHex !== newColorHex) {
                             const morphedColor = oldColor.clone().lerp(newColor, t);
@@ -2309,7 +2350,7 @@
                     nodesGroup.remove(ringMesh);
                     nodesGroup.remove(orbitGroup);
                     registry.group.scale.set(1, 1, 1);
-                    
+
                     if (oldColorHex !== newColorHex) {
                         if (registry.group.glowSprite) {
                             registry.group.glowSprite.material.color.copy(newColor);
@@ -2322,7 +2363,7 @@
                             registry.data.taskObj.priority = newPriority;
                         }
                     }
-                    
+
                     delete registry.animating;
                 }
             });
@@ -2596,7 +2637,7 @@
 
             const pulseCount = 5;
             const pulses = [];
-            
+
             for (let i = 0; i < pulseCount; i++) {
                 const angle = (i / pulseCount) * Math.PI * 2;
                 const startPos = new THREE.Vector3(
@@ -2604,7 +2645,7 @@
                     0.9,
                     Math.sin(angle) * 0.4
                 );
-                
+
                 const leadSprite = new THREE.Sprite(greenMat);
                 leadSprite.scale.set(0.04, 0.04, 1);
                 nodesGroup.add(leadSprite);
@@ -2890,7 +2931,7 @@
             const theta = Math.random() * 2 * Math.PI;
             const phi = Math.acos(2 * Math.random() - 1);
             const impactRadius = 0.45 + Math.random() * 0.4;
-            
+
             const impactX = impactRadius * Math.sin(phi) * Math.cos(theta);
             const impactY = impactRadius * Math.sin(phi) * Math.sin(theta);
             const impactZ = impactRadius * Math.cos(phi);
@@ -3457,14 +3498,13 @@
                 console.error(err);
                 list.innerHTML = `<div style="color: #F87171; font-size: 12px;">Could not load tasks. Is Jarvis running?</div>`;
             }
-        }
-
-        // ==========================================
+        }        // ==========================================
         // 6. JARVIS LIVE API INTEGRATION
         // ==========================================
         const chatInput = document.getElementById('chat-input');
         const chatMessages = document.getElementById('chat-messages');
         const sendBtn = document.getElementById('send-btn');
+        const micMuteBtn = document.getElementById('mic-mute-btn');
         const orbIndicator = document.getElementById('orb-indicator');
         const orbLabel = document.getElementById('orb-label');
 
@@ -3472,6 +3512,19 @@
         let isFirstPoll = true;
         let orbCurrentState = 'idle';
         let lastSpokenWord = '';
+
+        micMuteBtn.addEventListener('click', async () => {
+            try {
+                await fetch('/jarvis/mute-mic', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                pollState(); // immediately refresh state
+            } catch (e) {
+                console.error("Error toggling mic mute:", e);
+            }
+        });
 
         // Tracker for frontend state
         let currentUiState = {
@@ -3490,7 +3543,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(currentUiState)
                 });
-            } catch(e) {}
+            } catch (e) { }
         }
 
         // Report action acknowledgement back to backend
@@ -3501,7 +3554,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action, status })
                 });
-            } catch(e) {}
+            } catch (e) { }
         }
 
         // Poll /state every 800ms for live updates from voice commands
@@ -3543,6 +3596,34 @@
                         syncUiState({ sleeping: isSleeping });
                     }
 
+                    // Update mic mute button visual state
+                    const micMuted = !!data.mic_muted;
+                    if (micMuted) {
+                        micMuteBtn.classList.add('muted');
+                        micMuteBtn.title = "Unmute Microphone";
+                        micMuteBtn.innerHTML = `
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="1" y1="1" x2="23" y2="23"></line>
+                                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                                <path d="M17 11a6.9 6.9 0 0 1-2.49 5.27"></path>
+                                <path d="M19 10v1a7.92 7.92 0 0 1-.78 3.44"></path>
+                                <path d="M5 10v1a7.92 7.92 0 0 0 .78 3.44"></path>
+                                <line x1="12" y1="19" x2="12" y2="23"></line>
+                                <line x1="8" y1="23" x2="16" y2="23"></line>
+                            </svg>
+                        `;
+                    } else {
+                        micMuteBtn.classList.remove('muted');
+                        micMuteBtn.title = "Mute Microphone";
+                        micMuteBtn.innerHTML = `
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                <line x1="12" y1="19" x2="12" y2="23"></line>
+                                <line x1="8" y1="23" x2="16" y2="23"></line>
+                            </svg>
+                        `;
+                    }
                     // Render any new messages from voice interaction
                     const messages = data.messages || [];
                     if (messages.length > lastMessageCount) {
@@ -3832,7 +3913,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text })
                 });
-                
+
                 // Poll immediately to show user's message
                 setTimeout(pollState, 50);
 
@@ -3909,7 +3990,7 @@
                     const div = document.createElement('div');
                     div.className = 'task-live-item';
                     div.style.borderLeftColor = n.status === 'done' ? 'rgba(255,255,255,0.1)' : '#F59E0B';
-                    const dateStr = n.created_at ? new Date(n.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '';
+                    const dateStr = n.created_at ? new Date(n.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
                     div.innerHTML = `
                         <div class="task-live-title" style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
                             <span>${n.content}</span>
@@ -3962,21 +4043,21 @@
                     <div>
                         <div class="section-title">AI PROVIDER</div>
                         <select id="cfg-provider" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#fff;padding:10px 14px;border-radius:6px;font-size:13px;cursor:pointer;">
-                            <option value="gemini" ${s.provider==='gemini'?'selected':''}>Gemini (Cloud)</option>
-                            <option value="ollama" ${s.provider==='ollama'||!s.provider?'selected':''}>Ollama (Local)</option>
+                            <option value="gemini" ${s.provider === 'gemini' ? 'selected' : ''}>Gemini (Cloud)</option>
+                            <option value="ollama" ${s.provider === 'ollama' || !s.provider ? 'selected' : ''}>Ollama (Local)</option>
                         </select>
                     </div>
 
                     <div>
-                        <div class="section-title">VOICE SPEED — <span id="cfg-speed-val">${s.voice_speed||175}</span> WPM</div>
-                        <input type="range" id="cfg-speed" min="100" max="300" step="5" value="${s.voice_speed||175}"
+                        <div class="section-title">VOICE SPEED — <span id="cfg-speed-val">${s.voice_speed || 175}</span> WPM</div>
+                        <input type="range" id="cfg-speed" min="100" max="300" step="5" value="${s.voice_speed || 175}"
                             style="width:100%;accent-color:#A78BFA;"
                             oninput="document.getElementById('cfg-speed-val').textContent=this.value">
                     </div>
 
                     <div>
-                        <div class="section-title">WAKE WORD SENSITIVITY — <span id="cfg-thresh-val">${((s.wake_word_threshold||0.5)*100).toFixed(0)}%</span></div>
-                        <input type="range" id="cfg-threshold" min="0.1" max="0.9" step="0.05" value="${s.wake_word_threshold||0.5}"
+                        <div class="section-title">WAKE WORD SENSITIVITY — <span id="cfg-thresh-val">${((s.wake_word_threshold || 0.5) * 100).toFixed(0)}%</span></div>
+                        <input type="range" id="cfg-threshold" min="0.1" max="0.9" step="0.05" value="${s.wake_word_threshold || 0.5}"
                             style="width:100%;accent-color:#A78BFA;"
                             oninput="document.getElementById('cfg-thresh-val').textContent=Math.round(this.value*100)+'%'">
                         <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Lower = more sensitive. Higher = requires clearer 'Hey Jarvis'.</div>
@@ -3985,9 +4066,9 @@
                     <div>
                         <div class="section-title">THEME</div>
                         <select id="cfg-theme" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#fff;padding:10px 14px;border-radius:6px;font-size:13px;cursor:pointer;">
-                            <option value="cyberpunk" ${s.theme==='cyberpunk'?'selected':''}>Cyberpunk</option>
-                            <option value="dark" ${s.theme==='dark'?'selected':''}>Dark</option>
-                            <option value="light" ${s.theme==='light'?'selected':''}>Light</option>
+                            <option value="cyberpunk" ${s.theme === 'cyberpunk' ? 'selected' : ''}>Cyberpunk</option>
+                            <option value="dark" ${s.theme === 'dark' ? 'selected' : ''}>Dark</option>
+                            <option value="light" ${s.theme === 'light' ? 'selected' : ''}>Light</option>
                         </select>
                     </div>
 

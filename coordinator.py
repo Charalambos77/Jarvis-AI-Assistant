@@ -603,8 +603,16 @@ def outsource_google_search(query: str) -> str:
         )
         return res.text or "No results found."
     except Exception as e:
-        print(f"Error in outsourced Google Search: {e}")
-        return f"Failed to perform search: {e}"
+        print(f"Error in outsourced Google Search: {e}. Falling back to general knowledge...")
+        try:
+            fallback_res = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=f"Summarize what you know about: '{query}'. Keep your response extremely brief, under 15 words, factual and spoken-friendly."
+            )
+            return fallback_res.text or "Search service is currently unavailable."
+        except Exception as fallback_err:
+            return f"Search service is currently unavailable: {fallback_err}"
+
 
 TOOL_IMPL = {
     "add_task": lambda conn, **kw: db.add_task(conn, **kw),
