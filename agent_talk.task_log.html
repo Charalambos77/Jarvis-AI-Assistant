@@ -811,6 +811,9 @@
         let lastChatData = [];
         let lastThinkingData = [];
         let lastNarrativeData = [];
+        let lastChatStr = '';
+        let lastThinkingStr = '';
+        let lastNarrativeStr = '';
         const expandedMessages = new Set();
         const collapsedSections = new Set();
 
@@ -1090,8 +1093,12 @@ ${item.content}
                     if (chatRes.ok) {
                         const data = await chatRes.json();
                         if (data.conversations) {
-                            lastChatData = data.conversations;
-                            renderChatLogs(lastChatData);
+                            const chatStr = JSON.stringify(data.conversations);
+                            if (chatStr !== lastChatStr) {
+                                lastChatData = data.conversations;
+                                lastChatStr = chatStr;
+                                renderChatLogs(lastChatData);
+                            }
                         }
                     }
                 } else if (activeRightTab === 'thoughts') {
@@ -1099,8 +1106,12 @@ ${item.content}
                     if (thinkRes.ok) {
                         const data = await thinkRes.json();
                         if (data.thinking) {
-                            lastThinkingData = data.thinking;
-                            renderThinkingLogs(lastThinkingData);
+                            const thinkStr = JSON.stringify(data.thinking);
+                            if (thinkStr !== lastThinkingStr) {
+                                lastThinkingData = data.thinking;
+                                lastThinkingStr = thinkStr;
+                                renderThinkingLogs(lastThinkingData);
+                            }
                         }
                     }
                 } else if (activeRightTab === 'narrative') {
@@ -1108,8 +1119,12 @@ ${item.content}
                     if (narrRes.ok) {
                         const data = await narrRes.json();
                         if (data.narrative) {
-                            lastNarrativeData = data.narrative;
-                            renderNarrativeLogs(lastNarrativeData);
+                            const narrStr = JSON.stringify(data.narrative);
+                            if (narrStr !== lastNarrStr) {
+                                lastNarrativeData = data.narrative;
+                                lastNarrativeStr = narrStr;
+                                renderNarrativeLogs(lastNarrativeData);
+                            }
                         }
                     }
                 }
@@ -1121,6 +1136,13 @@ ${item.content}
         setInterval(fetchLogs, 1000);
         fetchLogs();
 
+        // Report current page to Jarvis backend
+        fetch(apiBase + '/jarvis/state-update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({current_page: 'Task Logs/Chat'})
+        });
+
         // ==========================================
         // 3. VOICE NAVIGATION POLLING (/state)
         // ==========================================
@@ -1129,15 +1151,29 @@ ${item.content}
                 const res = await fetch(apiBase + '/state');
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.ui_action && data.ui_action.type === 'navigate' && data.ui_action.url) {
-                        window.location.href = data.ui_action.url;
-                    } else if (data.ui_action && data.ui_action.type === 'control_interface') {
-                        if (data.ui_action.action === 'go_back') {
-                            window.history.back();
-                        } else if (data.ui_action.action === 'go_to_brain') {
-                            window.location.href = 'command_center.html';
-                        } else if (data.ui_action.action === 'go_to_plan') {
-                            window.location.href = 'plan.html';
+                    if (data.ui_action) {
+                        const act = data.ui_action;
+                        if (act.type === 'navigate' && act.url) {
+                            window.location.href = act.url;
+                        } else if (act.type === 'control_interface') {
+                            if (act.action === 'go_back') {
+                                window.history.back();
+                            } else if (act.action === 'go_to_brain') {
+                                window.location.href = 'command_center.html';
+                            } else if (act.action === 'go_to_plan') {
+                                window.location.href = 'plan.html?from=execution';
+                            } else if (act.action === 'go_to_apis') {
+                                window.location.href = 'provider_comparison.html?from=execution';
+                            } else if (act.action === 'go_to_execution') {
+                                window.location.href = 'execution.html';
+                            }
+                        } else if (act.type === 'execution_control') {
+                            if (act.action === 'exec_open_console') {
+                                // Already here, no-op
+                            } else if (act.action && act.action.startsWith('exec_')) {
+                                // For execution-specific actions, redirect user to the execution map page
+                                window.location.href = 'execution.html';
+                            }
                         }
                     }
                 }

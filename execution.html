@@ -710,6 +710,51 @@
 
 
     <script>
+        // Report current page to Jarvis backend
+        fetch('/jarvis/state-update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({current_page: 'Execution'})
+        });
+
+        // Report action acknowledgement back to backend
+        async function sendAck(action, status = "ok") {
+            try {
+                await fetch('/jarvis/ack', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, status })
+                });
+            } catch (e) { }
+        }
+
+        // Floating toast message support
+        function showToast(message) {
+            if (!message) return;
+            let toast = document.getElementById('jarvis-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'jarvis-toast';
+                toast.style.cssText = `
+                    position: fixed; top: 90px; left: 50%; transform: translateX(-50%) translateY(-20px);
+                    background: rgba(15, 17, 28, 0.92); border: 1px solid rgba(167, 139, 250, 0.4);
+                    backdrop-filter: blur(20px); color: #E2E8F0; font-size: 13px; font-weight: 500;
+                    padding: 12px 24px; border-radius: 8px; z-index: 1000; opacity: 0;
+                    transition: opacity 0.3s ease, transform 0.3s ease; pointer-events: none;
+                    box-shadow: 0 8px 32px rgba(0,0,0,0.5); max-width: 420px; text-align: center;
+                `;
+                document.body.appendChild(toast);
+            }
+            toast.textContent = message;
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateX(-50%) translateY(0)';
+            clearTimeout(toast._hideTimer);
+            toast._hideTimer = setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(-50%) translateY(-20px)';
+            }, 3500);
+        }
+
         // =========================================================
         // GLOBAL CONTROLLER & FLASH TRANSITION LOGIC
         // =========================================================
@@ -1247,6 +1292,9 @@
                 wrapper.style.transformOrigin = 'center center';
                 wrapper.style.transform = 'translate(0px, 0px) scale(1.0)';
             };
+
+            window.openOverviewPanel = openOverviewPanel;
+            window.openDetailPanel = openDetailPanel;
 
             fetchTasks();
             setInterval(fetchTasks, 3000);
@@ -2130,7 +2178,40 @@
                 }
             }
 
+            // Expose internal functions to window for voice control
+            window.enterDrillDown = enterDrillDown;
+            window.exitDrillDown = exitDrillDown;
+
+            window.drillIntoDepartmentByName = function(name) {
+                if (!name || !departments) return;
+                const nameLower = name.toLowerCase();
+                const dept = departments.find(d => d.label.toLowerCase().includes(nameLower));
+                if (dept) {
+                    enterDrillDown(dept.id);
+                }
+            };
+
+            window.openAgentPanelById = function(agentId) {
+                if (!cyActive || !agentId) return;
+                const agentIdStr = String(agentId).toLowerCase();
+                const node = cyActive.nodes().filter(n => {
+                    const d = n.data();
+                    return d.agentId && (
+                        String(d.agentId).toLowerCase() === agentIdStr ||
+                        String(d.label).toLowerCase().includes(agentIdStr) ||
+                        String(d.id).toLowerCase() === agentIdStr
+                    );
+                }).first();
+                if (node && node.length) {
+                    openAgentPanel(node.data());
+                }
+            };
+
         })();
+
+        // Explicitly expose view switcher actions to window
+        window.switchToActiveView = switchToActiveView;
+        window.switchToIdleView = switchToIdleView;
 
 
     </script>
@@ -2208,10 +2289,58 @@
                         lastMessageCount = messages.length;
                     }
 
-                    if (data.ui_action && data.ui_action.type === 'navigate' && data.ui_action.url) {
-                        window.location.href = data.ui_action.url;
-                    } else if (data.ui_action && data.ui_action.type === 'control_interface') {
-                        if (data.ui_action.action === 'go_back') { window.history.back(); }
+                    if (data.ui_action) {
+                        const act = data.ui_action;
+                        let ackedAction = null;
+
+                        if (act.type === 'navigate' && act.url) {
+                            window.location.href = act.url;
+                        } else if (act.type === 'control_interface') {
+                            ackedAction = act.action;
+                            if (act.action === 'go_back') {
+                                window.history.back();
+                            } else if (act.action === 'go_to_brain') {
+                                window.location.href = 'command_center.html';
+                            } else if (act.action === 'go_to_plan') {
+                                window.location.href = 'plan.html?from=execution';
+                            } else if (act.action === 'go_to_apis') {
+                                window.location.href = 'provider_comparison.html?from=execution';
+                            } else if (act.action === 'flash_notification') {
+                                showToast(act.payload?.message || '');
+                            }
+                        } else if (act.type === 'execution_control') {
+                            ackedAction = act.action;
+                            try {
+                                if (act.action === 'open_task_panel' || act.action === 'exec_open_task_panel') {
+                                    if (window.openOverviewPanel) window.openOverviewPanel();
+                                } else if (act.action === 'close_panel' || act.action === 'exec_close_panel') {
+                                    if (window.closeIdlePanel) window.closeIdlePanel();
+                                    if (window.closeActivePanel) window.closeActivePanel();
+                                } else if (act.action === 'drill_down' || act.action === 'exec_drill_department') {
+                                    const deptName = act.department || (act.payload && act.payload.department) || '';
+                                    if (window.drillIntoDepartmentByName && deptName) {
+                                        window.drillIntoDepartmentByName(deptName);
+                                    }
+                                } else if (act.action === 'exit_drill' || act.action === 'exec_exit_drill') {
+                                    if (window.exitDrillDown) window.exitDrillDown();
+                                } else if (act.action === 'show_idle' || act.action === 'exec_show_idle') {
+                                    if (window.switchToIdleView) window.switchToIdleView();
+                                } else if (act.action === 'show_active' || act.action === 'exec_show_active') {
+                                    if (window.switchToActiveView) window.switchToActiveView();
+                                } else if (act.action === 'exec_open_agent_panel') {
+                                    const agentId = act.payload && act.payload.agent_id;
+                                    if (window.openAgentPanelById && agentId) {
+                                        window.openAgentPanelById(agentId);
+                                    }
+                                } else if (act.action === 'exec_open_console') {
+                                    window.location.href = 'agent_talk.task_log.html';
+                                }
+                            } catch (e) {
+                                ackedAction = null; // Don't ack on failure
+                            }
+                        }
+
+                        if (ackedAction) sendAck(ackedAction, "ok");
                     }
                 }
             } catch (e) { }

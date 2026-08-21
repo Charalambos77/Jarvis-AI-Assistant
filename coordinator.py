@@ -358,7 +358,15 @@ TOOLS = [
                         "wake_up",
                         "go_to_sleep",
                         "flash_notification",
-                        "reset_camera"
+                        "reset_camera",
+                        "exec_open_task_panel",
+                        "exec_close_panel",
+                        "exec_open_agent_panel",
+                        "exec_drill_department",
+                        "exec_exit_drill",
+                        "exec_show_idle",
+                        "exec_show_active",
+                        "exec_open_console"
                     ],
                     "description": (
                         "go_to_plan: Navigate to the Plan page. "
@@ -375,15 +383,25 @@ TOOLS = [
                         "wake_up: Wake Jarvis from sleep mode. "
                         "go_to_sleep: Put UI into sleep/dim mode. "
                         "flash_notification: Show a temporary floating notification — use payload.message. "
-                        "reset_camera: Reset the 3D camera to default position."
+                        "reset_camera: Reset the 3D camera to default position. "
+                        "exec_open_task_panel: Open the task constellation side panel (execution idle view). "
+                        "exec_close_panel: Close any open execution side panel. "
+                        "exec_open_agent_panel: Open agent detail side panel — requires payload.agent_id. "
+                        "exec_drill_department: Drill into a specific department cycle — requires payload.department. "
+                        "exec_exit_drill: Exit department drill-down back to full constellation. "
+                        "exec_show_idle: Switch to idle/task constellation view. "
+                        "exec_show_active: Switch to active pipeline constellation view. "
+                        "exec_open_console: Navigate to the Task Logs/Chat page."
                     )
                 },
                 "payload": {
                     "type": "object",
-                    "description": "Extra data for the action. task_id (int) for focus/detail actions; message (str) for notifications.",
+                    "description": "Extra data. task_id for focus/detail; message for notifications; department for drill-down; agent_id for agent panel.",
                     "properties": {
                         "task_id": {"type": "integer", "description": "Task ID to focus on or open detail for"},
-                        "message": {"type": "string", "description": "Message text for flash_notification"}
+                        "message": {"type": "string", "description": "Message text for flash_notification"},
+                        "department": {"type": "string", "description": "Department/cycle name for exec_drill_department"},
+                        "agent_id": {"type": "string", "description": "Agent ID for exec_open_agent_panel"}
                     }
                 }
             },
@@ -717,6 +735,19 @@ UI_MAP = (
     "  - Show floating toast message. Action: flash_notification + payload.message\n"
     "  - Reset 3D camera. Action: reset_camera\n"
     "  - Shut down entirely with collapse animation. Action: exit_completely\n"
+    "EXECUTION PAGE (execution.html):\n"
+    "  Sub-views:\n"
+    "    - Idle View: Task Constellation Map (when no pipeline running). Shows task nodes orbiting core.\n"
+    "    - Active View: Department Execution Constellation (when pipeline running). Shows agent department cycles orbiting core.\n"
+    "  Actions (only when current_page is 'Execution'):\n"
+    "    - exec_open_task_panel: Open task database side panel in idle view.\n"
+    "    - exec_close_panel: Close any open side panel.\n"
+    "    - exec_drill_department + payload.department: Drill into a department cycle (e.g. 'research').\n"
+    "    - exec_exit_drill: Exit drill-down, return to full constellation.\n"
+    "    - exec_open_agent_panel + payload.agent_id: Open agent detail panel.\n"
+    "    - exec_show_idle: Switch to idle task constellation view.\n"
+    "    - exec_show_active: Switch to active pipeline constellation view.\n"
+    "    - exec_open_console: Navigate to Task Logs/Chat page.\n"
     "VOICE EXAMPLES (always invoke control_interface for these):\n"
     "  'open settings' → open_settings_panel\n"
     "  'show the plan' / 'go to plan' → go_to_plan\n"
@@ -742,6 +773,11 @@ UI_MAP = (
     "  'track youtube CTR at 0.03' → update_metric\n"
     "  'show all metrics' → read_metrics\n"
     "  'switch to gem' → change_settings(provider='gemini')\n"
+    "  'drill into research' (on execution page) → exec_drill_department, payload={department:'research'}\n"
+    "  'zoom out' (on execution page) → exec_exit_drill\n"
+    "  'show the pipeline' (on execution page) → exec_show_active\n"
+    "  'open console' / 'show logs' → exec_open_console\n"
+    "  'show task database' (on execution page) → exec_open_task_panel\n"
 )
 
 SYSTEM_PROMPT = (
@@ -767,6 +803,9 @@ SYSTEM_PROMPT = (
     "13. If the user refers to you as 'Jar' or says 'Jar', understand that they are addressing you as 'Jarvis'.\n"
     "14. If the user asks to resume, track, delete, or check a pipeline by project name or task, ALWAYS check `get_pipelines` first to identify its ID.\n"
     "15. Before deleting a pipeline (delete_pipeline), you MUST request double confirmation from the user conversationally. First ask: 'Are you sure you want to delete pipeline Y, Sir?'. If they confirm, ask a second time: 'Please confirm once more, Sir: this action is permanent. Should I delete Y?'. Do NOT invoke the delete_pipeline tool until they have confirmed BOTH times.\n"
+    "16. When the user is on the Execution Page (current_page contains 'Execution'), use exec_* actions for "
+    "in-page navigation. For cross-page navigation from execution, the system will automatically append "
+    "'?from=execution' to preserve context.\n"
 )
 
 
@@ -1039,6 +1078,7 @@ def handle_request(transcript: str) -> str:
                             "go_to_plan": "Navigating to the Plan page, Sir.",
                             "go_to_brain": "Returning to the Brain Core, Sir.",
                             "go_to_apis": "Going to the APIs page, Sir.",
+                            "go_to_execution": "Going into execution mode, Sir.",
                             "open_side_panel": "Opening the side panel, Sir.",
                             "close_side_panel": "Closing the side panel, Sir.",
                             "open_notes_panel": "Opening notes panel, Sir.",
@@ -1047,7 +1087,15 @@ def handle_request(transcript: str) -> str:
                             "exit_completely": "Shutting down completely, goodbye.",
                             "wake_up": "I am awake, Sir.",
                             "go_to_sleep": "Going to sleep, Sir.",
-                            "reset_camera": "Camera view reset, Sir."
+                            "reset_camera": "Camera view reset, Sir.",
+                            "exec_open_task_panel": "Opening task database, Sir.",
+                            "exec_close_panel": "Closing the panel, Sir.",
+                            "exec_drill_department": "Drilling into that department, Sir.",
+                            "exec_exit_drill": "Zooming back out, Sir.",
+                            "exec_show_idle": "Switching to idle view, Sir.",
+                            "exec_show_active": "Showing pipeline constellation, Sir.",
+                            "exec_open_console": "Opening the console, Sir.",
+                            "exec_open_agent_panel": "Opening agent details, Sir."
                         }
                         if action in action_map:
                             instant_reply = action_map[action]

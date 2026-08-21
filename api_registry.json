@@ -20,6 +20,8 @@
     "status": "up"
   },
   "arxiv_api": {
-    "status": "up"
+    "status": "up",
+    "method_id": "public_access",
+    "last_updated": "2026-08-21 16:23:58"
   }
 }

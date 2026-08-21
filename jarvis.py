@@ -430,11 +430,26 @@ def jarvis_tool_listener(name, args, result):
             if action == "go_to_execution":
                 UI_ACTION = {"type": "navigate", "url": "execution.html"}
             elif action == "go_to_plan":
-                UI_ACTION = {"type": "navigate", "url": "plan.html"}
+                with JARVIS_STATE_LOCK:
+                    cp = JARVIS_UI_SNAPSHOT.get("current_page", "")
+                is_exec = "execution" in cp.lower() or "task logs" in cp.lower()
+                url = "plan.html?from=execution" if is_exec else "plan.html"
+                UI_ACTION = {"type": "navigate", "url": url}
             elif action == "go_to_brain":
                 UI_ACTION = {"type": "navigate", "url": "command_center.html"}
             elif action == "go_to_apis":
-                UI_ACTION = {"type": "navigate", "url": "provider_comparison.html"}
+                with JARVIS_STATE_LOCK:
+                    cp = JARVIS_UI_SNAPSHOT.get("current_page", "")
+                is_exec = "execution" in cp.lower() or "task logs" in cp.lower()
+                url = "provider_comparison.html?from=execution" if is_exec else "provider_comparison.html"
+                UI_ACTION = {"type": "navigate", "url": url}
+            elif action and action.startswith("exec_"):
+                # Forward execution-specific actions directly
+                UI_ACTION = {
+                    "type": "execution_control",
+                    "action": action,
+                    "payload": args.get("payload") or {}
+                }
             else:
                 UI_ACTION = {
                     "type": "control_interface",
@@ -916,12 +931,62 @@ coordinator.register_state_provider("read_metrics", read_metrics_local)
 
 coordinator.register_tool_listener(jarvis_tool_listener)
 
+def _extract_after_keyword(text: str, keywords: list) -> str:
+    """Extract the text that follows any of the keywords in the transcript."""
+    for kw in keywords:
+        idx = text.find(kw)
+        if idx >= 0:
+            remainder = text[idx + len(kw):].strip()
+            # Clean up common filler words
+            for prefix in ["the ", "a ", "my "]:
+                if remainder.startswith(prefix):
+                    remainder = remainder[len(prefix):]
+            return remainder
+    return text
+
 def check_navigation_intent(transcript: str) -> str:
     global UI_ACTION
     t_lower = transcript.lower()
+
+    # Determine current page context
+    with JARVIS_STATE_LOCK:
+        current_page = JARVIS_UI_SNAPSHOT.get("current_page", "Brain Core")
+
+    is_on_execution = "execution" in current_page.lower()
+    is_on_task_logs = "task logs" in current_page.lower()
+
+    # Execution-specific commands (only when on execution page)
+    if is_on_execution:
+        if any(k in t_lower for k in ["show tasks", "open tasks", "task database", "show task constellation"]):
+            with STATE_LOCK:
+                UI_ACTION = {"type": "execution_control", "action": "open_task_panel"}
+            return "exec_tasks"
+        elif any(k in t_lower for k in ["drill into", "zoom into", "enter department", "go into"]):
+            dept_name = _extract_after_keyword(t_lower, ["drill into", "zoom into", "enter department", "go into"])
+            with STATE_LOCK:
+                UI_ACTION = {"type": "execution_control", "action": "drill_down", "department": dept_name}
+            return "exec_drill"
+        elif any(k in t_lower for k in ["zoom out", "exit drill", "go back to constellation", "back out"]):
+            with STATE_LOCK:
+                UI_ACTION = {"type": "execution_control", "action": "exit_drill"}
+            return "exec_exit_drill"
+        elif any(k in t_lower for k in ["close panel", "close everything", "hide panel"]):
+            with STATE_LOCK:
+                UI_ACTION = {"type": "execution_control", "action": "close_panel"}
+            return "exec_close"
+        elif any(k in t_lower for k in ["show pipeline", "active view", "show agents", "show constellation"]):
+            with STATE_LOCK:
+                UI_ACTION = {"type": "execution_control", "action": "show_active"}
+            return "exec_active"
+        elif any(k in t_lower for k in ["idle view", "show idle"]):
+            with STATE_LOCK:
+                UI_ACTION = {"type": "execution_control", "action": "show_idle"}
+            return "exec_idle"
+
+    # Standard cross-page navigation (with execution context preservation)
     if any(k in t_lower for k in ["console", "console stream", "task console", "chat stream", "console logs", "agent chat"]):
         with STATE_LOCK:
-            UI_ACTION = {"type": "navigate", "url": "execution.html"}
+            UI_ACTION = {"type": "navigate", "url": "agent_talk.task_log.html"}
         return "console"
     elif any(k in t_lower for k in ["execution mode", "execution map", "go to execution", "open execution"]):
         with STATE_LOCK:
@@ -941,9 +1006,16 @@ def check_navigation_intent(transcript: str) -> str:
             UI_ACTION = {"type": "navigate", "url": "command_center.html"}
         return "brain"
     elif any(k in t_lower for k in ["open plan", "go to plan", "plan page"]):
+        # Context-aware: preserve execution context in URL
+        url = "plan.html?from=execution" if (is_on_execution or is_on_task_logs) else "plan.html"
         with STATE_LOCK:
-            UI_ACTION = {"type": "navigate", "url": "plan.html"}
+            UI_ACTION = {"type": "navigate", "url": url}
         return "plan"
+    elif any(k in t_lower for k in ["go to api", "open api", "go to providers", "show providers", "go to mcp"]):
+        url = "provider_comparison.html?from=execution" if (is_on_execution or is_on_task_logs) else "provider_comparison.html"
+        with STATE_LOCK:
+            UI_ACTION = {"type": "navigate", "url": url}
+        return "apis"
     return ""
 
 def handle_request(transcript: str) -> str:
@@ -958,6 +1030,21 @@ def handle_request(transcript: str) -> str:
         return "Navigating to the brain core map."
     elif nav_target == "back":
         return "Going back to the previous page."
+    elif nav_target == "apis":
+        return "Going to the APIs page."
+    # Execution-specific commands
+    elif nav_target == "exec_tasks":
+        return "Opening task database."
+    elif nav_target == "exec_drill":
+        return "Drilling into that department."
+    elif nav_target == "exec_exit_drill":
+        return "Zooming back out."
+    elif nav_target == "exec_close":
+        return "Closing the panel."
+    elif nav_target == "exec_active":
+        return "Showing pipeline constellation."
+    elif nav_target == "exec_idle":
+        return "Switching to idle view."
     return coordinator.handle_request(transcript)
 
 

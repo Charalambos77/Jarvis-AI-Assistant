@@ -3524,6 +3524,13 @@
       toast.textContent = "Hello. I am Jarvis. How can I help you compare AI providers today?";
     }
 
+    // Report current page to Jarvis backend
+    fetch('/jarvis/state-update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({current_page: 'APIs/MCPs Page'})
+    });
+
     function pollState() {
       fetch('/state')
         .then(r => r.json())
@@ -3541,14 +3548,7 @@
               const msg = messages[i];
               const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : 'user';
 
-              if (role === 'user') {
-                const textLower = msg.text.toLowerCase();
-                if (textLower.includes('go to brain') || textLower.includes('go to the brain') || textLower.includes('go back to brain') || textLower.includes('go back to the brain') || textLower.includes('command center')) {
-                  window.location.href = 'command-center';
-                } else if (textLower.includes('go to plan') || textLower.includes('show plan') || textLower.includes('open plan')) {
-                  window.location.href = 'plan.html';
-                }
-              } else if (role === 'jarvis') {
+              if (role === 'jarvis') {
                 const toast = document.getElementById('jarvis-toast');
                 if (toast) toast.textContent = msg.text;
               }
@@ -3558,12 +3558,19 @@
 
           if (data.ui_action) {
             const act = data.ui_action;
-            if (act.type === 'control_interface') {
+            if (act.type === 'navigate' && act.url) {
+              window.location.href = act.url;
+            } else if (act.type === 'control_interface') {
               const action = act.action;
-              if (action === 'go_to_brain') {
-                window.location.href = 'command-center';
+              if (action === 'go_back') {
+                window.history.back();
+              } else if (action === 'go_to_brain') {
+                window.location.href = 'command_center.html';
+              } else if (action === 'go_to_execution') {
+                window.location.href = 'execution.html';
               } else if (action === 'go_to_plan') {
-                window.location.href = 'plan.html';
+                const from = new URLSearchParams(window.location.search).get('from');
+                window.location.href = from === 'execution' ? 'plan.html?from=execution' : 'plan.html';
               }
             }
           }

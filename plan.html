@@ -2119,6 +2119,13 @@
         window.addEventListener('resize', drawConnectors);
         document.getElementById('pipeline').addEventListener('scroll', drawConnectors);
 
+        // Report current page to Jarvis backend
+        fetch('/jarvis/state-update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({current_page: 'Plan Page'})
+        });
+
         // State polling for voice assistant integrations
         let lastMessageCount = 0;
         let isFirstPoll = true;
@@ -2140,16 +2147,7 @@
                             const msg = messages[i];
                             const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : 'user';
 
-                            if (role === 'user') {
-                                const textLower = msg.text.toLowerCase();
-                                if (textLower.includes('go to brain') || textLower.includes('go to the brain') || textLower.includes('go back to brain') || textLower.includes('go back to the brain') || textLower.includes('command center')) {
-                                    window.location.href = 'command-center';
-                                } else if (textLower.includes('go to plan') || textLower.includes('show plan') || textLower.includes('open plan')) {
-                                    // already here
-                                } else if (textLower.includes('go to apis') || textLower.includes('show apis') || textLower.includes('open apis') || textLower.includes('provider')) {
-                                    window.location.href = 'provider_comparison.html';
-                                }
-                            } else if (role === 'jarvis') {
+                            if (role === 'jarvis') {
                                 document.querySelector('.jarvis-toast').innerText = msg.text;
                             }
                         }
@@ -2162,10 +2160,15 @@
                             window.location.href = act.url;
                         } else if (act.type === 'control_interface') {
                             const action = act.action;
-                            if (action === 'go_to_brain') {
-                                window.location.href = 'command-center';
+                            if (action === 'go_back') {
+                                window.history.back();
+                            } else if (action === 'go_to_brain') {
+                                window.location.href = 'command_center.html';
+                            } else if (action === 'go_to_execution') {
+                                window.location.href = 'execution.html';
                             } else if (action === 'go_to_apis') {
-                                window.location.href = 'provider_comparison.html';
+                                const from = new URLSearchParams(window.location.search).get('from');
+                                window.location.href = from === 'execution' ? 'provider_comparison.html?from=execution' : 'provider_comparison.html';
                             }
                         }
                     }

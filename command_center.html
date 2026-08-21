@@ -3632,29 +3632,6 @@
                             const role = msg.role === 'ai' ? 'jarvis' : msg.role === 'system' ? 'system' : msg.role === 'jarvis' ? 'jarvis' : 'user';
                             appendChatMessage(msg.text, role);
 
-                            // Voice / Text navigation triggers
-                            if (!isFirstPoll && role === 'user') {
-                                const textLower = msg.text.toLowerCase();
-                                if (textLower.includes('execution mode') || textLower.includes('execution map') || textLower.includes('go to execution') || textLower.includes('open execution')) {
-                                    window.location.href = 'execution.html';
-                                } else if (textLower.includes('console') || textLower.includes('task console') || textLower.includes('chat stream')) {
-                                    window.location.href = 'execution.html';
-                                } else if (textLower.includes('show plan') || textLower.includes('open plan') || textLower.includes('go to plan') || textLower.includes('go to the plan')) {
-                                    animateWarpExit();
-                                } else if (textLower.includes('close panel') || textLower.includes('exit focus') || textLower.includes('hide panel') || textLower.includes('close focus')) {
-                                    closePanel();
-                                } else if (textLower.includes('pan')) {
-                                    targetCameraPos.set(0, 0, 2.5);
-                                    openTasksPanel();
-                                } else if (textLower.includes('show task database') || textLower.includes('open task database') || textLower.includes('show tasks') || textLower.includes('open tasks')) {
-                                    targetCameraPos.set(0, 0, 2.5);
-                                    openTasksPanel();
-                                } else if (textLower.includes('show brain') || textLower.includes('open brain') || textLower.includes('focus on brain') || textLower.includes('go back')) {
-                                    window.location.href = 'command_center.html';
-                                } else if (textLower.includes('exit completely') || textLower.includes('shutdown completely')) {
-                                    animateCoreCollapse();
-                                }
-                            }
                         }
                         lastMessageCount = messages.length;
                     }
