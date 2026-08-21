@@ -281,7 +281,7 @@
             cursor: not-allowed;
         }
 
-        #send-btn {
+        #send-btn, #mic-mute-btn, #mute-btn {
             width: 36px;
             height: 36px;
             border-radius: 50%;
@@ -296,42 +296,23 @@
             flex-shrink: 0;
         }
 
-        #send-btn:hover {
+        #send-btn:hover, #mic-mute-btn:hover, #mute-btn:hover {
             background: rgba(255, 255, 255, 0.15);
             box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
         }
-        #send-btn svg, #mic-mute-btn svg {
+
+        #send-btn svg, #mic-mute-btn svg, #mute-btn svg {
             width: 14px;
             height: 14px;
         }
 
-        #mic-mute-btn {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            color: #FFFFFF;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s ease;
-            flex-shrink: 0;
-        }
-
-        #mic-mute-btn:hover {
-            background: rgba(255, 255, 255, 0.15);
-            box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
-        }
-
-        #mic-mute-btn.muted {
+        #mic-mute-btn.muted, #mute-btn.muted {
             background: rgba(239, 68, 68, 0.2);
             border-color: rgba(239, 68, 68, 0.4);
             color: #EF4444;
         }
 
-        #mic-mute-btn.muted:hover {
+        #mic-mute-btn.muted:hover, #mute-btn.muted:hover {
             background: rgba(239, 68, 68, 0.3);
             box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
         }
