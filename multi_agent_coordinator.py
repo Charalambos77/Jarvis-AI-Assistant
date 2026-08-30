@@ -85,7 +85,7 @@ async def run_research_phase_for_cycle(
         if physical_memories:
             combined_mem = "\n\nPHYSICAL PROJECT MEMORY FILES:\n" + "\n".join(physical_memories) + "\n\n" + combined_mem
         
-        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context, on_chunk_callback=on_chunk, event_logger=event_logger))
+        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context, on_chunk_callback=on_chunk, event_logger=event_logger, project_name=project_name))
 
     print(f"[Multi-Agent] Spawning {len(tasks)} research agents in parallel...")
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -301,6 +301,7 @@ async def run_execution_phase(
     gate_redirect_note: str | None = None,
     agent_ids_to_run: list[str] | None = None,
     event_logger=None,
+    project_name: str = "Default Project",
 ) -> dict:
     """Spawns all execution agents in parallel."""
     execution_agents = agent_plan.get("execution_agents", [])
@@ -321,7 +322,7 @@ async def run_execution_phase(
             event_logger({"event_type": "running", "agent_id": agent_id})
 
     tasks = [
-        run_execution_agent(cfg, blueprint, gate_redirect_note, event_logger=event_logger)
+        run_execution_agent(cfg, blueprint, gate_redirect_note, event_logger=event_logger, project_name=project_name)
         for cfg in execution_agents
     ]
 
@@ -533,7 +534,10 @@ async def run_full_pipeline(
     gate_approve_fn,        # async fn(gate_id: str, data: dict) -> {approved, redirect_note}
     event_logger=None,      # callable(event_dict) for observability — Step 11
     plan_id: str | None = None,
-    project_name: str = "Default Project"
+    project_name: str = "Default Project",
+    force_reexecute: bool = False,   # NEW: when resuming a plan already past execution
+                                      # (phase in qa/deploy/complete), re-run execution
+                                      # agents fresh instead of replaying stale exec_results.
 ) -> dict:
     """
     Runs the complete multi-agent pipeline with ordered cycles.
@@ -977,10 +981,14 @@ async def run_full_pipeline(
         # Check if execution phase completed
         skip_execution = False
         exec_results = []
-        if existing_plan and existing_plan.get("phase") in ('qa', 'deploy', 'complete'):
+        if existing_plan and existing_plan.get("phase") in ('qa', 'deploy', 'complete') and not force_reexecute:
             skip_execution = True
             exec_results = existing_plan.get("exec_results", [])
             print("[Pipeline] Resuming: Execution deliverables already completed. Skipping execution agents.")
+        elif existing_plan and force_reexecute:
+            print("[Pipeline] Resuming with force_reexecute=True: re-running execution agents fresh instead of replaying stale exec_results.")
+            if event_logger:
+                event_logger({"event_type": "narrative", "data": {"phase": "execution", "message": "Force re-executing — discarding stale exec_results and running execution agents fresh...", "icon": "🔁"}})
 
         if not skip_execution:
             # Phase 6: Execution + Quality Check
@@ -988,7 +996,7 @@ async def run_full_pipeline(
             if event_logger:
                 event_logger({"event_type": "narrative", "data": {"phase": "execution", "message": "Execution agents producing deliverables...", "icon": "⚡"}})
 
-            exec_output = await run_execution_phase(agent_plan, master_blueprint, event_logger=event_logger)
+            exec_output = await run_execution_phase(agent_plan, master_blueprint, event_logger=event_logger, project_name=project_name)
             exec_results = exec_output.get("agent_results", [])
             for r in exec_results:
                 if r.get("status") == "ok":
@@ -1009,7 +1017,7 @@ async def run_full_pipeline(
                 
                 retry_history.append(f"QA verification failure retry {qa_retry + 1} for agents {failed_ids}.")
                 exec_output = await run_execution_phase(
-                    agent_plan, master_blueprint, agent_ids_to_run=failed_ids, event_logger=event_logger
+                    agent_plan, master_blueprint, agent_ids_to_run=failed_ids, event_logger=event_logger, project_name=project_name
                 )
                 retry_map = {r["agent_id"]: r for r in exec_output["agent_results"]}
                 exec_results = [retry_map.get(r["agent_id"], r) for r in exec_results]
@@ -1071,7 +1079,8 @@ async def run_full_pipeline(
                     rejected_ids = await identify_rejected_agents(redirect_note, agent_plan)
                 exec_output = await run_execution_phase(
                     agent_plan, master_blueprint,
-                    agent_ids_to_run=rejected_ids, gate_redirect_note=redirect_note, event_logger=event_logger
+                    agent_ids_to_run=rejected_ids, gate_redirect_note=redirect_note, event_logger=event_logger,
+                    project_name=project_name
                 )
                 retry_map = {r["agent_id"]: r for r in exec_output["agent_results"]}
                 exec_results = [retry_map.get(r["agent_id"], r) for r in exec_results]

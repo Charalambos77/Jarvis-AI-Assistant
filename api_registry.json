@@ -14,10 +14,10 @@
     "fallback": null
   },
   "google_docs_api": {
-    "status": "up"
+    "status": "unknown"
   },
   "google_drive_api": {
-    "status": "up"
+    "status": "unknown"
   },
   "arxiv_api": {
     "status": "up",

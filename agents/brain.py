@@ -4,6 +4,7 @@ Does NOT call APIs directly. Returns spawn plans (lists of agent configs).
 """
 import json
 import os
+import re
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -127,7 +128,12 @@ def build_agent_plan(
                 f"{steps_info}"
                 f"APPROVED BLUEPRINTS FROM PRIOR CYCLES:\n{json.dumps(approved_blueprints or [], indent=2)}\n\n"
                 f"Re-plan ONLY Cycle {cycle_id}. Keep other cycles unchanged. "
-                f"Adjust the research agent briefs to address the rejection note."
+                f"Adjust the research agent briefs to address the rejection note.\n\n"
+                f"CRITICAL — AGENT ID NUMBERING: This is Cycle {cycle_id}, not Cycle 1. Every "
+                f"agent_id you generate for this re-plan MUST use the suffix `_cycle{cycle_id}_lead` "
+                f"or `_cycle{cycle_id}_adv_N` (e.g. `some_role_cycle{cycle_id}_lead`). Do NOT copy the "
+                f"`_cycle1_...` pattern from the example format unless {cycle_id} == 1 — reusing "
+                f"another cycle's real agent_id string here silently corrupts that cycle's data."
             )
         else:
             user_input = (
@@ -203,7 +209,40 @@ def build_agent_plan(
         })
 
     try:
-        return json.loads(response.text)
+        parsed = json.loads(response.text)
     except json.JSONDecodeError:
         return {"error": "Brain failed to produce valid JSON", "raw": response.text}
+
+    return _normalize_cycle_agent_ids(parsed)
+
+
+_CYCLE_SUFFIX_RE = re.compile(r"_cycle\d+_")
+
+
+def _normalize_cycle_agent_ids(agent_plan: dict) -> dict:
+    """
+    Defense-in-depth against Brain's observed habit of copying the `_cycle1_...`
+    example from its own system prompt verbatim, regardless of which cycle it's
+    actually planning — most visible on conflict/rejection re-plans of a single
+    cycle (cycle_id is not None), where it would otherwise reuse the literal
+    agent_id of an unrelated, already-approved cycle and silently corrupt that
+    agent's entry in jarvis.py's global AGENT_REGISTRY / conversation logs.
+
+    Rewrites every agent_id's `_cycleN_` segment to match its own cycle's real
+    `cycle_id` field (which Brain does set correctly — it's only the agent_id
+    string itself that drifts). No-op if Brain already got it right.
+    """
+    for cycle in agent_plan.get("cycles", []):
+        real_cid = cycle.get("cycle_id")
+        if real_cid is None:
+            continue
+        agents = [cycle.get("lead_specialist")] if cycle.get("lead_specialist") else []
+        agents += cycle.get("advisory_agents", [])
+        for agent in agents:
+            if not isinstance(agent, dict):
+                continue
+            aid = agent.get("agent_id")
+            if isinstance(aid, str) and _CYCLE_SUFFIX_RE.search(aid):
+                agent["agent_id"] = _CYCLE_SUFFIX_RE.sub(f"_cycle{real_cid}_", aid)
+    return agent_plan
 

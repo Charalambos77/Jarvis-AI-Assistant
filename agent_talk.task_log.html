@@ -1120,7 +1120,7 @@ ${item.content}
                         const data = await narrRes.json();
                         if (data.narrative) {
                             const narrStr = JSON.stringify(data.narrative);
-                            if (narrStr !== lastNarrStr) {
+                            if (narrStr !== lastNarrativeStr) {
                                 lastNarrativeData = data.narrative;
                                 lastNarrativeStr = narrStr;
                                 renderNarrativeLogs(lastNarrativeData);

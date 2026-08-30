@@ -144,53 +144,45 @@ def save_tool_credentials(service_name: str, credentials: dict, method_id: str |
     API_REGISTRY[s_clean]["last_updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
     save_registry()
 
-    # Update PLAN_STORE in jarvis if loaded, as well as apis_mcps.json on disk
+    # Sync every project's apis_mcps.json on disk so anything reading that file
+    # directly sees the new status too.
+    #
+    # NOTE: this deliberately does NOT try to reach into jarvis.py's live
+    # PLAN_STORE / DB rows anymore. jarvis.py is normally run as __main__, so
+    # `from jarvis import PLAN_STORE` here would silently re-import jarvis.py
+    # as a second, disconnected module instance with its own stale copy of
+    # PLAN_STORE — mutations to it never reach the actually-running Flask
+    # server, and writing that stale plan dict back to the DB risked
+    # clobbering newer state. The live "is this tool connected" status is
+    # instead resolved fresh from this registry at read-time by
+    # jarvis.py's merge_live_tool_status() (see /plans, /plans/<id>), which
+    # is correct regardless of what's cached in memory anywhere.
     try:
-        from jarvis import PLAN_STORE, PLAN_STORE_LOCK, DB_PATH
-        import db
-        with PLAN_STORE_LOCK:
-            for plan in PLAN_STORE:
-                mb = plan.get("master_blueprint")
-                if isinstance(mb, dict) and "tool_recommendations" in mb:
-                    for rec in mb["tool_recommendations"]:
-                        r_name = rec.get("service", "")
-                        r_clean = r_name.lower().replace("-", "_").replace(" ", "_")
-                        if r_name == service_name or r_clean == s_clean or s_clean in r_clean or r_clean in s_clean:
-                            rec["current_status"] = "up"
-                            rec["configured"] = True
-
-                proj_name = plan.get("project_name", "Default Project")
-                plan_id = plan.get("id")
-                if plan_id:
-                    mem_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Let Jarvis Handle It", proj_name, "memory", "apis_mcps.json")
-                    if os.path.exists(mem_file):
-                        try:
-                            with open(mem_file, "r", encoding="utf-8") as f:
-                                apis_data = json.load(f)
-                            updated = False
-                            for sec in ("brain", "agents"):
-                                for rec in apis_data.get(sec, []):
-                                    r_name = rec.get("service", "")
-                                    r_clean = r_name.lower().replace("-", "_").replace(" ", "_")
-                                    if r_name == service_name or r_clean == s_clean or s_clean in r_clean or r_clean in s_clean:
-                                        rec["current_status"] = "up"
-                                        rec["configured"] = True
-                                        updated = True
-                            if updated:
-                                with open(mem_file, "w", encoding="utf-8") as f:
-                                    json.dump(apis_data, f, indent=2, ensure_ascii=False)
-                        except Exception as ex:
-                            print(f"[save_tool_credentials] Error updating memory file: {ex}")
-                
-                # Save updated plan to DB
+        base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Let Jarvis Handle It")
+        if os.path.isdir(base_dir):
+            for proj_name in os.listdir(base_dir):
+                mem_file = os.path.join(base_dir, proj_name, "memory", "apis_mcps.json")
+                if not os.path.exists(mem_file):
+                    continue
                 try:
-                    conn = db.get_connection(DB_PATH)
-                    db.save_pipeline(conn, plan)
-                    conn.close()
-                except Exception:
-                    pass
+                    with open(mem_file, "r", encoding="utf-8") as f:
+                        apis_data = json.load(f)
+                    updated = False
+                    for sec in ("brain", "agents"):
+                        for rec in apis_data.get(sec, []):
+                            r_name = rec.get("service", "")
+                            r_clean = r_name.lower().replace("-", "_").replace(" ", "_")
+                            if r_name == service_name or r_clean == s_clean or s_clean in r_clean or r_clean in s_clean:
+                                rec["current_status"] = "up"
+                                rec["configured"] = True
+                                updated = True
+                    if updated:
+                        with open(mem_file, "w", encoding="utf-8") as f:
+                            json.dump(apis_data, f, indent=2, ensure_ascii=False)
+                except Exception as ex:
+                    print(f"[save_tool_credentials] Error updating memory file for '{proj_name}': {ex}")
     except Exception as e:
-        print(f"[save_tool_credentials] Error propagating status update: {e}")
+        print(f"[save_tool_credentials] Error syncing apis_mcps.json files: {e}")
 
     return True
 

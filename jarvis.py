@@ -115,16 +115,28 @@ MIC_MUTED = False # tracks whether microphone is muted
 ELEVENLABS_QUOTA_EXCEEDED = False # temporary runtime flag to skip ElevenLabs if quota exceeded
 
 # --- Pipeline Gate State ---
-PIPELINE_STATE = {
-    "current_gate": None,        # None | "cycle_1_research" | "execution_blueprint" | "final_qa"
-    "gate_status": "idle",       # "idle" | "waiting" | "approved" | "rejected"
-    "redirect_note": None,       # human's rejection reason
-    "phase": "idle",             # e.g. "research" | "synthesis" | "execution" | "deployed"
-    "cycle_data": None,          # dict with cycle info when gate is cycle-level
-    "gate_data": None,           # the full data payload passed to the gate
-    "rejected_steps": None,      # step IDs or indices that were rejected by the user
-}
+# Keyed by plan_id — NOT a single shared dict. Multiple pipelines can be
+# running (and gated) concurrently; a global PIPELINE_STATE meant every
+# pipeline thread's gate_fn polled the SAME slot, so approving one plan's
+# gate in the UI could silently resolve a completely different plan's gate
+# instead (whichever one happened to occupy the shared slot at that moment).
+PIPELINE_STATES: dict[str, dict] = {}
 PIPELINE_LOCK = threading.Lock()
+
+
+def _default_gate_state() -> dict:
+    return {
+        "current_gate": None,        # None | "cycle_1_research" | "execution_blueprint" | "final_qa"
+        "gate_status": "idle",       # "idle" | "waiting" | "approved" | "rejected"
+        "redirect_note": None,       # human's rejection reason
+        "gate_data": None,           # the full data payload passed to the gate
+        "rejected_steps": None,      # step IDs or indices that were rejected by the user
+    }
+
+
+def _get_gate_state(plan_id: str) -> dict:
+    """Must be called while holding PIPELINE_LOCK."""
+    return PIPELINE_STATES.setdefault(plan_id, _default_gate_state())
 
 # --- Track Agent Metric Store ---
 TRACKED_METRICS = {}   # e.g. {"youtube_ctr": {"value": 0.025, "threshold": 0.03}}
@@ -706,25 +718,28 @@ def initiate_pipeline(task: str) -> str:
 
     async def gate_fn(gate_id: str, data: dict) -> dict:
         with PIPELINE_LOCK:
-            PIPELINE_STATE["current_gate"] = gate_id
-            PIPELINE_STATE["gate_status"] = "waiting"
-            PIPELINE_STATE["redirect_note"] = None
-            PIPELINE_STATE["gate_data"] = data
-            PIPELINE_STATE["rejected_steps"] = None
+            state = _get_gate_state(plan_id)
+            state["current_gate"] = gate_id
+            state["gate_status"] = "waiting"
+            state["redirect_note"] = None
+            state["gate_data"] = data
+            state["rejected_steps"] = None
         push_message("system", f"Gate {gate_id} is open. Waiting for your approval.")
         import asyncio
         while True:
             await asyncio.sleep(2)
             with PIPELINE_LOCK:
-                status = PIPELINE_STATE["gate_status"]
-                note = PIPELINE_STATE["redirect_note"]
-                rejected = PIPELINE_STATE["rejected_steps"]
+                state = _get_gate_state(plan_id)
+                status = state["gate_status"]
+                note = state["redirect_note"]
+                rejected = state["rejected_steps"]
             if status in ("approved", "rejected"):
                 with PIPELINE_LOCK:
-                    PIPELINE_STATE["current_gate"] = None
-                    PIPELINE_STATE["gate_status"] = "idle"
-                    PIPELINE_STATE["gate_data"] = None
-                    PIPELINE_STATE["rejected_steps"] = None
+                    state = _get_gate_state(plan_id)
+                    state["current_gate"] = None
+                    state["gate_status"] = "idle"
+                    state["gate_data"] = None
+                    state["rejected_steps"] = None
                 return {"approved": status == "approved", "redirect_note": note, "rejected_steps": rejected}
 
     def run_pipeline():
@@ -773,6 +788,7 @@ def resume_pipeline_local(settings_dict):
     plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
     if not plan_id:
         return {"error": "plan_id is required"}
+    force_reexecute = bool(settings_dict.get("force_reexecute", False))
     
     plan_entry = None
     with PLAN_STORE_LOCK:
@@ -815,29 +831,35 @@ def resume_pipeline_local(settings_dict):
         except Exception as e:
             print(f"Failed to automatically open log file: {e}")
 
-    push_message("system", f"Resuming pipeline [Plan ID: {plan_id}]: {task[:80]}...")
+    if force_reexecute:
+        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}] with FORCE RE-EXECUTE: {task[:80]}...")
+    else:
+        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}]: {task[:80]}...")
 
     async def gate_fn(gate_id: str, data: dict) -> dict:
         with PIPELINE_LOCK:
-            PIPELINE_STATE["current_gate"] = gate_id
-            PIPELINE_STATE["gate_status"] = "waiting"
-            PIPELINE_STATE["redirect_note"] = None
-            PIPELINE_STATE["gate_data"] = data
-            PIPELINE_STATE["rejected_steps"] = None
+            state = _get_gate_state(plan_id)
+            state["current_gate"] = gate_id
+            state["gate_status"] = "waiting"
+            state["redirect_note"] = None
+            state["gate_data"] = data
+            state["rejected_steps"] = None
         push_message("system", f"Gate {gate_id} is open. Waiting for your approval.")
         import asyncio
         while True:
             await asyncio.sleep(2)
             with PIPELINE_LOCK:
-                status = PIPELINE_STATE["gate_status"]
-                note = PIPELINE_STATE["redirect_note"]
-                rejected = PIPELINE_STATE["rejected_steps"]
+                state = _get_gate_state(plan_id)
+                status = state["gate_status"]
+                note = state["redirect_note"]
+                rejected = state["rejected_steps"]
             if status in ("approved", "rejected"):
                 with PIPELINE_LOCK:
-                    PIPELINE_STATE["current_gate"] = None
-                    PIPELINE_STATE["gate_status"] = "idle"
-                    PIPELINE_STATE["gate_data"] = None
-                    PIPELINE_STATE["rejected_steps"] = None
+                    state = _get_gate_state(plan_id)
+                    state["current_gate"] = None
+                    state["gate_status"] = "idle"
+                    state["gate_data"] = None
+                    state["rejected_steps"] = None
                 return {"approved": status == "approved", "redirect_note": note, "rejected_steps": rejected}
 
     with ACTIVE_PIPELINE_LOCK:
@@ -852,7 +874,7 @@ def resume_pipeline_local(settings_dict):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, force_reexecute=force_reexecute))
             status = result.get('status', 'done')
             if status == "escalated_to_human":
                 reason = result.get('message', 'Max retries exceeded.')
@@ -869,9 +891,16 @@ def resume_pipeline_local(settings_dict):
     threading.Thread(target=run_pipeline, daemon=True).start()
     return {"status": "pipeline_resumed", "plan_id": plan_id}
 
-def get_gate_status_local():
+def get_gate_status_local(plan_id: str | None = None):
     with PIPELINE_LOCK:
-        return PIPELINE_STATE.copy()
+        if plan_id:
+            return _get_gate_state(plan_id).copy()
+        # No specific plan given (e.g. a generic voice "check pipeline status" query) —
+        # best-effort: report the first gate currently waiting on approval, if any.
+        for pid, state in PIPELINE_STATES.items():
+            if state.get("gate_status") == "waiting":
+                return {**state.copy(), "plan_id": pid}
+        return _default_gate_state()
 
 def update_metric_local(settings_dict):
     name = settings_dict.get("name")
@@ -1311,50 +1340,60 @@ def jarvis_ack():
 
 @app.route("/gate/status", methods=["GET"])
 def gate_status():
-    with PIPELINE_LOCK:
-        return jsonify(PIPELINE_STATE.copy())
+    plan_id = request.args.get("plan_id")
+    return jsonify(get_gate_status_local(plan_id))
 
 
 @app.route("/gate/approve", methods=["POST"])
 def gate_approve():
     data = request.get_json(force=True) or {}
+    plan_id = (data.get("plan_id") or "").strip()
+    if not plan_id:
+        return jsonify({"error": "plan_id is required — approving without it could resolve the wrong pipeline's gate when more than one is running."}), 400
     with PIPELINE_LOCK:
-        gate = PIPELINE_STATE.get("current_gate")
+        state = _get_gate_state(plan_id)
+        gate = state.get("current_gate")
         if gate is None:
-            return jsonify({"error": "No gate is currently active"}), 400
-        PIPELINE_STATE["gate_status"] = "approved"
-        PIPELINE_STATE["redirect_note"] = None
+            return jsonify({"error": f"No gate is currently active for plan '{plan_id}'"}), 400
+        state["gate_status"] = "approved"
+        state["redirect_note"] = None
         # accept per-step approvals
         approved_steps = data.get("approved_steps")  # optional list of step IDs
-    push_message("system", f"Gate '{gate}' approved. Advancing pipeline.")
-    return jsonify({"status": "approved", "gate": gate})
+    push_message("system", f"Gate '{gate}' approved for plan {plan_id}. Advancing pipeline.")
+    return jsonify({"status": "approved", "gate": gate, "plan_id": plan_id})
 
 
 @app.route("/gate/reject", methods=["POST"])
 def gate_reject():
     data = request.get_json(force=True) or {}
+    plan_id = (data.get("plan_id") or "").strip()
+    if not plan_id:
+        return jsonify({"error": "plan_id is required — rejecting without it could resolve the wrong pipeline's gate when more than one is running."}), 400
     note = data.get("redirect_note", "").strip()
     rejected = data.get("rejected_steps") or []
     with PIPELINE_LOCK:
-        gate = PIPELINE_STATE.get("current_gate")
+        state = _get_gate_state(plan_id)
+        gate = state.get("current_gate")
         if gate is None:
-            return jsonify({"error": "No gate is currently active"}), 400
-        PIPELINE_STATE["gate_status"] = "rejected"
-        PIPELINE_STATE["redirect_note"] = note or None
-        PIPELINE_STATE["rejected_steps"] = rejected
-    push_message("system", f"Gate '{gate}' rejected. Note: {note or 'none provided'}, steps: {rejected}")
-    return jsonify({"status": "rejected", "gate": gate, "redirect_note": note, "rejected_steps": rejected})
+            return jsonify({"error": f"No gate is currently active for plan '{plan_id}'"}), 400
+        state["gate_status"] = "rejected"
+        state["redirect_note"] = note or None
+        state["rejected_steps"] = rejected
+    push_message("system", f"Gate '{gate}' rejected for plan {plan_id}. Note: {note or 'none provided'}, steps: {rejected}")
+    return jsonify({"status": "rejected", "gate": gate, "plan_id": plan_id, "redirect_note": note, "rejected_steps": rejected})
 
 
 @app.route("/gate/data", methods=["GET"])
 def gate_data():
     """Returns the full data payload for the currently active gate."""
-    with PIPELINE_LOCK:
-        return jsonify({
-            "gate": PIPELINE_STATE.get("current_gate"),
-            "status": PIPELINE_STATE.get("gate_status"),
-            "data": PIPELINE_STATE.get("gate_data"),
-        })
+    plan_id = request.args.get("plan_id")
+    state = get_gate_status_local(plan_id)
+    return jsonify({
+        "gate": state.get("current_gate"),
+        "status": state.get("gate_status"),
+        "data": state.get("gate_data"),
+        "plan_id": plan_id or state.get("plan_id"),
+    })
 
 
 @app.route("/registry", methods=["GET"])
@@ -1429,6 +1468,29 @@ def get_agent_thinking():
 def get_narrative():
     with NARRATIVE_LOGS_LOCK:
         return jsonify({"narrative": list(NARRATIVE_LOGS)})
+
+
+@app.route("/api/narrative", methods=["POST"])
+def post_narrative():
+    """
+    Lets an external narrator (e.g. Claude watching a pipeline live) push an
+    entry into the same Narrative feed the pipeline itself writes to via
+    append_narrative() — same store, same timeline, shows up in the
+    Narrative tab immediately next to the pipeline's own agent narration.
+    """
+    token = request.headers.get("X-Jarvis-Token")
+    if token != JARVIS_SESSION_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(force=True) or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+    phase = data.get("phase") or "external"
+    icon = data.get("icon") or "🤖"
+
+    append_narrative(phase, message, icon)
+    return jsonify({"status": "ok"})
 
 def pipeline_event_logger(event: dict):
     """Called by multi_agent_coordinator at each agent lifecycle point."""
@@ -1577,21 +1639,47 @@ def pipeline_event_logger(event: dict):
         update_task_log_file(plan_id, event)
 
 
+def merge_live_tool_status(plan: dict) -> dict:
+    """
+    Overlays live api_registry.json status onto a plan's tool_recommendations.
+
+    This is the single source of truth for "is this API/MCP connected" —
+    it's read fresh from disk on every call. We do NOT rely on in-memory
+    PLAN_STORE mutation for this (connectors/api_connector.py's
+    save_tool_credentials tries to patch PLAN_STORE directly, but since
+    jarvis.py normally runs as __main__, its `from jarvis import PLAN_STORE`
+    actually re-imports this file as a second, disconnected module — that
+    patch lands on a throwaway copy, never on the live server state, which
+    is exactly why a freshly connected tool would show as disconnected again
+    on the next page load/poll). Merging live registry status at read-time
+    sidesteps that entirely and is correct regardless.
+    """
+    from connectors.api_connector import get_service_status
+    mb = plan.get("master_blueprint")
+    if isinstance(mb, dict) and mb.get("tool_recommendations"):
+        for rec in mb["tool_recommendations"]:
+            status = get_service_status(rec.get("service"))
+            rec["current_status"] = status
+            rec["configured"] = status != "unknown"
+    return plan
+
+
 @app.route("/plans", methods=["GET"])
 def get_plans():
     """Returns the full plans store with active thread status."""
     with PLAN_STORE_LOCK:
         plans = list(PLAN_STORE)
-    
+
     with ACTIVE_PIPELINE_LOCK:
         active_ids = list(ACTIVE_PIPELINE_THREADS)
-        
+
     decorated_plans = []
     for plan in plans:
         p_copy = plan.copy()
         p_copy["active"] = p_copy["id"] in active_ids
+        merge_live_tool_status(p_copy)
         decorated_plans.append(p_copy)
-        
+
     return jsonify({"plans": decorated_plans})
 
 
@@ -1618,7 +1706,7 @@ def get_plan_detail(plan_id):
     with PLAN_STORE_LOCK:
         for plan in PLAN_STORE:
             if plan["id"] == plan_id:
-                return jsonify(plan)
+                return jsonify(merge_live_tool_status(plan.copy()))
         return jsonify({"error": f"Plan '{plan_id}' not found"}), 404
 
 
@@ -1787,7 +1875,8 @@ def resume_pipeline_route():
     plan_id = data.get("plan_id", "").strip()
     if not plan_id:
         return jsonify({"error": "plan_id is required"}), 400
-    res = resume_pipeline_local({"plan_id": plan_id})
+    force_reexecute = bool(data.get("force_reexecute", False))
+    res = resume_pipeline_local({"plan_id": plan_id, "force_reexecute": force_reexecute})
     if "error" in res:
         return jsonify(res), 404
     return jsonify(res)
@@ -1808,18 +1897,59 @@ def delete_pipeline_route():
 
 @app.route("/api/connect-tool", methods=["POST"])
 def connect_tool_route():
-    """Saves tool credentials to .env and updates status in registry."""
+    """
+    Saves tool credentials and updates status in registry.
+
+    For method_id == "oauth" against a service with a known OAuth provider
+    (connectors/oauth_flow.OAUTH_PROVIDERS), this doesn't just store the
+    Client ID/Secret text — those alone can never authorize anything. It
+    actually runs the real OAuth2 flow: opens the user's browser to Google's
+    (or whichever provider's) consent screen, waits for them to approve,
+    captures the redirect, and exchanges the code for a real access/refresh
+    token — automatically, for any provider registered there, not just
+    Google. Only once that succeeds is the service marked genuinely
+    connected. Plain API-key services are unaffected — same as before.
+    """
     from connectors.api_connector import save_tool_credentials
+    from connectors.oauth_flow import run_installed_app_flow, get_oauth_provider
     data = request.get_json(force=True) or {}
     service_name = data.get("service_name", "").strip()
     credentials = data.get("credentials", {})
     method_id = data.get("method_id")
-    
+
     if not service_name:
         return jsonify({"error": "service_name is required"}), 400
     if not credentials or not isinstance(credentials, dict):
         return jsonify({"error": "credentials dict is required"}), 400
-        
+
+    provider = get_oauth_provider(service_name) if method_id == "oauth" else None
+
+    if provider:
+        client_id = credentials.get("client_id", "").strip()
+        client_secret = credentials.get("client_secret", "").strip()
+        if not client_id or not client_secret:
+            return jsonify({"error": "client_id and client_secret are required for OAuth services"}), 400
+
+        push_message("system", f"Opening your browser to authorize {service_name} — please approve access, Sir.")
+        result = run_installed_app_flow(
+            authorize_url=provider["authorize_url"],
+            token_url=provider["token_url"],
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=provider["scopes"],
+        )
+        if result.get("status") != "ok":
+            return jsonify({"error": f"OAuth authorization failed for {service_name}: {result.get('error')}"}), 502
+
+        # Persist client_id/secret AND the real tokens the flow produced —
+        # the tokens are what actually let a connector call the API later.
+        credentials = {
+            **credentials,
+            "access_token": result.get("access_token"),
+            "refresh_token": result.get("refresh_token"),
+        }
+        push_message("system", f"{service_name} authorized successfully.")
+
     success = save_tool_credentials(service_name, credentials, method_id=method_id)
     if success:
         return jsonify({"status": "success", "message": f"Successfully connected {service_name}"})
@@ -1836,7 +1966,10 @@ def get_configured_tools_route():
 
 
 def run_server():
-    app.run(host=HOST, port=PORT, use_reloader=False)
+    # threaded=True: /api/connect-tool now blocks for up to 3 minutes while
+    # waiting on OAuth browser consent — without this, that would freeze
+    # every other request (UI polling, voice commands, etc.) app-wide.
+    app.run(host=HOST, port=PORT, use_reloader=False, threaded=True)
 
 
 # ---------------------------------------------------------------------------
