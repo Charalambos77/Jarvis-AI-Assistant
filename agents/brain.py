@@ -216,6 +216,116 @@ def build_agent_plan(
     return _normalize_cycle_agent_ids(parsed)
 
 
+def finalize_execution_plan(
+    task: str,
+    execution_agents: list[dict],
+    master_blueprint: dict,
+    event_logger=None,
+) -> list[dict]:
+    """
+    Revises execution agents' tools_needed AFTER research is complete, using
+    the actual master blueprint findings — instead of trusting whatever Brain
+    guessed at Phase 1, before any research had happened.
+
+    Observed failure mode this fixes: Brain's very first planning pass (before
+    research) drafts execution_agents.tools_needed as a rough guess (e.g. just
+    ["google_drive_api"]). Research cycles run afterward and can discover a
+    more accurate, complete answer (e.g. Cycle 3 finding that BOTH
+    "Google Drive API" and "Google Docs API" are separately required) — but
+    that better answer only ever lands in master_blueprint.tool_recommendations
+    for display at the gate. Nothing fed it back into the execution agent's
+    already-fixed tools_needed, so the agent stayed bound to the stale,
+    incomplete pre-research guess. This closes that loop: conclusions about
+    what tools are actually needed get made AFTER research, using what
+    research actually found — not before it.
+
+    Only tools_needed is touched; agent_id/role/brief/output_spec are left
+    exactly as originally planned. Falls back to the original list unchanged
+    on any failure (never blocks the pipeline on this refinement step).
+    """
+    if not execution_agents:
+        return execution_agents
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    user_input = f"""ORIGINAL TASK: {task}
+
+Research is now COMPLETE. Below is the execution agent roster that was drafted BEFORE any research
+had happened — its "tools_needed" fields are only a rough first guess, not ground truth.
+
+DRAFT EXECUTION AGENTS (do not change agent_id, role, brief, or output_spec — only tools_needed):
+{json.dumps(execution_agents, indent=2)}
+
+COMPLETED RESEARCH — MASTER BLUEPRINT (the actual, informed source of truth):
+{json.dumps(master_blueprint, indent=2)}
+
+Revise each execution agent's "tools_needed" list to accurately reflect what the completed research
+determined is actually required. Use the exact service names found in the master blueprint's
+tool_recommendations.
+
+IMPORTANT: don't just keyword-match tool names mentioned literally in the brief's wording — the brief
+was also written before research and may itself only name one tool where the completed research (see
+each tool's "cons"/reasoning fields) reveals the underlying goal actually needs more than one. E.g. if
+the brief only says "upload the report as a Google Doc" but the master blueprint's reasoning explains
+that the upload tool converts a file but a SEPARATE tool is required to edit/insert the document's
+actual content afterward, that second tool is genuinely required to fulfill the brief's real goal even
+though the brief itself never names it — include it. Read each tool's "cons"/"purpose" text for exactly
+this kind of dependency before deciding an agent only needs one tool.
+
+If an agent genuinely needs no external tool, leave its tools_needed empty.
+
+Return JSON: {{"execution_agents": [ ...same agents, each with a corrected tools_needed... ]}}"""
+
+    if event_logger:
+        event_logger({
+            "event_type": "thinking",
+            "source": "Brain",
+            "data": {
+                "thinking_type": "user_prompt",
+                "role": "Brain Orchestrator (post-research finalization)",
+                "content": user_input,
+            },
+        })
+        event_logger({
+            "event_type": "narrative",
+            "source": "Brain",
+            "data": {
+                "phase": "planning",
+                "message": "Finalizing execution agents' tools against completed research findings...",
+                "icon": "🧠",
+            },
+        })
+
+    config = types.GenerateContentConfig(
+        system_instruction=(
+            "You are the Central Brain Orchestrator finalizing an execution plan after research. "
+            "Output valid JSON only."
+        ),
+        response_mime_type="application/json",
+    )
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=user_input,
+            config=config,
+        )
+        if event_logger:
+            event_logger({
+                "event_type": "response_received",
+                "source": "Brain",
+                "data": {"role": "Brain Orchestrator (post-research finalization)", "content": response.text},
+            })
+        parsed = json.loads(response.text)
+        revised = parsed.get("execution_agents")
+        if not isinstance(revised, list) or not revised:
+            return execution_agents
+        return revised
+    except Exception as e:
+        print(f"[Brain] finalize_execution_plan failed, keeping original tools_needed: {e}")
+        return execution_agents
+
+
 _CYCLE_SUFFIX_RE = re.compile(r"_cycle\d+_")
 
 

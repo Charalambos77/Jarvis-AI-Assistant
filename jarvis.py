@@ -18,6 +18,7 @@ import os
 import sys
 import json
 import time
+import subprocess
 import threading
 
 import numpy as np
@@ -1403,6 +1404,21 @@ def get_registry():
     return jsonify({"registry": load_registry()})
 
 
+@app.route("/api/oauth-providers", methods=["GET"])
+def get_oauth_providers_route():
+    """
+    Returns the service names we actually know how to auto-connect via a
+    real OAuth flow (connectors/oauth_flow.OAUTH_PROVIDERS) — the plugging
+    gate UI uses this to know when it can ignore Brain's often-invented
+    connection_methods field list (which has hallucinated things like a
+    manual "Refresh Token" input — nonsensical, since the whole point of
+    the real flow is that the backend obtains that itself) and show only
+    what's actually needed: Client ID + Client Secret.
+    """
+    from connectors.oauth_flow import OAUTH_PROVIDERS
+    return jsonify({"providers": list(OAUTH_PROVIDERS.keys())})
+
+
 @app.route("/registry/update", methods=["POST"])
 def update_registry():
     """Register or update a service. Used during API/MCP plugging."""
@@ -1955,6 +1971,36 @@ def connect_tool_route():
         return jsonify({"status": "success", "message": f"Successfully connected {service_name}"})
     else:
         return jsonify({"error": f"Failed to save credentials for {service_name}"}), 500
+
+
+@app.route("/api/open-artifact", methods=["POST"])
+def open_artifact_route():
+    """
+    Opens a real deliverable produced by an execution agent — a written file
+    (via the OS file explorer, at its containing folder) or a created remote
+    resource (a Google Doc, a deployed site, ...). URL-type artifacts are
+    opened directly by the frontend (window.open) and never reach this route;
+    this only handles local paths, since a browser can't open the OS file
+    explorer itself for security reasons.
+    """
+    data = request.get_json(force=True) or {}
+    rel_path = (data.get("value") or "").strip()
+    if not rel_path:
+        return jsonify({"error": "value is required"}), 400
+
+    abs_path = os.path.abspath(os.path.join(BASE_DIR, rel_path))
+    if not (abs_path == BASE_DIR or abs_path.startswith(BASE_DIR + os.sep)):
+        return jsonify({"error": "Path escapes the project directory."}), 400
+    if not os.path.exists(abs_path):
+        return jsonify({"error": f"File not found: {rel_path}"}), 404
+
+    try:
+        # Select the file in its containing folder rather than trying to
+        # "run" it — correct for a script, a doc, a video, or any file type.
+        subprocess.run(["explorer", "/select,", os.path.normpath(abs_path)], check=False)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": f"Failed to open: {e}"}), 500
 
 
 @app.route("/api/configured-tools", methods=["GET"])

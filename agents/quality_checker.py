@@ -111,6 +111,7 @@ Return a JSON object:
     # Tier 2: Global Integration Verification
     integration_passed = True
     integration_issues = []
+    integration_implicated_agents = []
     if all_passed and len(execution_results) > 0:
         prompt = f"""You are the Quality Checker Agent. Check if all individual execution outputs integrate and align seamlessly based on the master blueprint.
 
@@ -124,10 +125,13 @@ Do these outputs fit together coherently as a single product? Are there any stru
 
 NOTE: The QA/Testing deliverables are expected to log simulated bugs or defects (e.g. BUG-001, BUG-002, etc.) and state that release criteria are not met. Do NOT treat these logged bugs/defects as integration failures or contradictions. That is normal QA reporting. Only mark "integrates" as false if there are actual structural, architectural, or API alignment conflicts between the different deliverables.
 
+If "integrates" is false, identify EXACTLY which agent_id(s) (from the "agent_id" field of the execution outputs above) are actually responsible for each conflict — e.g. if two deliverables disagree, name whichever one is wrong or out of date, not both by default, unless both genuinely need to change. Only include an agent_id in "implicated_agent_ids" if fixing that specific agent's output is the correct way to resolve the conflict. Leave it empty only if you truly cannot attribute the conflict to specific agents.
+
 Return a JSON object:
 {{
   "integrates": true/false,
-  "issues": ["list of issues if any"]
+  "issues": ["list of issues if any"],
+  "implicated_agent_ids": ["agent_id of each deliverable that needs to be redone to resolve the conflict"]
 }}
 """
         config = types.GenerateContentConfig(
@@ -147,13 +151,20 @@ Return a JSON object:
             if not res.get("integrates", True):
                 integration_passed = False
                 integration_issues = res.get("issues", ["Integration issues detected."])
+                integration_implicated_agents = res.get("implicated_agent_ids", []) or []
                 all_passed = False
         except Exception as e:
             print(f"[Quality Checker] Global integration check failed: {e}")
 
     failed_agents = [r["agent_id"] for r in results if not r["passed"]]
     if not integration_passed and not failed_agents:
-        failed_agents = [r.get("agent_id") for r in execution_results]
+        implicated = [
+            aid for aid in integration_implicated_agents
+            if aid in {r.get("agent_id") for r in execution_results}
+        ]
+        # Only fall back to rerunning every agent if the integration check
+        # couldn't attribute the conflict to specific deliverables at all.
+        failed_agents = implicated or [r.get("agent_id") for r in execution_results]
 
     return {
         "all_passed": all_passed,

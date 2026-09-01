@@ -9,7 +9,7 @@ import os
 from google import genai
 from google.genai import types
 import db
-from agents.brain import build_agent_plan
+from agents.brain import build_agent_plan, finalize_execution_plan
 from agents.research_agent import run_research_agent
 from agents.execution_agent import run_execution_agent
 from agents.synthesis import run_synthesis_agent, run_master_synthesis
@@ -877,6 +877,18 @@ async def run_full_pipeline(
             skip_exec_gate = True
 
         if not skip_exec_gate:
+            # Phase 4: Finalize execution agents' tools_needed against the NOW-COMPLETE
+            # research, instead of trusting Brain's pre-research Phase-1 guess. Only runs
+            # once (guarded the same way the gate below is) — a resume after this gate was
+            # already approved should never silently rewrite an already-reviewed plan.
+            print("[Pipeline] Phase 4: Finalizing execution plan against completed research...")
+            agent_plan["execution_agents"] = finalize_execution_plan(
+                task, agent_plan.get("execution_agents", []), master_blueprint, event_logger=event_logger
+            )
+            save_agent_plan_file(plan_id, agent_plan, project_name)
+            if event_logger:
+                event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
+
             # Phase 5: Gate — Review Execution Blueprint
             print("[Pipeline] Phase 5: Waiting for human approval of execution blueprint...")
             exec_retry = 0

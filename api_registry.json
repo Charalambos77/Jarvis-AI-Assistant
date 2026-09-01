@@ -14,14 +14,23 @@
     "fallback": null
   },
   "google_docs_api": {
-    "status": "unknown"
+    "status": "up",
+    "method_id": "oauth",
+    "last_updated": "2026-08-31 00:18:46"
   },
   "google_drive_api": {
-    "status": "unknown"
+    "status": "up",
+    "method_id": "oauth",
+    "last_updated": "2026-08-31 00:13:50"
   },
   "arxiv_api": {
     "status": "up",
     "method_id": "public_access",
     "last_updated": "2026-08-21 16:23:58"
+  },
+  "semantic_scholar_api": {
+    "status": "up",
+    "method_id": "http_request",
+    "last_updated": "2026-08-31 00:18:52"
   }
 }

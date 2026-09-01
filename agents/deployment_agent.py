@@ -44,14 +44,22 @@ async def run_deployment_agent(
         target = target_platform or "local"
         connector_status = get_service_status(target) if target != "local" else "local"
         
+        # Real artifacts (a created Google Doc, a written file, ...) come
+        # from the execution agent's actual tool calls (see execution_agent's
+        # _extract_artifact) — they survive even if that agent's own status
+        # ended up "error" from an unrelated wrap-up formatting issue, since
+        # the tool call itself already did real, irreversible work.
+        artifacts = result.get("artifacts", [])
+
         if connector_status in ("up", "local"):
             # Future: call the actual connector here
             deployment_log.append({
                 "agent_id": agent_id,
-                "status": "deployed" if status == "ok" else "skipped",
+                "status": "deployed" if (status == "ok" or artifacts) else "skipped",
                 "platform": target,
                 "connector_status": connector_status,
                 "output_keys": list(result.keys()),
+                "artifacts": artifacts,
                 "note": "Stub — would deploy here when connector is implemented",
             })
         else:
@@ -60,13 +68,17 @@ async def run_deployment_agent(
                 "status": "blocked",
                 "platform": target,
                 "connector_status": connector_status,
+                "artifacts": artifacts,
                 "note": f"Connector '{target}' is {connector_status}. Cannot deploy.",
             })
     
+    all_artifacts = [a for entry in deployment_log for a in entry.get("artifacts", [])]
+
     return {
         "status": "deployed",
         "platform": target_platform or "local",
         "deployment_log": deployment_log,
+        "artifacts": all_artifacts,
         "artifacts_count": len(exec_results),
         "registry_snapshot": {k: v.get("status", "unknown") for k, v in registry.items()} if registry else {},
     }

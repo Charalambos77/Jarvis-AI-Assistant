@@ -328,6 +328,26 @@
             color: #E5E7EB;
         }
 
+        .artifact-open-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: rgba(74, 222, 128, 0.1);
+            border: 1px solid rgba(74, 222, 128, 0.35);
+            color: #4ade80;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 6px;
+            transition: background 0.15s ease;
+        }
+
+        .artifact-open-btn:hover {
+            background: rgba(74, 222, 128, 0.2);
+        }
+
         .code-box {
             background: rgba(0, 0, 0, 0.4);
             border: 1px solid rgba(255, 255, 255, 0.05);
@@ -976,6 +996,43 @@
     <div class="jarvis-toast">Hello. I am Jarvis. How can I help you coordinate the pipeline plan today?</div>
 
     <script>
+        // Real HTML-attribute escaping (not JS-string escaping) — text baked
+        // into an onclick='...' attribute must be HTML-escaped or a stray
+        // quote silently truncates the attribute. See the Connect-button
+        // note further down for the bug this class of mistake caused once.
+        function htmlAttrEscape(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Opens a real deliverable an execution agent produced. URL artifacts
+        // (a created Google Doc, a deployed site, ...) open directly in a new
+        // tab. Local-file artifacts (a written script/report) can't be opened
+        // by the browser directly for security reasons, so those go through
+        // the backend, which reveals the file in the OS file explorer —
+        // generic across file type (script, doc, video, whatever comes next).
+        async function openArtifact(type, value) {
+            if (type === 'url') {
+                window.open(value, '_blank', 'noopener');
+                return;
+            }
+            try {
+                const res = await fetch('/api/open-artifact', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type, value })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(`Couldn't open "${value}": ${data.error || 'unknown error'}`);
+                }
+            } catch (e) {
+                alert(`Couldn't open "${value}": ${e}`);
+            }
+        }
+
         function isApiOrMcp(serviceName) {
             if (!serviceName) return false;
             const s = serviceName.toLowerCase();
@@ -996,6 +1053,18 @@
 
         let selectedPlanId = localStorage.getItem('jarvis_active_pipeline_id') || "";
         let plansCache = [];
+
+        // Services we can actually auto-connect via a real OAuth flow
+        // (connectors/oauth_flow.OAUTH_PROVIDERS on the backend) — the
+        // authoritative source for what a connect form should ask for.
+        // Brain's own connection_methods field list is often wrong (it has
+        // invented fields like a manual "Refresh Token" input, which makes
+        // no sense — the real flow obtains that itself); for any service in
+        // this list, we ignore Brain's guess and show only Client ID/Secret.
+        let knownOAuthProviders = [];
+        fetch('/api/oauth-providers').then(r => r.json()).then(d => {
+            knownOAuthProviders = (d.providers || []).map(s => s.toLowerCase());
+        }).catch(() => {});
         let activeGateData = null;
         let viewMode = selectedPlanId ? "detail" : "listing"; // "listing" or "detail"
         let userClosedModal = true;
@@ -1554,6 +1623,24 @@
                             <span class="item-text" style="color: #4ade80;">Deployed to ${plan.deploy_result.platform}</span>
                         </div>
                     `;
+                    const artifacts = plan.deploy_result.artifacts || [];
+                    artifacts.forEach(a => {
+                        // Windows paths routinely contain sequences like "\u"
+                        // or "\n" that are valid (and different!) escapes in
+                        // a JS string literal — embedding the raw value would
+                        // silently corrupt or hard-break the onclick handler
+                        // depending on what happens to follow the backslash.
+                        // JSON.stringify + htmlAttrEscape (same pattern used
+                        // for the Connect button above) escapes correctly for
+                        // both layers: JS string, then HTML attribute.
+                        const argsEscaped = htmlAttrEscape(JSON.stringify([a.type, a.value]));
+                        const safeLabel = (a.label || a.value || 'Open').toString();
+                        outHTML += `
+                            <button class="artifact-open-btn" onclick="openArtifact(...${argsEscaped})" title="${htmlAttrEscape(a.value)}">
+                                🔗 Open: ${safeLabel.length > 40 ? safeLabel.slice(0, 40) + '…' : safeLabel}
+                            </button>
+                        `;
+                    });
                 }
                 document.getElementById('stage-6-outputs').innerHTML = outHTML || '<div style="font-size:11px; color:var(--text-muted); text-align:center;">Execution complete.</div>';
             } else {
@@ -1719,11 +1806,19 @@
 
                             const urlHtml = url ? `<br><a href="${url}" target="_blank" style="color: #06b6d4; text-decoration: underline; font-weight: 500; display: inline-block; margin-top: 4px;">Get API key / Credentials ↗</a>` : "";
 
-                            const toolJsonEscaped = JSON.stringify(r).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                            // Brain's free-text tool descriptions (purpose/pros/cons/etc.) routinely
+                            // contain apostrophes ("Google's API", "won't work without...") — the
+                            // old escaping here JS-escaped quotes (\') instead of HTML-escaping them
+                            // (&#39;), which does nothing inside an HTML attribute: the browser's
+                            // HTML parser finds the raw ' and ends the onclick='...' attribute right
+                            // there, silently truncating/breaking it. Any such tool's Connect button
+                            // would then do nothing at all when clicked. Real HTML-attribute escaping
+                            // (global helper defined at the top of this script):
+                            const toolJsonEscaped = htmlAttrEscape(JSON.stringify(r));
                             const statusHtml = isUp
                                 ? `<span style="color: #a7f3d0; font-size: 11px;">Status: ✅ Up</span>`
-                                : `<span style="color: #fca5a5; font-size: 11px;">Status: ❌ Unconfigured</span> 
-                                   <button onclick='openConnectModal("${r.service.replace(/'/g, "\\'")}", ${toolJsonEscaped})' style="background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); color: #06b6d4; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px; cursor: pointer; margin-left: 8px;">🔌 Connect</button>`;
+                                : `<span style="color: #fca5a5; font-size: 11px;">Status: ❌ Unconfigured</span>
+                                   <button onclick='openConnectModal("${htmlAttrEscape(r.service)}", ${toolJsonEscaped})' style="background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); color: #06b6d4; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px; cursor: pointer; margin-left: 8px;">🔌 Connect</button>`;
 
                             html += `
                                 <div class="step-row" style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.05);">
@@ -1886,12 +1981,25 @@
             // Render fields for selected method
             const fieldsContainer = document.getElementById('connect-modal-fields');
             let method = null;
-            if (activeToolObj && activeToolObj.connection_methods) {
+            const isKnownOAuthProvider = methodId === "oauth" &&
+                knownOAuthProviders.includes((activeConnectingService || "").toLowerCase().replace(/[\s-]+/g, '_'));
+
+            if (!isKnownOAuthProvider && activeToolObj && activeToolObj.connection_methods) {
                 method = activeToolObj.connection_methods.find(m => m.method_id === methodId);
             }
 
             let fieldsHtml = "";
-            if (method && method.fields && Array.isArray(method.fields)) {
+            if (isKnownOAuthProvider) {
+                // Known provider: we drive the real OAuth flow ourselves once
+                // Save & Connect is clicked — nothing else needs to be asked.
+                fieldsHtml = `
+                    <label style="color: var(--text-muted); font-size: 11px; font-weight: 600;">Client ID:</label>
+                    <input type="text" id="input-client_id" class="connect-input-field" placeholder="Enter Client ID...">
+                    <label style="color: var(--text-muted); font-size: 11px; font-weight: 600;">Client Secret:</label>
+                    <input type="password" id="input-client_secret" class="connect-input-field" placeholder="Enter Client Secret...">
+                    <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Clicking Save &amp; Connect opens a real Google sign-in window — nothing else to enter here.</div>
+                `;
+            } else if (method && method.fields && Array.isArray(method.fields)) {
                 method.fields.forEach(f => {
                     const type = f.type || "text";
                     fieldsHtml += `

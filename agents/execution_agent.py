@@ -21,6 +21,33 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 MAX_TOOL_TURNS = 6
 
+# Keys, in priority order, that a tool result might carry the "thing that got
+# created" under. Generic on purpose — any current or future tool (Docs,
+# Drive, video generation, website deploy, ...) is picked up automatically
+# as long as its handler returns one of these, no per-tool wiring needed.
+_ARTIFACT_URL_KEYS = ("google_doc_url", "doc_url", "url", "web_url", "video_url", "website_url", "deploy_url")
+_ARTIFACT_PATH_KEYS = ("path", "file_path", "output_path", "video_path")
+
+
+def _extract_artifact(tool_name: str, tool_args: dict, result) -> dict | None:
+    """Pulls a clickable artifact (a URL or a local file path) out of a real
+    tool result, if that call actually produced one. Returns None for tool
+    calls that didn't create anything openable (e.g. read_file, a search)."""
+    if not isinstance(result, dict) or result.get("status") != "ok":
+        return None
+    label = tool_args.get("relative_path") or tool_args.get("title") or tool_args.get("query") or tool_name
+    for key in _ARTIFACT_URL_KEYS:
+        if result.get(key):
+            return {"type": "url", "value": result[key], "label": str(label), "tool": tool_name}
+    # write_file's own bookkeeping (list_deliverables, read_file) also uses
+    # "path" but isn't something the user asked to "open" — only count it as
+    # an artifact when this call actually wrote something.
+    if result.get("action") == "write_file":
+        for key in _ARTIFACT_PATH_KEYS:
+            if result.get(key):
+                return {"type": "path", "value": result[key], "label": str(label), "tool": tool_name}
+    return None
+
 
 async def run_execution_agent(
     agent_config: dict,
@@ -103,6 +130,7 @@ RULES:
         })
 
     client = genai.Client(api_key=GEMINI_API_KEY)
+    collected_artifacts = []
 
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
@@ -151,6 +179,9 @@ RULES:
                         }
                     })
                 result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
+                artifact = _extract_artifact(fc.name, tool_args, result)
+                if artifact:
+                    collected_artifacts.append(artifact)
                 if event_logger:
                     event_logger({
                         "event_type": "tool_result",
@@ -189,10 +220,19 @@ RULES:
         result = json.loads(cleaned)
         result["agent_id"] = agent_id
         result.setdefault("status", "ok")
+        if collected_artifacts:
+            result["artifacts"] = collected_artifacts
         return result
     except Exception as e:
-        return {
+        # Even if the agent's final wrap-up JSON failed to parse, any tools
+        # it actually called already did real, irreversible work (a Doc got
+        # created, a file got written) — don't let a text-formatting slip
+        # hide that from the user.
+        error_result = {
             "agent_id": agent_id,
             "status": "error",
             "error": str(e)
         }
+        if collected_artifacts:
+            error_result["artifacts"] = collected_artifacts
+        return error_result
