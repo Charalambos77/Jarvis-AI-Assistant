@@ -1069,6 +1069,11 @@
         let viewMode = selectedPlanId ? "detail" : "listing"; // "listing" or "detail"
         let userClosedModal = true;
         let lastGateId = "";
+        // The plan whose gate the modal is currently showing. This is NOT always
+        // selectedPlanId: when nothing is explicitly selected the page falls back to
+        // the first running plan and opens its gate anyway, and approving or rejecting
+        // then has to name THAT plan or the backend rejects the call.
+        let modalPlanId = "";
         // Dynamic navigation context (Brain vs Execution)
         const urlParams = new URLSearchParams(window.location.search);
         const fromSource = urlParams.get('from') || 'brain';
@@ -1575,6 +1580,7 @@
 
                 // If currently active run, show approval modal overlay unless user closed it
                 if (!selectedPlanId || selectedPlanId === plan.id) {
+                    modalPlanId = plan.id;
                     activeGateData = plan.gate_data;
                     if (!userClosedModal) {
                         document.getElementById('approval-modal').style.display = 'flex';
@@ -2127,7 +2133,9 @@
             userClosedModal = false;
             userOpenedToolsModal = false;
 
-            const plan = plansCache.find(p => p.id === selectedPlanId);
+            const planId = selectedPlanId || modalPlanId;
+            const plan = plansCache.find(p => p.id === planId);
+            if (plan) modalPlanId = plan.id;
             const gateId = plan ? plan.current_gate : "";
             const gateData = plan ? plan.gate_data : null;
 
@@ -2165,19 +2173,42 @@
             const noteInput = document.getElementById('rejection-note');
             const note = noteInput ? noteInput.value : "";
             const endpoint = approved ? '/gate/approve' : '/gate/reject';
+            const toast = document.querySelector('.jarvis-toast');
+
             // plan_id is required — without it, approving/rejecting could resolve the
             // wrong pipeline's gate whenever more than one plan is running concurrently.
+            // Fall back to the plan the modal is showing: the page opens a waiting gate
+            // even when nothing was explicitly selected, and sending an empty id there
+            // made the backend refuse the call while the modal closed as if it worked.
+            const planId = selectedPlanId || modalPlanId;
+            if (!planId) {
+                if (toast) toast.innerText = "Could not tell which pipeline this gate belongs to. Pick the plan and try again.";
+                return;
+            }
+
             const body = approved
-                ? { plan_id: selectedPlanId, approved_steps: stepsList }
-                : { plan_id: selectedPlanId, rejected_steps: stepsList, redirect_note: note };
+                ? { plan_id: planId, approved_steps: stepsList }
+                : { plan_id: planId, rejected_steps: stepsList, redirect_note: note };
 
             fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             })
-                .then(r => r.json())
-                .then(() => {
+                .then(r => r.json().then(data => ({ ok: r.ok, data })))
+                .then(({ ok, data }) => {
+                    // A failed gate call used to close the modal anyway, so a rejection
+                    // that never reached the pipeline looked exactly like one that did.
+                    if (!ok) {
+                        if (toast) toast.innerText = data.error || "The pipeline did not accept that. Nothing was changed.";
+                        console.error("Gate call rejected by the server:", data);
+                        return;
+                    }
+                    if (toast) {
+                        toast.innerText = approved
+                            ? `Gate approved for plan ${planId}. Advancing the pipeline.`
+                            : `Gate rejected for plan ${planId}. The agents are re-planning.`;
+                    }
                     userClosedModal = true;
                     document.getElementById('approval-modal').style.display = 'none';
                     if (document.getElementById('rejection-feedback-container')) {
@@ -2192,7 +2223,10 @@
                     }
                     fetchPlans();
                 })
-                .catch(err => console.error("Error submitting gate checkpoint:", err));
+                .catch(err => {
+                    console.error("Error submitting gate checkpoint:", err);
+                    if (toast) toast.innerText = "Could not reach Jarvis. The gate is still waiting.";
+                });
         }
 
         // Draw animated connection paths using SVG
