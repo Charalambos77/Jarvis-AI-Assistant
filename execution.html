@@ -2293,7 +2293,13 @@
                         const act = data.ui_action;
                         let ackedAction = null;
 
-                        if (act.type === 'navigate' && act.url) {
+                        if (act.type === 'pipeline_intake_ask') {
+                            // The intake modal lives on the command centre, and /state
+                            // hands a ui_action to whichever page polls first — so carry
+                            // the draft over instead of swallowing the ask here.
+                            window.location.href =
+                                'command_center.html?intake=' + encodeURIComponent(act.draft_id);
+                        } else if (act.type === 'navigate' && act.url) {
                             window.location.href = act.url;
                         } else if (act.type === 'control_interface') {
                             ackedAction = act.action;

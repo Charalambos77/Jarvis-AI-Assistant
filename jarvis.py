@@ -701,21 +701,42 @@ def _intake_safe_filename(name: str) -> str:
     return base[:120] or "upload"
 
 
+def _delete_draft_uploads(draft: dict):
+    """Delete only the files THIS draft uploaded.
+
+    Never wipe the project's Inputs/ folder wholesale: get_project_name derives
+    that folder from the task text, so a second, similar request lands in the
+    same folder as an earlier pipeline. Cancelling the new draft must not take
+    the older pipeline's files with it \u2014 it may still be running on them.
+    """
+    for f in draft.get("files", []):
+        try:
+            if os.path.exists(f["path"]):
+                os.remove(f["path"])
+        except Exception as e:
+            print(f"[Intake] Could not delete {f.get('name')}: {e}")
+
+    # Tidy up the folders this draft created, but only while they are empty.
+    project = os.path.join(BASE_DIR, "Let Jarvis Handle It", draft["project_name"])
+    for path in (os.path.join(project, "Inputs"), project):
+        try:
+            if os.path.isdir(path) and not os.listdir(path):
+                os.rmdir(path)
+        except Exception as e:
+            print(f"[Intake] Could not remove empty folder {path}: {e}")
+
+
 def _prune_intake_drafts():
     """Drop drafts nobody came back to, along with the files they uploaded."""
-    import shutil, time as _time
+    import time as _time
     cutoff = _time.time() - INTAKE_DRAFT_TTL
     with INTAKE_DRAFTS_LOCK:
         stale = [d for d in INTAKE_DRAFTS.values() if d.get("touched", 0) < cutoff]
         for draft in stale:
             INTAKE_DRAFTS.pop(draft["draft_id"], None)
     for draft in stale:
-        try:
-            inputs = os.path.join(BASE_DIR, "Let Jarvis Handle It", draft["project_name"], "Inputs")
-            if os.path.isdir(inputs) and not draft.get("approved"):
-                shutil.rmtree(inputs, ignore_errors=True)
-        except Exception as e:
-            print(f"[Intake] Failed to sweep stale draft files: {e}")
+        if not draft.get("approved"):
+            _delete_draft_uploads(draft)
 
 
 def _get_intake_draft(draft_id: str):
@@ -921,7 +942,13 @@ def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
 
 def _intake_write_brief(draft: dict) -> str:
     brief_dir = _intake_project_dir(draft["project_name"], "Brief")
+    # Two similar requests derive the same project name, so never overwrite a brief
+    # an earlier pipeline is still working from — its plan points at that file.
     brief_path = os.path.join(brief_dir, "clarified_brief.md")
+    n = 2
+    while os.path.exists(brief_path):
+        brief_path = os.path.join(brief_dir, f"clarified_brief ({n}).md")
+        n += 1
     with open(brief_path, "w", encoding="utf-8") as f:
         f.write(_intake_brief_markdown(draft))
     return brief_path
@@ -929,18 +956,9 @@ def _intake_write_brief(draft: dict) -> str:
 
 def _intake_discard(draft: dict):
     """Cancel means it never happened: forget the draft, delete its uploads."""
-    import shutil
     with INTAKE_DRAFTS_LOCK:
         INTAKE_DRAFTS.pop(draft["draft_id"], None)
-    try:
-        inputs = os.path.join(BASE_DIR, "Let Jarvis Handle It", draft["project_name"], "Inputs")
-        if os.path.isdir(inputs):
-            shutil.rmtree(inputs, ignore_errors=True)
-        project = os.path.join(BASE_DIR, "Let Jarvis Handle It", draft["project_name"])
-        if os.path.isdir(project) and not os.listdir(project):
-            os.rmdir(project)
-    except Exception as e:
-        print(f"[Intake] Failed to remove cancelled draft files: {e}")
+    _delete_draft_uploads(draft)
 
 
 def create_intake_draft(task: str) -> dict:
@@ -2260,6 +2278,21 @@ def intake_start_route():
         "draft_id": draft["draft_id"],
         "task": draft["task"],
         "project_name": draft["project_name"],
+    })
+
+
+@app.route("/pipeline/intake/draft", methods=["GET"])
+def intake_draft_route():
+    """Fetch a draft by id — used when the ask has to move to another page."""
+    draft = _get_intake_draft(request.args.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    return jsonify({
+        "draft_id": draft["draft_id"],
+        "task": draft["task"],
+        "project_name": draft["project_name"],
+        "details": draft.get("details", ""),
+        "files": [{k: v for k, v in f.items() if k != "path"} for f in draft.get("files", [])],
     })
 
 

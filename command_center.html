@@ -5061,6 +5061,25 @@
             } catch (e) { /* the draft expires on its own anyway */ }
         }
 
+        // A pipeline started by voice on another page hands the draft over through
+        // the URL, because /state gives a ui_action to whichever page polls first.
+        (async function resumeHandedOverIntake() {
+            const draftId = new URLSearchParams(window.location.search).get('intake');
+            if (!draftId) return;
+            // Clear it so a refresh does not re-open an ask the user already answered.
+            history.replaceState(null, '', window.location.pathname);
+            try {
+                const res = await fetch(`/pipeline/intake/draft?draft_id=${encodeURIComponent(draftId)}`);
+                if (!res.ok) return;
+                const draft = await res.json();
+                showIntakeAsk(draft.draft_id, draft.task, draft.project_name);
+                intakeState.details = draft.details || '';
+                intakeState.files = draft.files || [];
+            } catch (e) {
+                console.error('Could not resume the pipeline brief:', e);
+            }
+        })();
+
         // Escape maps to Cancel, but only through the same confirmation — a long
         // brief is too easy to lose to a stray keypress.
         document.addEventListener('keydown', (e) => {

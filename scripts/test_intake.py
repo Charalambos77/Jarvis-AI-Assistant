@@ -19,16 +19,24 @@ jarvis.speak = lambda text: None
 def set_model_reply(payload):
     genai.FAKE["response"] = json.dumps(payload)
 
+FIRST_REPLY = genai.FAKE.get("response") or '{"questions": []}'
+
 def check(label, cond):
     print(("PASS  " if cond else "FAIL  ") + label)
     if not cond:
         sys.exit(1)
+
+# A failed run leaves a project folder behind, and the upload dedupe would then
+# rename this run's files. Start from a clean slate.
+def wipe_project(name):
+    shutil.rmtree(os.path.join(BASE, "Let Jarvis Handle It", name), ignore_errors=True)
 
 # ---- 1. start a draft ------------------------------------------------------
 r = app.post("/pipeline/intake/start", json={"task": "Build a website for my dentist client"})
 draft = r.get_json()
 did = draft["draft_id"]
 project = draft["project_name"]
+wipe_project(project)
 check("draft created, no pipeline yet", r.status_code == 200 and did and not STARTED)
 check("no plan row created", len(jarvis.PLAN_STORE) == 0 or all(p["id"] != "99" for p in jarvis.PLAN_STORE))
 
@@ -139,6 +147,21 @@ check("brief states the research freedom rule", "search the web freely" in brief
 check("full brief handed to the agents", STARTED[0]["task"] == brief)
 check("draft cleared after approval", jarvis._get_intake_draft(did) is None)
 
+# ---- 9b. a second pipeline must not overwrite the first's brief -------------
+# The stub derives the project name from the model reply, so put it back to
+# whatever produced the first draft's name to force the collision under test.
+genai.FAKE["response"] = FIRST_REPLY
+r = app.post("/pipeline/intake/start", json={"task": "Build a website for my dentist client"})
+twin = r.get_json()
+check("second job derives the same project name", twin["project_name"] == project)
+set_model_reply({"plan_text": "# Plan\n\nA second, different site."})
+app.post("/pipeline/intake/picture", json={"draft_id": twin["draft_id"]})
+r2 = app.post("/pipeline/intake/approve", json={"draft_id": twin["draft_id"]})
+second_brief = r2.get_json()["brief_path"]
+check("second brief written beside the first", second_brief != brief_path)
+check("first brief untouched", "in blue" in open(brief_path, encoding="utf-8").read())
+check("second brief holds its own plan", "second, different site" in open(second_brief, encoding="utf-8").read())
+
 # ---- 10. cancel leaves nothing --------------------------------------------
 r = app.post("/pipeline/intake/start", json={"task": "Throwaway job"})
 d2 = r.get_json()
@@ -150,17 +173,59 @@ check("cancel test file exists first", os.path.exists(os.path.join(junk_dir, "ju
 app.post("/pipeline/intake/cancel", json={"draft_id": d2["draft_id"]})
 check("cancel removed the files", not os.path.exists(junk_dir))
 check("cancel removed the draft", jarvis._get_intake_draft(d2["draft_id"]) is None)
-check("cancel started nothing", len(STARTED) == 1)
+check("cancel started nothing", len(STARTED) == 2)
+
+# ---- 10b. cancelling must not touch another pipeline's files ----------------
+# get_project_name derives the folder from the task text, so two similar requests
+# share one Inputs/ folder. Cancelling the second must leave the first's files —
+# that pipeline may still be running on them.
+r = app.post("/pipeline/intake/start", json={"task": "Shared folder job"})
+keeper = r.get_json()
+app.post("/pipeline/intake/upload", data={
+    "draft_id": keeper["draft_id"], "files": [(io.BytesIO(b"keep me"), "keeper.txt")]
+}, content_type="multipart/form-data")
+shared_dir = os.path.join(BASE, "Let Jarvis Handle It", keeper["project_name"], "Inputs")
+
+intruder = app.post("/pipeline/intake/start", json={"task": "Shared folder job"}).get_json()
+check("second draft derives the same project folder",
+      intruder["project_name"] == keeper["project_name"])
+app.post("/pipeline/intake/upload", data={
+    "draft_id": intruder["draft_id"], "files": [(io.BytesIO(b"discard me"), "intruder.txt")]
+}, content_type="multipart/form-data")
+app.post("/pipeline/intake/cancel", json={"draft_id": intruder["draft_id"]})
+check("cancel removed only its own file",
+      not os.path.exists(os.path.join(shared_dir, "intruder.txt")))
+check("cancel left the other draft's file alone",
+      os.path.exists(os.path.join(shared_dir, "keeper.txt")))
+app.post("/pipeline/intake/cancel", json={"draft_id": keeper["draft_id"]})
+check("cancelling the last draft clears the folder", not os.path.exists(shared_dir))
 
 # ---- 11. the tool no longer launches a pipeline -----------------------------
 res = jarvis.start_pipeline_local({"task": "Some complex job"})
 check("start_pipeline only opens the gate", res["status"] == "awaiting_details")
-check("no pipeline started by the tool", len(STARTED) == 1)
+check("no pipeline started by the tool", len(STARTED) == 2)
 check("UI told to ask about details", jarvis.UI_ACTION["type"] == "pipeline_intake_ask")
 
 # ---- 12. saying no still builds the old way --------------------------------
 res = jarvis.start_pipeline_local({"task": "Just build it", "skip_intake": True})
-check("skip_intake builds immediately", res["status"] == "pipeline_started" and len(STARTED) == 2)
+check("skip_intake builds immediately", res["status"] == "pipeline_started" and len(STARTED) == 3)
+
+# ---- 12b. a draft can be picked up on another page --------------------------
+# Voice can start a pipeline from any page, but the modal only lives on the
+# command centre, so the other pages hand the draft over through the URL.
+d4 = app.post("/pipeline/intake/start", json={"task": "Started by voice elsewhere"}).get_json()
+app.post("/pipeline/intake/upload", data={
+    "draft_id": d4["draft_id"], "files": [(io.BytesIO(b"note"), "brief.txt")]
+}, content_type="multipart/form-data")
+app.post("/pipeline/intake/questions", json={"draft_id": d4["draft_id"], "details": "typed earlier"})
+r = app.get(f"/pipeline/intake/draft?draft_id={d4['draft_id']}")
+handed = r.get_json()
+check("draft can be fetched by id", r.status_code == 200 and handed["task"] == "Started by voice elsewhere")
+check("handover keeps the typed details", handed["details"] == "typed earlier")
+check("handover keeps the uploaded files", [f["name"] for f in handed["files"]] == ["brief.txt"])
+check("handover hides server paths", all("path" not in f for f in handed["files"]))
+check("unknown draft refused", app.get("/pipeline/intake/draft?draft_id=nope").status_code == 404)
+app.post("/pipeline/intake/cancel", json={"draft_id": d4["draft_id"]})
 
 # ---- 13. a dead model must not trap the user -------------------------------
 r = app.post("/pipeline/intake/start", json={"task": "Model is down"})
@@ -174,5 +239,7 @@ check("broken model still yields an editable brief", bool(body["plan_text"]) and
 app.post("/pipeline/intake/cancel", json={"draft_id": d3})
 
 # cleanup
-shutil.rmtree(os.path.join(BASE, "Let Jarvis Handle It", project), ignore_errors=True)
+wipe_project(project)
+for extra in ("Shared folder job", "Started by voice elsewhere", "Throwaway job"):
+    wipe_project(extra)
 print("\nAll checks passed.")

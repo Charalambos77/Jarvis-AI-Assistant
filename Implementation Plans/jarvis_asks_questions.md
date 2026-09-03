@@ -399,3 +399,29 @@ Two verification gaps to close by hand against the real app:
 Note: `agents/research_agent.py` needs Python 3.12+ (it has a backslash inside an f-string), so
 `multi_agent_coordinator` could not be imported for testing on 3.11 — its changes were verified
 by parsing the source instead. That constraint is pre-existing and unrelated to this work.
+
+
+## 11. Fixes from the post-implementation review
+
+Three defects found by re-reading the diff adversarially, all fixed and covered by tests:
+
+**Cancel could delete another pipeline's files.** `get_project_name` derives the project folder
+from the task text, so two similar requests share one `Inputs/` folder. Cancel used to `rmtree`
+that whole folder — which would take an already-approved, possibly still-running pipeline's
+uploads with it. Cancel now deletes only the files that draft itself recorded, and removes the
+folders only while they are empty.
+
+**A pipeline started by voice on another page vanished.** `execution.html`, `plan.html` and
+`provider_comparison.html` all poll `/state` and consume `ui_action`, and `/state` clears the
+action after serving it — so whichever page polled first swallowed the intake ask, and the
+pipeline never started. Those three pages now hand the draft to the command centre through
+`?intake=<draft_id>`, and a new `GET /pipeline/intake/draft` lets it pick the draft back up with
+the typed details and uploaded files intact.
+
+**A second pipeline overwrote the first's brief.** Same project-name collision: the second
+approval wrote over `clarified_brief.md` while the first pipeline's `brief_path` still pointed at
+it, so a resumed run would read the wrong brief. Briefs are now written to the next free
+`clarified_brief (n).md`.
+
+The suite in `scripts/test_intake.py` is now 54 assertions, self-cleaning, and repeatable back to
+back.
