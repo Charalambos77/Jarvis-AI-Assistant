@@ -152,6 +152,22 @@ AGENT_OBS_LOCK = threading.Lock()
 PLAN_STORE: list[dict] = []            # list of all active/past plans
 PLAN_STORE_LOCK = threading.Lock()
 
+# --- Pipeline Intake Drafts (clarification gate) ---
+# A draft is everything the user has told us about a pipeline BEFORE the
+# pipeline exists: their typed details, uploaded files, and the running Q&A.
+# Deliberately NOT persisted to SQLite — cancelling an intake must leave no
+# trace at all, so an abandoned draft dies with the process (or with the
+# janitor below).
+INTAKE_DRAFTS: dict[str, dict] = {}
+INTAKE_DRAFTS_LOCK = threading.Lock()
+INTAKE_DRAFT_TTL = 6 * 3600            # seconds before an untouched draft is swept
+
+# Gemini can read these natively; everything else is stored and referenced by
+# path so the agents can open it themselves.
+INTAKE_READABLE_MIMES = ("image/", "application/pdf", "text/")
+INTAKE_MAX_INLINE_BYTES = 15 * 1024 * 1024   # per-file cap on what we inline into a prompt
+
+
 ACTIVE_PIPELINE_THREADS = set()
 ACTIVE_PIPELINE_LOCK = threading.Lock()
 
@@ -663,7 +679,306 @@ def update_task_log_file(plan_id: str, event: dict):
     except Exception as e:
         print(f"Failed to update task log file: {e}")
 
-def initiate_pipeline(task: str) -> str:
+# ---------------------------------------------------------------------------
+# Pipeline Intake — the clarification gate that runs BEFORE a pipeline exists
+#
+# Flow: details + files  ->  gap questions, one at a time  ->  a written plan
+# the user can edit  ->  approval.  Only the approval step creates a pipeline.
+# ---------------------------------------------------------------------------
+
+def _intake_project_dir(project_name: str, *parts: str) -> str:
+    """Path inside this project's folder, creating it on the way."""
+    path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, *parts)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _intake_safe_filename(name: str) -> str:
+    """Strip any directory component so an upload can only land in Inputs/."""
+    import re
+    base = os.path.basename((name or "").replace("\\", "/")).strip()
+    base = re.sub(r'[^A-Za-z0-9._ -]', "_", base)
+    return base[:120] or "upload"
+
+
+def _prune_intake_drafts():
+    """Drop drafts nobody came back to, along with the files they uploaded."""
+    import shutil, time as _time
+    cutoff = _time.time() - INTAKE_DRAFT_TTL
+    with INTAKE_DRAFTS_LOCK:
+        stale = [d for d in INTAKE_DRAFTS.values() if d.get("touched", 0) < cutoff]
+        for draft in stale:
+            INTAKE_DRAFTS.pop(draft["draft_id"], None)
+    for draft in stale:
+        try:
+            inputs = os.path.join(BASE_DIR, "Let Jarvis Handle It", draft["project_name"], "Inputs")
+            if os.path.isdir(inputs) and not draft.get("approved"):
+                shutil.rmtree(inputs, ignore_errors=True)
+        except Exception as e:
+            print(f"[Intake] Failed to sweep stale draft files: {e}")
+
+
+def _get_intake_draft(draft_id: str):
+    import time as _time
+    with INTAKE_DRAFTS_LOCK:
+        draft = INTAKE_DRAFTS.get((draft_id or "").strip())
+        if draft:
+            draft["touched"] = _time.time()
+        return draft
+
+
+def _intake_file_parts(draft: dict) -> list:
+    """Inline the files Gemini can actually read (images, PDFs, text)."""
+    parts = []
+    for f in draft.get("files", []):
+        mime = f.get("mime") or "application/octet-stream"
+        if not mime.startswith(INTAKE_READABLE_MIMES):
+            continue
+        try:
+            if os.path.getsize(f["path"]) > INTAKE_MAX_INLINE_BYTES:
+                continue
+            with open(f["path"], "rb") as fh:
+                parts.append(types.Part.from_bytes(data=fh.read(), mime_type=mime))
+        except Exception as e:
+            print(f"[Intake] Could not inline {f.get('name')}: {e}")
+    return parts
+
+
+def _intake_context_text(draft: dict) -> str:
+    """Everything the user has told us so far, as plain text for the prompt."""
+    lines = [f"ORIGINAL REQUEST:\n{draft.get('task', '')}"]
+    details = (draft.get("details") or "").strip()
+    lines.append(f"\nDETAILS THE USER WROTE:\n{details if details else '(none given)'}")
+
+    files = draft.get("files", [])
+    if files:
+        listed = "\n".join(f"- {f['name']} ({f.get('mime', 'unknown type')})" for f in files)
+        lines.append(
+            "\nATTACHED FILES (readable ones are included with this message):\n" + listed
+        )
+    else:
+        lines.append("\nATTACHED FILES:\n(none)")
+
+    qa = draft.get("qa", [])
+    if qa:
+        answered = "\n".join(f"Q: {item['question']}\nA: {item['answer']}" for item in qa)
+        lines.append("\nCLARIFICATIONS ALREADY ANSWERED — never ask these again:\n" + answered)
+    return "\n".join(lines)
+
+
+def _intake_parse_json(text: str):
+    """Gemini likes to wrap JSON in code fences; unwrap before parsing."""
+    import re
+    cleaned = (text or "").strip()
+    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1).strip()
+    return json.loads(cleaned)
+
+
+def _intake_ask_gemini(draft: dict, instruction: str):
+    """One Gemini call carrying the whole draft (text + readable files)."""
+    contents = [instruction, _intake_context_text(draft)] + _intake_file_parts(draft)
+    response = client.models.generate_content(model="gemini-2.5-flash", contents=contents)
+    return _intake_parse_json(response.text)
+
+
+_INTAKE_BRIEF_RULE = (
+    "The brief is authoritative for WHAT the user wants. It is not a limit on HOW you work: "
+    "research and search the web freely for anything the brief does not cover. Follow the brief "
+    "exactly where it constrains you \u2014 if it names a specific source, tool, or approach, use that "
+    "one instead of choosing your own. Attached files live at the paths listed in the brief; open "
+    "them when they are relevant."
+)
+
+
+def _intake_next_questions(draft: dict) -> list[dict]:
+    """Ask Gemini for the gaps that would genuinely change what gets built."""
+    instruction = (
+        "You are Jarvis, about to hand this job to a team of autonomous agents. Before they start, "
+        "find what you genuinely do not know.\n\n"
+        "RULES:\n"
+        "- Only ask about gaps that would actually change what gets built. Skip anything you can "
+        "reasonably infer, and skip preferences that would not alter the work.\n"
+        "- Never re-ask something already answered below.\n"
+        "- Read the attached files first; do not ask for information they already contain.\n"
+        "- Ask at most 5 questions. Short, plain, one topic each. No compound questions.\n"
+        "- If nothing material is missing, return an empty list. An empty list is the correct "
+        "answer whenever you could brief the team without guessing.\n\n"
+        "For each question also write \"gist\": a single short spoken line (under 15 words) that "
+        "conveys the question aloud.\n\n"
+        "Reply with JSON only: {\"questions\": [{\"question\": \"...\", \"gist\": \"...\"}]}"
+    )
+    try:
+        data = _intake_ask_gemini(draft, instruction)
+    except Exception as e:
+        # A dead question round must not trap the user — fall through to the plan.
+        print(f"[Intake] Question generation failed: {e}")
+        return []
+
+    questions = data.get("questions", []) if isinstance(data, dict) else data
+    cleaned = []
+    for q in questions or []:
+        if isinstance(q, str):
+            cleaned.append({"question": q, "gist": q})
+        elif isinstance(q, dict) and q.get("question"):
+            cleaned.append({"question": q["question"], "gist": q.get("gist") or q["question"]})
+    return cleaned[:5]
+
+
+def _intake_paint_picture(draft: dict) -> dict:
+    """Either the plan, or another round of questions — Jarvis decides."""
+    instruction = (
+        "You are Jarvis. Using everything below, paint a picture of what the user asked for: a "
+        "written plan they can read and correct.\n\n"
+        "RULES:\n"
+        "- Fold in every clarification and everything you can see in the attached files.\n"
+        "- Plain language and concrete. Describe what will be built and for whom, not how you "
+        "will manage the work.\n"
+        "- Invent nothing. Do not add requirements the user never gave you.\n"
+        "- If something material is still unclear, do NOT guess: return questions instead of a "
+        "plan.\n\n"
+        "Reply with JSON only, one of:\n"
+        "{\"plan_text\": \"the plan in markdown\"}\n"
+        "{\"questions\": [{\"question\": \"...\", \"gist\": \"...\"}]}"
+    )
+    try:
+        data = _intake_ask_gemini(draft, instruction)
+    except Exception as e:
+        # Degrade to the raw brief so the user can still edit and approve something.
+        print(f"[Intake] Painting the picture failed: {e}")
+        return {
+            "plan_text": _intake_brief_markdown(draft, include_plan=False),
+            "degraded": "Jarvis could not reach the model to write the plan, so this is the raw "
+                        "brief. You can edit it and build from it.",
+        }
+
+    if isinstance(data, dict) and data.get("questions"):
+        questions = []
+        for q in data["questions"]:
+            if isinstance(q, str):
+                questions.append({"question": q, "gist": q})
+            elif isinstance(q, dict) and q.get("question"):
+                questions.append({"question": q["question"], "gist": q.get("gist") or q["question"]})
+        if questions:
+            return {"questions": questions[:5]}
+
+    plan_text = (data or {}).get("plan_text") if isinstance(data, dict) else None
+    if not plan_text:
+        plan_text = _intake_brief_markdown(draft, include_plan=False)
+    return {"plan_text": plan_text}
+
+
+def _intake_clean_edit(draft: dict, edited_text: str) -> str:
+    """Tidy the user's edit without changing a single one of their decisions."""
+    instruction = (
+        "The user edited the plan below. Return it in a clean, consistent format.\n\n"
+        "RULES:\n"
+        "- Preserve every decision they made. Change no meaning.\n"
+        "- Add no requirements they did not write, and remove none that they did.\n"
+        "- Fix only structure, headings and wording.\n\n"
+        "Reply with JSON only: {\"plan_text\": \"the cleaned plan in markdown\"}\n\n"
+        "THE USER\u2019S EDITED PLAN:\n" + (edited_text or "")
+    )
+    try:
+        data = _intake_ask_gemini(draft, instruction)
+        cleaned = (data or {}).get("plan_text")
+        if cleaned:
+            return cleaned
+    except Exception as e:
+        print(f"[Intake] Cleaning the edit failed: {e}")
+    # Never lose the user's words — keep their version verbatim if cleaning fails.
+    return edited_text
+
+
+def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
+    """The complete record handed to the agents."""
+    out = [f"# Clarified Brief \u2014 {draft.get('project_name', 'Project')}", ""]
+    out += ["## Original request", draft.get("task", ""), ""]
+
+    details = (draft.get("details") or "").strip()
+    out += ["## Details from the user", details if details else "_(none given)_", ""]
+
+    qa = draft.get("qa", [])
+    if qa:
+        out.append("## Clarifications")
+        for item in qa:
+            out += [f"**Q:** {item['question']}", "", f"**A:** {item['answer']}", ""]
+
+    files = draft.get("files", [])
+    if files:
+        out.append("## Attached files")
+        for f in files:
+            out.append(f"- `Inputs/{f['name']}` \u2014 {f.get('mime', 'unknown type')}")
+        out.append("")
+
+    if include_plan and draft.get("plan_text"):
+        out += ["## Approved plan", draft["plan_text"], ""]
+
+    out += ["---", "", "## How to use this brief", _INTAKE_BRIEF_RULE, ""]
+    return "\n".join(out)
+
+
+def _intake_write_brief(draft: dict) -> str:
+    brief_dir = _intake_project_dir(draft["project_name"], "Brief")
+    brief_path = os.path.join(brief_dir, "clarified_brief.md")
+    with open(brief_path, "w", encoding="utf-8") as f:
+        f.write(_intake_brief_markdown(draft))
+    return brief_path
+
+
+def _intake_discard(draft: dict):
+    """Cancel means it never happened: forget the draft, delete its uploads."""
+    import shutil
+    with INTAKE_DRAFTS_LOCK:
+        INTAKE_DRAFTS.pop(draft["draft_id"], None)
+    try:
+        inputs = os.path.join(BASE_DIR, "Let Jarvis Handle It", draft["project_name"], "Inputs")
+        if os.path.isdir(inputs):
+            shutil.rmtree(inputs, ignore_errors=True)
+        project = os.path.join(BASE_DIR, "Let Jarvis Handle It", draft["project_name"])
+        if os.path.isdir(project) and not os.listdir(project):
+            os.rmdir(project)
+    except Exception as e:
+        print(f"[Intake] Failed to remove cancelled draft files: {e}")
+
+
+def create_intake_draft(task: str) -> dict:
+    """Start a draft. No pipeline, no DB row, nothing persistent yet."""
+    import time as _time
+    import uuid
+    _prune_intake_drafts()
+    draft = {
+        "draft_id": uuid.uuid4().hex[:8],
+        "task": task,
+        "project_name": get_project_name(task),
+        "details": "",
+        "files": [],
+        "qa": [],
+        "pending_questions": [],
+        "rounds": 0,
+        "plan_text": None,
+        "stage": "intake",
+        "created": _time.time(),
+        "touched": _time.time(),
+    }
+    with INTAKE_DRAFTS_LOCK:
+        INTAKE_DRAFTS[draft["draft_id"]] = draft
+    return draft
+
+
+def initiate_pipeline(task: str, project_name: str | None = None,
+                      brief_path: str | None = None,
+                      task_summary: str | None = None) -> str:
+    """Create the pipeline and start the agents.
+
+    `task` may now be a full clarified brief rather than a one-liner, so:
+      - `project_name` is passed in when the intake flow already derived one, so the
+        Inputs/ folder the user uploaded into is the same folder the pipeline uses;
+      - `task_summary` keeps the original short request for UI labels;
+      - `brief_path` points the agents at the complete brief on disk.
+    Called with none of them, this behaves exactly as it always did.
+    """
     import time
     
     conn = db.get_connection(DB_PATH)
@@ -685,12 +1000,15 @@ def initiate_pipeline(task: str) -> str:
     finally:
         conn.close()
     
-    project_name = get_project_name(task)
+    project_name = project_name or get_project_name(task)
+    task_summary = task_summary or task
 
     with PLAN_STORE_LOCK:
         plan_entry = {
             "id": plan_id,
             "task": task,
+            "task_summary": task_summary,
+            "brief_path": brief_path,
             "project_name": project_name,
             "status": "running",
             "current_gate": None,
@@ -714,8 +1032,8 @@ def initiate_pipeline(task: str) -> str:
             conn.close()
 
 
-    push_message("system", f"Pipeline started [Plan ID: {plan_id}]: {task[:80]}...")
-    create_initial_task_log(plan_id, task, project_name)
+    push_message("system", f"Pipeline started [Plan ID: {plan_id}]: {task_summary[:80]}...")
+    create_initial_task_log(plan_id, task_summary, project_name)
 
     async def gate_fn(gate_id: str, data: dict) -> dict:
         with PIPELINE_LOCK:
@@ -751,7 +1069,7 @@ def initiate_pipeline(task: str) -> str:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, brief_path=brief_path))
             status = result.get('status', 'done')
             if status == "escalated_to_human":
                 reason = result.get('message', 'Max retries exceeded.')
@@ -779,11 +1097,38 @@ def normalize_spoken_id(plan_id: str) -> str:
     return number_map.get(cleaned, cleaned)
 
 def start_pipeline_local(settings_dict):
+    """Opens the clarification gate instead of launching the pipeline outright.
+
+    Nothing is created here: no plan id, no DB row, no agent thread. We hand the
+    UI a draft and ask whether the user wants to give more details first. If they
+    say no, the frontend calls /pipeline/start and we build on the one-liner
+    exactly as before.
+    """
+    global UI_ACTION
     task = settings_dict.get("task", "").strip()
     if not task:
         return {"error": "task is required"}
-    plan_id = initiate_pipeline(task)
-    return {"status": "pipeline_started", "task": task, "plan_id": plan_id}
+
+    if settings_dict.get("skip_intake"):
+        plan_id = initiate_pipeline(task)
+        return {"status": "pipeline_started", "task": task, "plan_id": plan_id}
+
+    draft = create_intake_draft(task)
+    with STATE_LOCK:
+        UI_ACTION = {
+            "type": "pipeline_intake_ask",
+            "draft_id": draft["draft_id"],
+            "task": task,
+            "project_name": draft["project_name"],
+        }
+    push_message("ai", "Do you want to give me more details before I start?")
+    return {
+        "status": "awaiting_details",
+        "task": task,
+        "draft_id": draft["draft_id"],
+        "note": "The pipeline has NOT started. Jarvis asked the user whether they want to add "
+                "details first; the answer decides what happens next.",
+    }
 
 def resume_pipeline_local(settings_dict):
     plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
@@ -811,6 +1156,9 @@ def resume_pipeline_local(settings_dict):
 
     task = plan_entry.get("task")
     project_name = plan_entry.get("project_name", "Default Project")
+    # Pipelines started through the clarification gate carry a brief on disk.
+    brief_path = plan_entry.get("brief_path")
+    task_summary = plan_entry.get("task_summary") or task
     
     with PLAN_STORE_LOCK:
         plan_entry["status"] = "running"
@@ -833,9 +1181,9 @@ def resume_pipeline_local(settings_dict):
             print(f"Failed to automatically open log file: {e}")
 
     if force_reexecute:
-        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}] with FORCE RE-EXECUTE: {task[:80]}...")
+        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}] with FORCE RE-EXECUTE: {task_summary[:80]}...")
     else:
-        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}]: {task[:80]}...")
+        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}]: {task_summary[:80]}...")
 
     async def gate_fn(gate_id: str, data: dict) -> dict:
         with PIPELINE_LOCK:
@@ -875,7 +1223,7 @@ def resume_pipeline_local(settings_dict):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, force_reexecute=force_reexecute))
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, force_reexecute=force_reexecute, brief_path=brief_path))
             status = result.get('status', 'done')
             if status == "escalated_to_human":
                 reason = result.get('message', 'Max retries exceeded.')
@@ -918,8 +1266,19 @@ def read_metrics_local():
         return dict(TRACKED_METRICS)
 
 def get_pipelines_local():
+    """List plans for the assistant. `task` now holds the full clarified brief on
+    pipelines that came through the intake gate, which would flood the model's
+    context, so hand back the short summary and point at the brief instead."""
     with PLAN_STORE_LOCK:
-        return list(PLAN_STORE)
+        plans = list(PLAN_STORE)
+    trimmed = []
+    for plan in plans:
+        view = dict(plan)
+        summary = view.get("task_summary") or view.get("task") or ""
+        view["task"] = summary
+        view.pop("task_summary", None)
+        trimmed.append(view)
+    return trimmed
 
 def delete_pipeline_local(settings_dict):
     plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
@@ -1882,6 +2241,279 @@ def start_pipeline():
         return jsonify({"error": "task is required"}), 400
     plan_id = initiate_pipeline(task)
     return jsonify({"status": "pipeline_started", "task": task, "plan_id": plan_id})
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Intake routes — the clarification gate.
+# Only /pipeline/intake/approve ever creates a pipeline.
+# ---------------------------------------------------------------------------
+
+@app.route("/pipeline/intake/start", methods=["POST"])
+def intake_start_route():
+    """Open a draft for a task. Nothing is persisted and no pipeline exists yet."""
+    data = request.get_json(force=True) or {}
+    task = (data.get("task") or "").strip()
+    if not task:
+        return jsonify({"error": "task is required"}), 400
+    draft = create_intake_draft(task)
+    return jsonify({
+        "draft_id": draft["draft_id"],
+        "task": draft["task"],
+        "project_name": draft["project_name"],
+    })
+
+
+@app.route("/pipeline/intake/upload", methods=["POST"])
+def intake_upload_route():
+    """Store uploaded files of any type under the project's Inputs/ folder."""
+    draft_id = (request.form.get("draft_id") or "").strip()
+    draft = _get_intake_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    uploads = request.files.getlist("files")
+    if not uploads:
+        return jsonify({"error": "no files uploaded"}), 400
+
+    inputs_dir = _intake_project_dir(draft["project_name"], "Inputs")
+    stored = []
+    for upload in uploads:
+        if not upload or not upload.filename:
+            continue
+        name = _intake_safe_filename(upload.filename)
+        # Never silently overwrite a file the user already added.
+        base, ext = os.path.splitext(name)
+        candidate, n = name, 2
+        existing = {f["name"] for f in draft["files"]}
+        while candidate in existing or os.path.exists(os.path.join(inputs_dir, candidate)):
+            candidate = f"{base} ({n}){ext}"
+            n += 1
+        path = os.path.join(inputs_dir, candidate)
+        upload.save(path)
+        entry = {
+            "name": candidate,
+            "path": path,
+            "mime": upload.mimetype or "application/octet-stream",
+            "size": os.path.getsize(path),
+        }
+        with INTAKE_DRAFTS_LOCK:
+            draft["files"].append(entry)
+        stored.append(entry)
+
+    return jsonify({"files": [
+        {k: v for k, v in f.items() if k != "path"} for f in draft["files"]
+    ], "added": len(stored)})
+
+
+@app.route("/pipeline/intake/remove_file", methods=["POST"])
+def intake_remove_file_route():
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    name = data.get("name")
+    removed = None
+    with INTAKE_DRAFTS_LOCK:
+        for f in list(draft["files"]):
+            if f["name"] == name:
+                draft["files"].remove(f)
+                removed = f
+                break
+    if removed:
+        try:
+            os.remove(removed["path"])
+        except Exception as e:
+            print(f"[Intake] Could not delete {removed['name']}: {e}")
+    return jsonify({"files": [
+        {k: v for k, v in f.items() if k != "path"} for f in draft["files"]
+    ]})
+
+
+@app.route("/pipeline/intake/questions", methods=["POST"])
+def intake_questions_route():
+    """Store the details, then ask Gemini for the next round of gap questions."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    if "details" in data:
+        with INTAKE_DRAFTS_LOCK:
+            draft["details"] = (data.get("details") or "").strip()
+
+    set_orb("thinking")
+    questions = _intake_next_questions(draft)
+    set_orb("idle")
+    with INTAKE_DRAFTS_LOCK:
+        draft["pending_questions"] = questions
+        draft["rounds"] += 1
+        draft["stage"] = "questions" if questions else "picture"
+
+    return jsonify({"questions": questions, "round": draft["rounds"]})
+
+
+@app.route("/pipeline/intake/answer", methods=["POST"])
+def intake_answer_route():
+    """Record one answer and hand back the next question, if any."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    question = (data.get("question") or "").strip()
+    answer = (data.get("answer") or "").strip()
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    with INTAKE_DRAFTS_LOCK:
+        draft["qa"].append({"question": question, "answer": answer})
+        draft["pending_questions"] = [
+            q for q in draft["pending_questions"] if q.get("question") != question
+        ]
+        remaining = list(draft["pending_questions"])
+
+    return jsonify({
+        "next": remaining[0] if remaining else None,
+        "remaining": len(remaining),
+        "done": not remaining,
+    })
+
+
+@app.route("/pipeline/intake/picture", methods=["POST"])
+def intake_picture_route():
+    """Jarvis decides: more questions, or the plan."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    set_orb("thinking")
+    result = _intake_paint_picture(draft)
+    set_orb("idle")
+
+    if result.get("questions"):
+        with INTAKE_DRAFTS_LOCK:
+            draft["pending_questions"] = result["questions"]
+            draft["rounds"] += 1
+            draft["stage"] = "questions"
+        return jsonify({"questions": result["questions"], "round": draft["rounds"]})
+
+    with INTAKE_DRAFTS_LOCK:
+        draft["plan_text"] = result.get("plan_text", "")
+        draft["stage"] = "picture"
+    return jsonify({"plan_text": draft["plan_text"], "degraded": result.get("degraded")})
+
+
+@app.route("/pipeline/intake/skip", methods=["POST"])
+def intake_skip_route():
+    """'Skip the rest — build with what you have': drop unanswered questions."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    with INTAKE_DRAFTS_LOCK:
+        draft["pending_questions"] = []
+    return jsonify({"status": "skipped"})
+
+
+@app.route("/pipeline/intake/edit", methods=["POST"])
+def intake_edit_route():
+    """Clean up the user's edit and hand it back for approval — never build."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    edited = data.get("edited_text") or ""
+    if not edited.strip():
+        return jsonify({"error": "edited_text is required"}), 400
+
+    set_orb("thinking")
+    cleaned = _intake_clean_edit(draft, edited)
+    set_orb("idle")
+    with INTAKE_DRAFTS_LOCK:
+        draft["plan_text"] = cleaned
+        draft["stage"] = "picture"
+    return jsonify({"plan_text": cleaned})
+
+
+@app.route("/pipeline/intake/approve", methods=["POST"])
+def intake_approve_route():
+    """The only path that creates a pipeline from a draft."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    # "Continue with this info" skips the questions entirely, so there may be no
+    # painted plan — the details the user typed are the brief.
+    if "details" in data:
+        with INTAKE_DRAFTS_LOCK:
+            draft["details"] = (data.get("details") or "").strip()
+
+    brief_path = _intake_write_brief(draft)
+    brief_text = _intake_brief_markdown(draft)
+
+    plan_id = initiate_pipeline(
+        brief_text,
+        project_name=draft["project_name"],
+        brief_path=brief_path,
+        task_summary=draft["task"],
+    )
+
+    with INTAKE_DRAFTS_LOCK:
+        draft["approved"] = True
+        draft["stage"] = "done"
+        INTAKE_DRAFTS.pop(draft["draft_id"], None)
+
+    return jsonify({
+        "status": "pipeline_started",
+        "plan_id": plan_id,
+        "task": draft["task"],
+        "project_name": draft["project_name"],
+        "brief_path": brief_path,
+    })
+
+
+@app.route("/intake-file/<draft_id>/<path:filename>", methods=["GET"])
+def intake_file_route(draft_id, filename):
+    """Serve an uploaded file back to the modal (thumbnails in the file chips)."""
+    draft = _get_intake_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    # Only files this draft actually recorded — never an arbitrary path.
+    for f in draft.get("files", []):
+        if f["name"] == filename:
+            return send_from_directory(os.path.dirname(f["path"]), os.path.basename(f["path"]))
+    return jsonify({"error": "file not found"}), 404
+
+
+@app.route("/pipeline/intake/cancel", methods=["POST"])
+def intake_cancel_route():
+    """Cancel means it never happened."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"status": "already_gone"})
+    _intake_discard(draft)
+    return jsonify({"status": "cancelled"})
+
+
+@app.route("/jarvis/say", methods=["POST"])
+def jarvis_say_route():
+    """Speak a line through the normal voice path (so mute and the orb apply)."""
+    data = request.get_json(force=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    # The only mute this app has is the mic button; treat it as "Jarvis, be quiet"
+    # so pressing mute silences the spoken questions too. The question text stays
+    # on screen either way, so nothing is lost by staying silent.
+    if MIC_MUTED:
+        return jsonify({"status": "muted"})
+    threading.Thread(target=speak, args=(text,), daemon=True).start()
+    return jsonify({"status": "speaking"})
 
 
 @app.route("/pipeline/resume", methods=["POST"])

@@ -412,7 +412,12 @@ def save_pipeline(conn: sqlite3.Connection, plan: dict):
         "exec_results": plan.get("exec_results", []),
         "deploy_result": plan.get("deploy_result", {}),
         "agent_plan": plan.get("agent_plan", {}),
-        "approved_blueprints": plan.get("approved_blueprints", [])
+        "approved_blueprints": plan.get("approved_blueprints", []),
+        # Clarification intake: the short one-liner the user originally asked for
+        # (the `task` column now holds the full clarified brief) and the path to
+        # the brief file on disk, so a resumed pipeline can re-read it.
+        "task_summary": plan.get("task_summary"),
+        "brief_path": plan.get("brief_path")
     }
     data_str = json.dumps(data_dict, ensure_ascii=False)
     

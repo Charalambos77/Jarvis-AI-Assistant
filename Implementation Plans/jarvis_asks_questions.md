@@ -1,6 +1,6 @@
 # Jarvis Asks Questions — Pipeline Intake & Clarification Loop
 
-**Status:** Planned — not yet implemented
+**Status:** Implemented
 **Branch:** `claude/jarvis-pipeline-details-modal-hg5xk9`
 
 ---
@@ -133,7 +133,10 @@ than a few hours (and their `Inputs/` folder) on each new intake.
 | `/pipeline/intake/picture` | POST | `{draft_id}` → Jarvis decides: more questions (returns `{questions: [...]}`) or paints the plan (returns `{plan_text: ...}`). |
 | `/pipeline/intake/edit` | POST | `{draft_id, edited_text}` → Gemini reformats the edit cleanly, stores and returns it for re-approval. |
 | `/pipeline/intake/approve` | POST | `{draft_id}` → writes `clarified_brief.md`, calls `initiate_pipeline(brief, project_name=..., brief_path=...)`, returns `plan_id`. **The only path that creates a pipeline.** |
+| `/pipeline/intake/skip` | POST | `{draft_id}` → "Skip the rest": drops the unanswered questions. |
 | `/pipeline/intake/cancel` | POST | `{draft_id}` → deletes the draft and its `Inputs/` folder. |
+| `/intake-file/<draft_id>/<name>` | GET | Serves an uploaded file back for the thumbnail chips. Only files that draft actually recorded — never an arbitrary path. |
+| `/jarvis/say` | POST | Speaks one line through the existing `speak()`, so the orb and mute behave normally. |
 
 All of these are plain Flask routes alongside the existing `/pipeline/start` family, and all
 mutate `INTAKE_DRAFTS` under `INTAKE_DRAFTS_LOCK`.
@@ -320,6 +323,7 @@ consistently. Length threshold: read verbatim under ~140 characters, otherwise r
 | `command_center.html` | The intake/questions/picture modal and its CSS; file upload UI; `intakeState` machine; `pipeline_intake_ask` branch in the `ui_action` dispatcher; `task_summary` used for plan labels. |
 | `coordinator.py` | `start_pipeline` tool description + `UI_MAP` line updated to say it opens the details flow, not that it launches the pipeline. |
 | `multi_agent_coordinator.py` | `run_full_pipeline` accepts `brief_path`; the standing brief instruction added to agent prompts. |
+| `db.py` | `save_pipeline` also persists `task_summary` and `brief_path` inside the existing `data` JSON blob — no schema migration needed, and `get_pipelines` already merges that blob back. |
 | `requirements.txt` | No new dependencies. Flask handles multipart; Gemini reads images/PDFs natively via `google-genai`. |
 
 ## 7. Build order
@@ -353,3 +357,45 @@ consistently. Length threshold: read verbatim under ~140 characters, otherwise r
   and the agents' first phase demonstrably references the details.
 - Constellation and project-list labels stay short (`task_summary`), not the whole brief.
 - Mute silences the spoken questions; the full text stays on screen regardless.
+
+
+---
+
+## 9. Implementation notes — decisions made while building
+
+Three places where the build had to settle something the plan left open:
+
+**The "Let Jarvis handle it" button now calls the gate directly.** The plan kept the button
+sending its chat message and relying on the model to pick the `start_pipeline` tool. That is a
+coin flip on a button press, so the button now calls `/pipeline/intake/start` and opens the ask
+itself. Typed chat and voice still travel the tool path, which routes to the same gate.
+
+**Mute.** The app has only a microphone mute (`MIC_MUTED`), no separate speech mute. `/jarvis/say`
+treats it as "Jarvis, be quiet" and stays silent while it is on. Nothing is lost by that: the
+question text is on screen regardless. If a dedicated speech mute is ever added, this is the one
+line to repoint.
+
+**Long tasks in the model's context.** Because `task` now holds the whole brief,
+`get_pipelines_local` hands the assistant `task_summary` in the `task` field instead — otherwise
+every "list my projects" call would drag several full briefs into the prompt.
+
+`start_pipeline_local` also accepts `skip_intake: true` for the "No, just build it" path, so the
+old behavior is reachable without duplicating `initiate_pipeline`'s logic.
+
+## 10. Test coverage
+
+`scripts/test_intake.py` drives the whole gate through Flask's test client with the model
+stubbed, covering 40 assertions: draft creation without a pipeline, multi-type upload, path
+traversal being stripped, duplicate filenames, thumbnail scoping, file removal from draft *and*
+disk, the one-at-a-time question walk, the picture looping back to more questions, the skip
+escape, the edit round-trip (including keeping the user's exact words when the model fails),
+approval writing the brief and starting exactly one pipeline, cancel leaving nothing behind, and
+a dead model degrading to an editable brief instead of trapping the user.
+
+Two verification gaps to close by hand against the real app:
+- Gemini genuinely *seeing* an uploaded photo/PDF (the test stubs the model out).
+- The modal's look and feel at real viewport sizes.
+
+Note: `agents/research_agent.py` needs Python 3.12+ (it has a backslash inside an f-string), so
+`multi_agent_coordinator` could not be imported for testing on 3.11 — its changes were verified
+by parsing the source instead. That constraint is pre-existing and unrelated to this work.

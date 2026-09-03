@@ -632,6 +632,380 @@
             background: rgba(245, 158, 11, 0.06) !important;
             box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
         }
+
+        /* ==========================================================
+           PIPELINE INTAKE — the clarification gate
+           ========================================================== */
+        #intake-ask {
+            position: fixed;
+            left: 50%;
+            bottom: 120px;
+            transform: translateX(-50%) translateY(20px);
+            z-index: 900;
+            display: none;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 20px;
+            background: rgba(10, 14, 22, 0.92);
+            border: 1px solid rgba(34, 211, 238, 0.35);
+            border-radius: 10px;
+            box-shadow: 0 0 30px rgba(34, 211, 238, 0.12);
+            backdrop-filter: blur(12px);
+            opacity: 0;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+        }
+
+        #intake-ask.visible {
+            display: flex;
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        #intake-ask .intake-ask-text {
+            font-size: 13px;
+            color: #E5E7EB;
+            letter-spacing: 0.3px;
+        }
+
+        .intake-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            color: #E5E7EB;
+            padding: 9px 18px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .intake-btn:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(255, 255, 255, 0.35);
+        }
+
+        .intake-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .intake-btn.primary {
+            background: rgba(34, 211, 238, 0.15);
+            border-color: #22D3EE;
+            color: #22D3EE;
+        }
+
+        .intake-btn.primary:hover:not(:disabled) {
+            background: rgba(34, 211, 238, 0.28);
+            box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
+        }
+
+        .intake-btn.danger {
+            background: rgba(239, 68, 68, 0.12);
+            border-color: rgba(239, 68, 68, 0.55);
+            color: #F87171;
+        }
+
+        .intake-btn.danger:hover:not(:disabled) {
+            background: rgba(239, 68, 68, 0.22);
+        }
+
+        .intake-btn.ghost {
+            background: transparent;
+            border-color: rgba(255, 255, 255, 0.12);
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 8px 14px;
+        }
+
+        #intake-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(3, 6, 12, 0.72);
+            backdrop-filter: blur(8px);
+        }
+
+        #intake-overlay.visible {
+            display: flex;
+        }
+
+        #intake-modal {
+            width: 92vw;
+            max-width: 1600px;
+            height: 86vh;
+            display: flex;
+            flex-direction: column;
+            background: linear-gradient(160deg, rgba(12, 17, 27, 0.98), rgba(8, 11, 18, 0.98));
+            border: 1px solid rgba(34, 211, 238, 0.25);
+            border-radius: 12px;
+            box-shadow: 0 0 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(34, 211, 238, 0.08);
+            overflow: hidden;
+        }
+
+        .intake-header {
+            padding: 20px 30px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            flex-shrink: 0;
+        }
+
+        .intake-eyebrow {
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: #22D3EE;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .intake-title {
+            font-size: 19px;
+            color: #F3F4F6;
+            font-weight: 500;
+            line-height: 1.35;
+        }
+
+        .intake-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 6px;
+            line-height: 1.5;
+        }
+
+        .intake-body {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 24px 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+        }
+
+        .intake-footer {
+            flex-shrink: 0;
+            padding: 16px 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.07);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.25);
+        }
+
+        .intake-footer .spacer {
+            flex: 1;
+        }
+
+        .intake-textarea {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            color: #E5E7EB;
+            font-family: inherit;
+            font-size: 14px;
+            line-height: 1.6;
+            padding: 16px;
+            resize: none;
+            outline: none;
+        }
+
+        .intake-textarea:focus {
+            border-color: rgba(34, 211, 238, 0.5);
+            box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.08);
+        }
+
+        .intake-textarea::placeholder {
+            color: rgba(156, 163, 175, 0.5);
+        }
+
+        #intake-details {
+            flex: 1;
+            min-height: 220px;
+        }
+
+        #intake-answer {
+            min-height: 160px;
+        }
+
+        #intake-plan-editor {
+            flex: 1;
+            min-height: 300px;
+        }
+
+        .intake-label {
+            font-size: 10px;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        #intake-dropzone {
+            border: 1px dashed rgba(255, 255, 255, 0.18);
+            border-radius: 8px;
+            padding: 18px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        #intake-dropzone:hover,
+        #intake-dropzone.dragover {
+            border-color: rgba(34, 211, 238, 0.6);
+            background: rgba(34, 211, 238, 0.05);
+            color: #22D3EE;
+        }
+
+        .intake-files {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .intake-file-chip {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 11px;
+            color: #D1D5DB;
+            max-width: 320px;
+        }
+
+        .intake-file-chip img {
+            width: 34px;
+            height: 34px;
+            object-fit: cover;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+
+        .intake-file-chip .file-meta {
+            min-width: 0;
+        }
+
+        .intake-file-chip .file-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .intake-file-chip .file-size {
+            color: var(--text-muted);
+            font-size: 10px;
+        }
+
+        .intake-file-chip button {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1;
+            padding: 0 2px;
+        }
+
+        .intake-file-chip button:hover {
+            color: #F87171;
+        }
+
+        .intake-question {
+            font-size: 22px;
+            line-height: 1.5;
+            color: #F3F4F6;
+            font-weight: 400;
+        }
+
+        .intake-counter {
+            font-size: 11px;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .intake-fade {
+            animation: intakeFadeIn 0.28s ease;
+        }
+
+        @keyframes intakeFadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .intake-plan {
+            font-size: 14px;
+            line-height: 1.75;
+            color: #D1D5DB;
+        }
+
+        .intake-plan h1,
+        .intake-plan h2,
+        .intake-plan h3 {
+            color: #F3F4F6;
+            margin: 20px 0 10px;
+            font-weight: 500;
+        }
+
+        .intake-plan h1 { font-size: 20px; }
+        .intake-plan h2 { font-size: 16px; }
+        .intake-plan h3 { font-size: 14px; letter-spacing: 0.5px; }
+        .intake-plan p { margin: 0 0 12px; }
+        .intake-plan ul { margin: 0 0 14px; padding-left: 22px; }
+        .intake-plan li { margin-bottom: 6px; }
+        .intake-plan strong { color: #F3F4F6; }
+        .intake-plan code {
+            background: rgba(255, 255, 255, 0.07);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        .intake-note {
+            font-size: 12px;
+            color: #FBBF24;
+            background: rgba(251, 191, 36, 0.08);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            border-radius: 6px;
+            padding: 10px 14px;
+        }
+
+        .intake-thinking {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            height: 100%;
+            color: #22D3EE;
+            font-size: 13px;
+            letter-spacing: 1px;
+        }
+
+        .intake-thinking .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #22D3EE;
+            animation: intakePulse 1.2s infinite ease-in-out;
+        }
+
+        .intake-thinking .dot:nth-child(2) { animation-delay: 0.15s; }
+        .intake-thinking .dot:nth-child(3) { animation-delay: 0.3s; }
+
+        @keyframes intakePulse {
+            0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+            40%           { opacity: 1;    transform: scale(1); }
+        }
     </style>
 </head>
 
@@ -639,6 +1013,28 @@
 
     <!-- Full viewport 3D Nebula -->
     <div id="globe-container"></div>
+
+    <!-- Pipeline intake: the "want to give more details?" ask -->
+    <div id="intake-ask">
+        <span class="intake-ask-text">Do you want to give me more details before I start?</span>
+        <button class="intake-btn primary" id="intake-ask-yes">Yes</button>
+        <button class="intake-btn" id="intake-ask-no">No, just build it</button>
+    </div>
+
+    <!-- Pipeline intake: details / questions / plan -->
+    <div id="intake-overlay">
+        <div id="intake-modal" role="dialog" aria-modal="true" aria-labelledby="intake-title">
+            <div class="intake-header">
+                <div class="intake-eyebrow" id="intake-eyebrow">Pipeline brief</div>
+                <div class="intake-title" id="intake-title">Tell me about this job</div>
+                <div class="intake-subtitle" id="intake-subtitle"></div>
+            </div>
+            <div class="intake-body" id="intake-body"></div>
+            <div class="intake-footer" id="intake-footer"></div>
+        </div>
+    </div>
+
+    <input type="file" id="intake-file-input" multiple style="display:none">
 
     <!-- Orb state indicator top-left -->
     <div class="orb-indicator" id="orb-indicator">
@@ -754,7 +1150,7 @@
                     implementation plan</button>
                 <button class="action-btn"
                     style="background: rgba(34, 211, 238, 0.15); border-color: #22D3EE; color: #22D3EE; width: 100%;"
-                    onclick="sendToJarvis('Start a pipeline to handle task #' + currentDetailTaskId + ' autonomously')">Let
+                    onclick="letJarvisHandleIt()">Let
                     Jarvis handle it</button>
             </div>
         </div>
@@ -3621,7 +4017,11 @@
                     // Dispatch custom Three.js UI Action animations
                     if (!isFirstPoll && data.ui_action) {
                         const act = data.ui_action;
-                        if (act.type === 'navigate' && act.url) {
+                        if (act.type === 'pipeline_intake_ask') {
+                            // A pipeline was requested. Nothing has started yet —
+                            // ask whether the user wants to brief Jarvis first.
+                            showIntakeAsk(act.draft_id, act.task, act.project_name);
+                        } else if (act.type === 'navigate' && act.url) {
                             window.location.href = act.url;
                         } else if (act.type === 'task_created') {
                             const tempTask = { id: act.task_id, content: 'New Task', priority: act.priority || 'medium', status: 'open' };
@@ -4136,6 +4536,539 @@
                 toast.style.transform = 'translateX(-50%) translateY(-20px)';
             }, 3500);
         }
+
+        // ==========================================
+        // 10. PIPELINE INTAKE — the clarification gate
+        //
+        // Nothing here starts a pipeline except approve(). The whole flow —
+        // details, files, one-question-at-a-time gaps, the plan you can edit —
+        // happens before any plan row or agent thread exists.
+        // ==========================================
+
+        const intakeAsk = document.getElementById('intake-ask');
+        const intakeOverlay = document.getElementById('intake-overlay');
+        const intakeBody = document.getElementById('intake-body');
+        const intakeFooter = document.getElementById('intake-footer');
+        const intakeFileInput = document.getElementById('intake-file-input');
+
+        let intakeState = null;
+
+        function resetIntakeState(draftId, task, projectName) {
+            intakeState = {
+                draftId,
+                task: task || '',
+                projectName: projectName || '',
+                stage: 'intake',      // intake | questions | picture
+                details: '',
+                files: [],
+                questions: [],
+                questionIndex: 0,
+                batchExhausted: false,
+                planText: '',
+                degradedNote: '',
+                isEditing: false,
+                busy: false
+            };
+        }
+
+        // The "Let Jarvis handle it" button goes straight to the gate. Chat and
+        // voice reach the same place through the start_pipeline tool instead.
+        async function letJarvisHandleIt() {
+            const task = tasksData.find(t => t.id === currentDetailTaskId);
+            const text = task
+                ? `Handle task #${task.id}: ${task.content}`
+                : `Handle task #${currentDetailTaskId} autonomously`;
+            appendChatMessage(text, 'user');
+            try {
+                const draft = await intakePost('/pipeline/intake/start', { task: text });
+                appendChatMessage('Do you want to give me more details before I start?', 'jarvis');
+                showIntakeAsk(draft.draft_id, draft.task, draft.project_name);
+            } catch (e) {
+                appendChatMessage('Could not reach Jarvis. Is the server running?', 'system');
+            }
+        }
+
+        function showIntakeAsk(draftId, task, projectName) {
+            resetIntakeState(draftId, task, projectName);
+            intakeAsk.classList.add('visible');
+        }
+
+        function hideIntakeAsk() {
+            intakeAsk.classList.remove('visible');
+        }
+
+        document.getElementById('intake-ask-yes').addEventListener('click', () => {
+            hideIntakeAsk();
+            openIntakeModal();
+        });
+
+        document.getElementById('intake-ask-no').addEventListener('click', async () => {
+            hideIntakeAsk();
+            const draft = intakeState;
+            if (!draft) return;
+            // Throw the draft away and build on the one-liner, exactly as before.
+            intakePost('/pipeline/intake/cancel', { draft_id: draft.draftId });
+            try {
+                const res = await fetch('/pipeline/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task: draft.task })
+                });
+                const data = await res.json();
+                if (data.plan_id) showFloatingNotification(`Pipeline ${data.plan_id} started`);
+            } catch (e) {
+                appendChatMessage('Could not start the pipeline. Is the server running?', 'system');
+            }
+            intakeState = null;
+        });
+
+        async function intakePost(url, payload) {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                let message = 'Request failed';
+                try { message = (await res.json()).error || message; } catch (e) { /* keep default */ }
+                throw new Error(message);
+            }
+            return res.json();
+        }
+
+        function openIntakeModal() {
+            intakeOverlay.classList.add('visible');
+            renderIntake();
+        }
+
+        function closeIntakeModal() {
+            intakeOverlay.classList.remove('visible');
+        }
+
+        function intakeSetBusy(message) {
+            intakeState.busy = true;
+            intakeBody.innerHTML =
+                `<div class="intake-thinking"><div class="dot"></div><div class="dot"></div>` +
+                `<div class="dot"></div><span>${message}</span></div>`;
+            intakeFooter.innerHTML = '';
+        }
+
+        function intakeEscapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : String(text);
+            return div.innerHTML;
+        }
+
+        function intakeFormatSize(bytes) {
+            if (bytes < 1024) return `${bytes} B`;
+            if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+            return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        }
+
+        // Small markdown renderer — enough for headings, lists, bold and code.
+        function intakeRenderMarkdown(text) {
+            const lines = intakeEscapeHtml(text).split('\n');
+            let html = '';
+            let inList = false;
+            const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+
+            for (const raw of lines) {
+                const line = raw.trimEnd();
+                const inline = (t) => t
+                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+                if (/^###\s+/.test(line))      { closeList(); html += `<h3>${inline(line.replace(/^###\s+/, ''))}</h3>`; }
+                else if (/^##\s+/.test(line))  { closeList(); html += `<h2>${inline(line.replace(/^##\s+/, ''))}</h2>`; }
+                else if (/^#\s+/.test(line))   { closeList(); html += `<h1>${inline(line.replace(/^#\s+/, ''))}</h1>`; }
+                else if (/^[-*]\s+/.test(line)) {
+                    if (!inList) { html += '<ul>'; inList = true; }
+                    html += `<li>${inline(line.replace(/^[-*]\s+/, ''))}</li>`;
+                } else if (line === '' || line === '---') {
+                    closeList();
+                } else {
+                    closeList();
+                    html += `<p>${inline(line)}</p>`;
+                }
+            }
+            closeList();
+            return html;
+        }
+
+        function intakeButton(label, kind, onClick, disabled) {
+            const btn = document.createElement('button');
+            btn.className = `intake-btn ${kind || ''}`.trim();
+            btn.textContent = label;
+            if (disabled) btn.disabled = true;
+            btn.addEventListener('click', onClick);
+            return btn;
+        }
+
+        function renderIntake() {
+            if (!intakeState) return;
+            intakeState.busy = false;
+            if (intakeState.stage === 'intake') renderIntakeDetails();
+            else if (intakeState.stage === 'questions') renderIntakeQuestion();
+            else renderIntakePicture();
+        }
+
+        // ---------- Stage 1: details + files ----------
+        function renderIntakeDetails() {
+            document.getElementById('intake-eyebrow').textContent = 'Pipeline brief';
+            document.getElementById('intake-title').textContent = intakeState.task;
+            document.getElementById('intake-subtitle').textContent =
+                'Tell me anything that matters — who it is for, what it must do, what it must avoid. ' +
+                'Attach any photos, documents or files you want me to work from.';
+
+            intakeBody.innerHTML = `
+                <div class="intake-label">Details</div>
+                <textarea id="intake-details" class="intake-textarea"
+                    placeholder="For example: this website is for a dentist in Limassol. She wants online booking, her existing logo used, and nothing in bright red…"></textarea>
+                <div class="intake-label">Files</div>
+                <div id="intake-dropzone">Drop files here, or click to choose — photos, documents, anything</div>
+                <div class="intake-files" id="intake-file-list"></div>`;
+
+            const details = document.getElementById('intake-details');
+            details.value = intakeState.details;
+            details.addEventListener('input', () => { intakeState.details = details.value; });
+
+            const dropzone = document.getElementById('intake-dropzone');
+            dropzone.addEventListener('click', () => intakeFileInput.click());
+            dropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropzone.classList.add('dragover');
+            });
+            dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('dragover');
+                if (e.dataTransfer.files.length) uploadIntakeFiles(e.dataTransfer.files);
+            });
+
+            renderIntakeFiles();
+
+            intakeFooter.innerHTML = '';
+            intakeFooter.appendChild(intakeButton('Cancel', 'danger', cancelIntake));
+            const spacer = document.createElement('div');
+            spacer.className = 'spacer';
+            intakeFooter.appendChild(spacer);
+            intakeFooter.appendChild(intakeButton('Continue with this info', '', approveIntake));
+            intakeFooter.appendChild(intakeButton('Continue with clarification questions', 'primary', startIntakeQuestions));
+
+            setTimeout(() => details.focus(), 50);
+        }
+
+        function renderIntakeFiles() {
+            const list = document.getElementById('intake-file-list');
+            if (!list) return;
+            list.innerHTML = '';
+            intakeState.files.forEach((f) => {
+                const chip = document.createElement('div');
+                chip.className = 'intake-file-chip';
+                const thumb = (f.mime || '').startsWith('image/')
+                    ? `<img src="/intake-file/${encodeURIComponent(intakeState.draftId)}/${encodeURIComponent(f.name)}" alt="">`
+                    : '';
+                chip.innerHTML = `
+                    ${thumb}
+                    <div class="file-meta">
+                        <div class="file-name">${intakeEscapeHtml(f.name)}</div>
+                        <div class="file-size">${intakeFormatSize(f.size || 0)}</div>
+                    </div>`;
+                const remove = document.createElement('button');
+                remove.textContent = '×';
+                remove.title = 'Remove';
+                remove.addEventListener('click', () => removeIntakeFile(f.name));
+                chip.appendChild(remove);
+                list.appendChild(chip);
+            });
+        }
+
+        intakeFileInput.addEventListener('change', () => {
+            if (intakeFileInput.files.length) uploadIntakeFiles(intakeFileInput.files);
+            intakeFileInput.value = '';
+        });
+
+        async function uploadIntakeFiles(fileList) {
+            if (!intakeState) return;
+            const form = new FormData();
+            form.append('draft_id', intakeState.draftId);
+            for (const file of fileList) form.append('files', file);
+
+            const dropzone = document.getElementById('intake-dropzone');
+            if (dropzone) dropzone.textContent = 'Uploading…';
+            try {
+                const res = await fetch('/pipeline/intake/upload', { method: 'POST', body: form });
+                const data = await res.json();
+                if (data.files) intakeState.files = data.files;
+                renderIntakeFiles();
+            } catch (e) {
+                showFloatingNotification('Upload failed');
+            } finally {
+                if (dropzone) {
+                    dropzone.textContent = 'Drop files here, or click to choose — photos, documents, anything';
+                }
+            }
+        }
+
+        async function removeIntakeFile(name) {
+            try {
+                const data = await intakePost('/pipeline/intake/remove_file', {
+                    draft_id: intakeState.draftId, name
+                });
+                intakeState.files = data.files || [];
+                renderIntakeFiles();
+            } catch (e) {
+                showFloatingNotification('Could not remove that file');
+            }
+        }
+
+        // ---------- Stage 2: one question at a time ----------
+        async function startIntakeQuestions() {
+            intakeSetBusy('Reading what you gave me…');
+            try {
+                const data = await intakePost('/pipeline/intake/questions', {
+                    draft_id: intakeState.draftId,
+                    details: intakeState.details
+                });
+                loadIntakeQuestions(data.questions || []);
+            } catch (e) {
+                showFloatingNotification('Could not reach Jarvis — showing the plan instead');
+                await paintIntakePicture();
+            }
+        }
+
+        function loadIntakeQuestions(questions) {
+            if (!questions.length) {
+                // Nothing material missing — go straight to the picture.
+                paintIntakePicture();
+                return;
+            }
+            intakeState.questions = questions;
+            intakeState.questionIndex = 0;
+            intakeState.batchExhausted = false;
+            intakeState.stage = 'questions';
+            renderIntake();
+        }
+
+        function renderIntakeQuestion() {
+            document.getElementById('intake-eyebrow').textContent = 'Clarification';
+            document.getElementById('intake-title').textContent = intakeState.task;
+            document.getElementById('intake-subtitle').textContent =
+                'One question at a time. Answer it and press Continue.';
+
+            if (intakeState.batchExhausted) {
+                renderIntakeBatchDone();
+                return;
+            }
+
+            const q = intakeState.questions[intakeState.questionIndex];
+            const total = intakeState.questions.length;
+
+            intakeBody.innerHTML = `
+                <div class="intake-fade" style="display:flex; flex-direction:column; gap:18px; flex:1; min-height:0;">
+                    <div class="intake-counter">Question ${intakeState.questionIndex + 1} of ${total}</div>
+                    <div class="intake-question">${intakeEscapeHtml(q.question)}</div>
+                    <textarea id="intake-answer" class="intake-textarea" placeholder="Your answer…"></textarea>
+                </div>`;
+
+            intakeFooter.innerHTML = '';
+            intakeFooter.appendChild(intakeButton('Cancel', 'danger', cancelIntake));
+            intakeFooter.appendChild(intakeButton('Skip the rest — build with what you have', 'ghost', skipIntakeQuestions));
+            const spacer = document.createElement('div');
+            spacer.className = 'spacer';
+            intakeFooter.appendChild(spacer);
+            intakeFooter.appendChild(intakeButton('Continue', 'primary', submitIntakeAnswer));
+
+            // Jarvis reads it aloud: verbatim when short, the gist when long.
+            // The full text stays on screen either way.
+            const spoken = q.question.length <= 140 ? q.question : (q.gist || q.question);
+            fetch('/jarvis/say', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: spoken })
+            }).catch(() => { /* silence is fine, the text is on screen */ });
+
+            setTimeout(() => document.getElementById('intake-answer').focus(), 50);
+        }
+
+        async function submitIntakeAnswer() {
+            const answerEl = document.getElementById('intake-answer');
+            const question = intakeState.questions[intakeState.questionIndex];
+            try {
+                await intakePost('/pipeline/intake/answer', {
+                    draft_id: intakeState.draftId,
+                    question: question.question,
+                    answer: answerEl ? answerEl.value : ''
+                });
+            } catch (e) {
+                showFloatingNotification('Could not save that answer');
+                return;
+            }
+
+            if (intakeState.questionIndex + 1 < intakeState.questions.length) {
+                intakeState.questionIndex += 1;
+                renderIntakeQuestion();
+            } else {
+                intakeState.batchExhausted = true;
+                renderIntakeBatchDone();
+            }
+        }
+
+        function renderIntakeBatchDone() {
+            intakeBody.innerHTML = `
+                <div class="intake-fade" style="display:flex; flex-direction:column; gap:14px;">
+                    <div class="intake-counter">All answered</div>
+                    <div class="intake-question">That is everything I had to ask for now.</div>
+                    <div class="intake-subtitle" style="font-size:13px;">
+                        I will look over your answers. If anything is still unclear I will ask more
+                        questions; otherwise I will paint a picture of the plan for you to approve.
+                    </div>
+                </div>`;
+
+            intakeFooter.innerHTML = '';
+            intakeFooter.appendChild(intakeButton('Cancel', 'danger', cancelIntake));
+            const spacer = document.createElement('div');
+            spacer.className = 'spacer';
+            intakeFooter.appendChild(spacer);
+            intakeFooter.appendChild(intakeButton('Paint a picture or ask more questions', 'primary', paintIntakePicture));
+        }
+
+        async function skipIntakeQuestions() {
+            try {
+                await intakePost('/pipeline/intake/skip', { draft_id: intakeState.draftId });
+            } catch (e) { /* the picture call below is what matters */ }
+            await paintIntakePicture();
+        }
+
+        // ---------- Stage 3: the picture ----------
+        async function paintIntakePicture() {
+            intakeSetBusy('Working through what you told me…');
+            try {
+                const data = await intakePost('/pipeline/intake/picture', {
+                    draft_id: intakeState.draftId
+                });
+                if (data.questions && data.questions.length) {
+                    // Still gaps — loop back into questions rather than assume.
+                    loadIntakeQuestions(data.questions);
+                    return;
+                }
+                intakeState.planText = data.plan_text || '';
+                intakeState.degradedNote = data.degraded || '';
+                intakeState.stage = 'picture';
+                intakeState.isEditing = false;
+                renderIntake();
+            } catch (e) {
+                showFloatingNotification('Could not write the plan — try again');
+                intakeState.stage = 'intake';
+                renderIntake();
+            }
+        }
+
+        function renderIntakePicture() {
+            document.getElementById('intake-eyebrow').textContent = 'The plan';
+            document.getElementById('intake-title').textContent = intakeState.task;
+            document.getElementById('intake-subtitle').textContent = intakeState.isEditing
+                ? 'Rewrite anything you like. I will clean it up and show it back to you before building.'
+                : 'This is what I understand you asked for. Nothing is built until you say so.';
+
+            const note = intakeState.degradedNote
+                ? `<div class="intake-note">${intakeEscapeHtml(intakeState.degradedNote)}</div>`
+                : '';
+
+            if (intakeState.isEditing) {
+                intakeBody.innerHTML = note +
+                    `<textarea id="intake-plan-editor" class="intake-textarea"></textarea>`;
+                const editor = document.getElementById('intake-plan-editor');
+                editor.value = intakeState.planText;
+
+                intakeFooter.innerHTML = '';
+                intakeFooter.appendChild(intakeButton('Cancel', 'danger', cancelIntake));
+                intakeFooter.appendChild(intakeButton('Cancel edit', 'ghost', () => {
+                    intakeState.isEditing = false;
+                    renderIntake();
+                }));
+                const spacer = document.createElement('div');
+                spacer.className = 'spacer';
+                intakeFooter.appendChild(spacer);
+                intakeFooter.appendChild(intakeButton('Done editing', 'primary', submitIntakeEdit));
+                setTimeout(() => editor.focus(), 50);
+                return;
+            }
+
+            intakeBody.innerHTML = note +
+                `<div class="intake-plan intake-fade">${intakeRenderMarkdown(intakeState.planText)}</div>`;
+
+            intakeFooter.innerHTML = '';
+            intakeFooter.appendChild(intakeButton('Cancel', 'danger', cancelIntake));
+            intakeFooter.appendChild(intakeButton('Edit', '', () => {
+                intakeState.isEditing = true;
+                renderIntake();
+            }));
+            const spacer = document.createElement('div');
+            spacer.className = 'spacer';
+            intakeFooter.appendChild(spacer);
+            intakeFooter.appendChild(intakeButton('Start building', 'primary', approveIntake));
+        }
+
+        async function submitIntakeEdit() {
+            const editor = document.getElementById('intake-plan-editor');
+            const edited = editor ? editor.value : '';
+            if (!edited.trim()) {
+                showFloatingNotification('The plan cannot be empty');
+                return;
+            }
+            intakeSetBusy('Cleaning that up…');
+            try {
+                const data = await intakePost('/pipeline/intake/edit', {
+                    draft_id: intakeState.draftId,
+                    edited_text: edited
+                });
+                intakeState.planText = data.plan_text || edited;
+            } catch (e) {
+                // Never lose the user's words.
+                intakeState.planText = edited;
+                showFloatingNotification('Could not reach Jarvis — keeping your wording');
+            }
+            intakeState.isEditing = false;
+            intakeState.degradedNote = '';
+            renderIntake();
+        }
+
+        // ---------- Endings ----------
+        async function approveIntake() {
+            intakeSetBusy('Starting the pipeline…');
+            try {
+                const data = await intakePost('/pipeline/intake/approve', {
+                    draft_id: intakeState.draftId,
+                    details: intakeState.details
+                });
+                closeIntakeModal();
+                showFloatingNotification(`Pipeline ${data.plan_id} started — ${data.project_name}`);
+                intakeState = null;
+            } catch (e) {
+                showFloatingNotification('Could not start the pipeline');
+                renderIntake();
+            }
+        }
+
+        async function cancelIntake() {
+            if (!confirm('Cancel this pipeline? Your details and uploaded files will be discarded.')) return;
+            const draftId = intakeState.draftId;
+            closeIntakeModal();
+            intakeState = null;
+            try {
+                await intakePost('/pipeline/intake/cancel', { draft_id: draftId });
+            } catch (e) { /* the draft expires on its own anyway */ }
+        }
+
+        // Escape maps to Cancel, but only through the same confirmation — a long
+        // brief is too easy to lose to a stray keypress.
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && intakeOverlay.classList.contains('visible') && intakeState && !intakeState.busy) {
+                cancelIntake();
+            }
+        });
+
     </script>
 </body>
 

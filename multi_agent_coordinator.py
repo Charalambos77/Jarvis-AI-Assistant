@@ -13,6 +13,16 @@ from agents.brain import build_agent_plan, finalize_execution_plan
 from agents.research_agent import run_research_agent
 from agents.execution_agent import run_execution_agent
 from agents.synthesis import run_synthesis_agent, run_master_synthesis
+
+# What a clarified brief means for the agents: it fixes WHAT the user wants, not
+# HOW they are allowed to work. Kept here so every planning call says the same thing.
+BRIEF_USAGE_RULE = (
+    "The brief is authoritative for WHAT the user wants. It is not a limit on HOW you work: "
+    "research and search the web freely for anything the brief does not cover. Follow the brief "
+    "exactly where it constrains you \u2014 if it names a specific source, tool, or approach, use that "
+    "one instead of choosing your own. Attached files live at the paths listed in the brief; open "
+    "them when they are relevant."
+)
 from agents.quality_checker import run_quality_checker
 from agents.deployment_agent import run_deployment_agent
 
@@ -538,10 +548,27 @@ async def run_full_pipeline(
     force_reexecute: bool = False,   # NEW: when resuming a plan already past execution
                                       # (phase in qa/deploy/complete), re-run execution
                                       # agents fresh instead of replaying stale exec_results.
+    brief_path: str | None = None,   # NEW: path to clarified_brief.md when this pipeline
+                                      # came through the clarification gate. `task` already
+                                      # carries the brief text; this is where the agents can
+                                      # re-read it, and where the attached files are listed.
 ) -> dict:
     """
     Runs the complete multi-agent pipeline with ordered cycles.
     """
+    # When the user clarified this job up front, the Brain plans against the brief
+    # plus a standing rule about how much freedom the agents still have.
+    planning_task = task
+    if brief_path:
+        planning_task = (
+            f"{task}\n\n"
+            f"[The full clarified brief for this job, including every attached file, is saved at:\n"
+            f"{brief_path}\n\n"
+            f"{BRIEF_USAGE_RULE}\n\n"
+            f"When you write each agent's brief, carry over the details, decisions and file paths "
+            f"that agent actually needs, and repeat this rule to them.]"
+        )
+
     conn = db.get_connection(DB_PATH)
     retry_history = []
 
@@ -612,7 +639,7 @@ async def run_full_pipeline(
         if not agent_plan:
             # Phase 1: Brain builds cycle plan
             print("[Pipeline] Phase 1: Central Brain generating multi-cycle agent plan...")
-            agent_plan = build_agent_plan(task, event_logger=event_logger)
+            agent_plan = build_agent_plan(planning_task, event_logger=event_logger)
             if "error" in agent_plan:
                 return agent_plan
             save_agent_plan_file(plan_id, agent_plan, project_name)
@@ -741,7 +768,7 @@ async def run_full_pipeline(
                     if event_logger:
                         event_logger({"event_type": "conflict", "source": "synthesis", "data": synthesis_result})
                     agent_plan_update = build_agent_plan(
-                        task, redirect_note=f"Conflicts in cycle {cycle_id}: {conflict_note}",
+                        planning_task, redirect_note=f"Conflicts in cycle {cycle_id}: {conflict_note}",
                         cycle_id=cycle_id, approved_blueprints=approved_blueprints, event_logger=event_logger
                     )
                     updated_cycles = agent_plan_update.get("cycles", [])
@@ -792,7 +819,7 @@ async def run_full_pipeline(
                     # Re-plan only this cycle
                     try:
                         agent_plan_update = build_agent_plan(
-                            task, redirect_note=redirect_note,
+                            planning_task, redirect_note=redirect_note,
                             cycle_id=cycle_id, approved_blueprints=approved_blueprints,
                             rejected_steps=rejected_steps, event_logger=event_logger
                         )
@@ -883,7 +910,7 @@ async def run_full_pipeline(
             # already approved should never silently rewrite an already-reviewed plan.
             print("[Pipeline] Phase 4: Finalizing execution plan against completed research...")
             agent_plan["execution_agents"] = finalize_execution_plan(
-                task, agent_plan.get("execution_agents", []), master_blueprint, event_logger=event_logger
+                planning_task, agent_plan.get("execution_agents", []), master_blueprint, event_logger=event_logger
             )
             save_agent_plan_file(plan_id, agent_plan, project_name)
             if event_logger:
@@ -911,7 +938,7 @@ async def run_full_pipeline(
                 if event_logger:
                     event_logger({"event_type": "gate_resolved", "source": "execution_blueprint", "data": gate2})
                 agent_plan = build_agent_plan(
-                    task, redirect_note=redirect_note, approved_blueprints=approved_blueprints,
+                    planning_task, redirect_note=redirect_note, approved_blueprints=approved_blueprints,
                     rejected_steps=rejected_steps
                 )
                 save_agent_plan_file(plan_id, agent_plan, project_name)

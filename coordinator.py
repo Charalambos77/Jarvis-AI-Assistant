@@ -533,7 +533,13 @@ TOOLS = [
     },
     {
         "name": "start_pipeline",
-        "description": "Launch the multi-agent pipeline for a complex task. The pipeline runs through research, synthesis, human gate review, execution, and deploy phases.",
+        "description": (
+            "Begin a multi-agent pipeline for a complex task. This does NOT start the pipeline "
+            "immediately: it asks the user whether they want to give more details first, and "
+            "opens the details window if they say yes. When the result says "
+            "'awaiting_details', tell the user you are waiting on their answer \u2014 never claim "
+            "the pipeline has started, and do not invent a plan ID."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -764,7 +770,8 @@ UI_MAP = (
     "  'delete tasks 4, 5, and 6' → batch_delete_tasks\n"
     "  'save these 3 notes...' → batch_create_notes\n"
     "  'delete notes 1, 2, and 3' → batch_delete_notes\n"
-    "  'start a pipeline for X' → start_pipeline\n"
+    "  'start a pipeline for X' / 'let Jarvis handle it' \u2192 start_pipeline "
+    "(asks about details first, then opens the details window)\n"
     "  'resume project Y' / 'resume pipeline Y' → resume_pipeline\n"
     "  'delete project Y' / 'delete pipeline Y' → delete_pipeline\n"
     "  'check pipeline status' → get_gate_status\n"
