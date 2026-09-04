@@ -900,6 +900,46 @@ def proofread_text(text: str) -> str:
 
 OLLAMA_CHAT_HISTORY = []
 
+def describe_empty_model_reply(response) -> str:
+    """Explain an empty Gemini reply instead of returning a blank line.
+
+    A blank string here reaches the user as an empty "JARVIS:" bubble with no
+    hint of what went wrong, and gets spoken as silence. Gemini legitimately
+    returns no text when the answer is cut off (MAX_TOKENS \u2014 2.5 models can spend
+    the whole budget on thinking), when safety filters block it, or when the
+    candidate carries no text part at all. Say which.
+    """
+    finish_reason = None
+    safety = None
+    try:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            finish_reason = getattr(candidates[0], "finish_reason", None)
+            safety = getattr(candidates[0], "safety_ratings", None)
+    except Exception:
+        pass
+
+    block_reason = None
+    try:
+        feedback = getattr(response, "prompt_feedback", None)
+        block_reason = getattr(feedback, "block_reason", None) if feedback else None
+    except Exception:
+        pass
+
+    # Always leave a trail in the terminal, whatever we tell the user.
+    print(f"[Coordinator] Gemini returned an empty reply. "
+          f"finish_reason={finish_reason} block_reason={block_reason} safety={safety}")
+
+    reason = str(finish_reason or "")
+    if block_reason:
+        return "That request was blocked by the model's safety filter, Sir."
+    if "MAX_TOKENS" in reason.upper():
+        return "I ran out of room before answering, Sir. Please try a shorter request."
+    if "RECITATION" in reason.upper():
+        return "The model stopped itself on a recitation check, Sir. Please rephrase."
+    return "The model came back empty, Sir. Please try that again."
+
+
 def handle_request(transcript: str) -> str:
     conn = db.get_connection(DB_PATH)
     try:
@@ -943,7 +983,11 @@ def handle_request(transcript: str) -> str:
                 # Check for function calls
                 function_calls = response.function_calls
                 if not function_calls:
-                    return response.text or ""
+                    reply = (response.text or "").strip()
+                    # Never hand back an empty string: /ask pushes whatever it gets
+                    # straight into the chat, so "" shows as a blank JARVIS line and
+                    # is spoken as silence, telling the user nothing at all.
+                    return reply or describe_empty_model_reply(response)
                 
                 # Execute all function calls
                 tool_responses = []
@@ -1047,6 +1091,10 @@ def handle_request(transcript: str) -> str:
                 reply = (message.content or "").strip()
                 if not reply and tool_called_in_session:
                     reply = "Done, Sir."
+                if not reply:
+                    # Same rule as the Gemini path: never return a blank line.
+                    print("[Coordinator] Local model returned an empty reply.")
+                    reply = "The local model came back empty, Sir. Please try that again."
                 return proofread_text(reply)
 
             # We have tool calls, process them

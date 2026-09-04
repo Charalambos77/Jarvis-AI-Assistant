@@ -1425,6 +1425,22 @@ def check_navigation_intent(transcript: str) -> str:
         return "apis"
     return ""
 
+def is_stop_command(transcript_lower: str, stop_words: list[str]) -> bool:
+    """True only when the user actually said goodbye, not merely used the word.
+
+    Two guards: whole-word matching (so "quite" is not "quit"), and a length limit
+    (so "exit the loop in that script, please" is a request, not a farewell).
+    """
+    import re
+    words = transcript_lower.split()
+    if len(words) > 6:
+        return False
+    for phrase in stop_words:
+        if re.search(r"\b" + re.escape(phrase) + r"\b", transcript_lower):
+            return True
+    return False
+
+
 def handle_request(transcript: str) -> str:
     nav_target = check_navigation_intent(transcript)
     if nav_target == "execution":
@@ -1626,6 +1642,11 @@ def ask():
         reply = handle_request(text)
     except Exception as e:
         reply = f"Something went wrong: {e}"
+    # Last line of defence: an empty reply would render as a blank "JARVIS:" bubble
+    # and be spoken as silence, which reads as the app being broken with no clue why.
+    if not (reply or "").strip():
+        print("[Jarvis] handle_request returned an empty reply.")
+        reply = "I could not produce a reply for that, Sir. Please try again."
     push_message("ai", reply)
 
     # Speak it out loud on a background thread so the UI updates immediately.
@@ -2851,7 +2872,11 @@ def mic_loop(window):
                         "end the conversation", "end conversation", "goodbye",
                         "go to sleep", "exit", "quit", "stop listening"
                     ]
-                    should_stop = any(w in transcript_lower for w in stop_words)
+                    # Match whole words on a SHORT utterance only. Plain substring
+                    # matching hid the window mid-request: "quit" is inside "quite",
+                    # "exit" inside "exits", and any long instruction that happened to
+                    # contain one was swallowed as a goodbye instead of being answered.
+                    should_stop = is_stop_command(transcript_lower, stop_words)
                     if should_stop:
                         push_message("user", transcript)
                         speak("Okay, going back to sleep.")
