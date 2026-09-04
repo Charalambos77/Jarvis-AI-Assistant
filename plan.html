@@ -54,9 +54,9 @@
             flex-direction: column;
             position: relative;
 
-            /* A visible page scrollbar, so it is obvious there is more below. */
-            scrollbar-width: thin;
-            scrollbar-color: rgba(6, 182, 212, 0.35) transparent;
+            /* Page scrollbar styling lives on html, below: body's overflow
+               propagates to the viewport, and the viewport's scrollbar takes
+               its appearance from the root element, not from body. */
 
             /* Dotted Grid Background */
             background-image:
@@ -64,21 +64,39 @@
             background-size: 24px 24px;
         }
 
-        body::-webkit-scrollbar {
-            width: 10px;
+        /* See-through page scrollbar in the cyan accent: no track, a translucent
+           thumb that sits over the background rather than covering it. */
+        html {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(6, 182, 212, 0.32) transparent;
         }
 
-        body::-webkit-scrollbar-track {
+        html::-webkit-scrollbar {
+            width: 10px;
             background: transparent;
         }
 
-        body::-webkit-scrollbar-thumb {
-            background: rgba(6, 182, 212, 0.3);
-            border-radius: 5px;
+        html::-webkit-scrollbar-track {
+            background: transparent;
+            border: none;
         }
 
-        body::-webkit-scrollbar-thumb:hover {
+        html::-webkit-scrollbar-thumb {
+            background: rgba(6, 182, 212, 0.28);
+            border-radius: 6px;
+            /* Transparent border with background-clip keeps the thumb slim and
+               floating, with the page showing through on either side. */
+            border: 2px solid transparent;
+            background-clip: content-box;
+        }
+
+        html::-webkit-scrollbar-thumb:hover {
             background: rgba(6, 182, 212, 0.55);
+            background-clip: content-box;
+        }
+
+        html::-webkit-scrollbar-corner {
+            background: transparent;
         }
 
         /* Subtle radial gradient vignette */
