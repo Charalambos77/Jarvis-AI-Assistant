@@ -5,6 +5,7 @@ it's going to be used by an AI; it just stores and retrieves tasks and notes.
 Keeping this separate from server.py means you can test it on its own.
 """
 import sqlite3
+import threading
 from datetime import datetime, timezone
 
 
@@ -60,12 +61,46 @@ CREATE TABLE IF NOT EXISTS pipelines (
 """
 
 
+# The schema and migrations only need running once per process, not on every
+# connection. Doing them per connection meant every HTTP request and every agent
+# event opened a connection that immediately took a WRITE lock to re-run
+# CREATE TABLE IF NOT EXISTS. With a pipeline running (which writes a pipelines
+# row per event) the UI's reads piled up behind those writes and the window
+# stopped repainting.
+_SCHEMA_READY: set[str] = set()
+_SCHEMA_LOCK = threading.Lock()
+
+
 def get_connection(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    # Wait for a busy database rather than failing, and keep readers off the
+    # writer's lock entirely via WAL (set once, below — it persists on the file).
+    conn = sqlite3.connect(db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+
+    if db_path in _SCHEMA_READY:
+        return conn
+
+    with _SCHEMA_LOCK:
+        if db_path in _SCHEMA_READY:
+            return conn
+        _initialise_schema(conn)
+        _SCHEMA_READY.add(db_path)
+    return conn
+
+
+def _initialise_schema(conn: sqlite3.Connection) -> None:
+    """Create tables and apply migrations. Runs once per process, per database."""
+    try:
+        # WAL lets the UI keep reading while a pipeline writes. Persistent once set.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    except Exception as e:
+        print(f"Could not enable WAL mode: {e}")
+
     conn.executescript(SCHEMA)
-    
+
     # Dynamic migration for existing databases:
     try:
         cursor = conn.cursor()
@@ -115,8 +150,6 @@ def get_connection(db_path: str) -> sqlite3.Connection:
             conn.commit()
     except Exception as e:
         print(f"Migration error: {e}")
-        
-    return conn
 
 
 def _now() -> str:

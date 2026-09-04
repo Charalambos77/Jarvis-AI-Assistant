@@ -626,11 +626,12 @@ def update_task_log_file(plan_id: str, event: dict):
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"pipeline_{plan_id}.md")
 
-    plan_events = []
+    # Snapshot under the lock (a fast C-level copy), then filter outside it.
+    # This runs on every agent event and the log only grows, so scanning it while
+    # holding the lock stalled the observability endpoints the execution page polls.
     with AGENT_OBS_LOCK:
-        for e in AGENT_EVENT_LOG:
-            if e.get("plan_id") == plan_id:
-                plan_events.append(e)
+        all_events = list(AGENT_EVENT_LOG)
+    plan_events = [e for e in all_events if e.get("plan_id") == plan_id]
 
     content = f"# Pipeline Task Log - Plan ID: {plan_id}\n"
     content += f"- **Task:** {plan_data.get('task')}\n"
