@@ -686,6 +686,25 @@ def update_task_log_file(plan_id: str, event: dict):
 # the user can edit  ->  approval.  Only the approval step creates a pipeline.
 # ---------------------------------------------------------------------------
 
+def _draft_project_name(draft: dict) -> str:
+    """The draft's project folder name, derived on first use.
+
+    get_project_name() is a synchronous Gemini round-trip. Doing it while the
+    user is waiting for the "want to give me more details?" prompt — itself
+    nested inside another Gemini call — stalls the UI for seconds before
+    anything appears. Nothing needs the name until a file is uploaded or the
+    brief is written, so pay for it then.
+    """
+    with INTAKE_DRAFTS_LOCK:
+        name = draft.get("project_name")
+    if name:
+        return name
+    name = get_project_name(draft["task"])
+    with INTAKE_DRAFTS_LOCK:
+        draft["project_name"] = name
+    return name
+
+
 def _intake_project_dir(project_name: str, *parts: str) -> str:
     """Path inside this project's folder, creating it on the way."""
     path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, *parts)
@@ -717,7 +736,10 @@ def _delete_draft_uploads(draft: dict):
             print(f"[Intake] Could not delete {f.get('name')}: {e}")
 
     # Tidy up the folders this draft created, but only while they are empty.
-    project = os.path.join(BASE_DIR, "Let Jarvis Handle It", draft["project_name"])
+    project_name = draft.get("project_name")
+    if not project_name:
+        return          # never named, so nothing was ever written for it
+    project = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name)
     for path in (os.path.join(project, "Inputs"), project):
         try:
             if os.path.isdir(path) and not os.listdir(path):
@@ -914,7 +936,7 @@ def _intake_clean_edit(draft: dict, edited_text: str) -> str:
 
 def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
     """The complete record handed to the agents."""
-    out = [f"# Clarified Brief \u2014 {draft.get('project_name', 'Project')}", ""]
+    out = [f"# Clarified Brief \u2014 {draft.get('project_name') or 'Project'}", ""]
     out += ["## Original request", draft.get("task", ""), ""]
 
     details = (draft.get("details") or "").strip()
@@ -941,7 +963,7 @@ def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
 
 
 def _intake_write_brief(draft: dict) -> str:
-    brief_dir = _intake_project_dir(draft["project_name"], "Brief")
+    brief_dir = _intake_project_dir(_draft_project_name(draft), "Brief")
     # Two similar requests derive the same project name, so never overwrite a brief
     # an earlier pipeline is still working from — its plan points at that file.
     brief_path = os.path.join(brief_dir, "clarified_brief.md")
@@ -969,7 +991,7 @@ def create_intake_draft(task: str) -> dict:
     draft = {
         "draft_id": uuid.uuid4().hex[:8],
         "task": task,
-        "project_name": get_project_name(task),
+        "project_name": None,          # derived lazily by _draft_project_name()
         "details": "",
         "files": [],
         "qa": [],
@@ -1137,7 +1159,6 @@ def start_pipeline_local(settings_dict):
             "type": "pipeline_intake_ask",
             "draft_id": draft["draft_id"],
             "task": task,
-            "project_name": draft["project_name"],
         }
     push_message("ai", "Do you want to give me more details before I start?")
     return {
@@ -2298,7 +2319,9 @@ def intake_start_route():
     return jsonify({
         "draft_id": draft["draft_id"],
         "task": draft["task"],
-        "project_name": draft["project_name"],
+        # Deliberately not resolved here: naming the project costs a model call
+        # and the UI does not need it until files are attached.
+        "project_name": draft.get("project_name"),
     })
 
 
@@ -2311,7 +2334,7 @@ def intake_draft_route():
     return jsonify({
         "draft_id": draft["draft_id"],
         "task": draft["task"],
-        "project_name": draft["project_name"],
+        "project_name": draft.get("project_name"),
         "details": draft.get("details", ""),
         "files": [{k: v for k, v in f.items() if k != "path"} for f in draft.get("files", [])],
     })
@@ -2329,7 +2352,7 @@ def intake_upload_route():
     if not uploads:
         return jsonify({"error": "no files uploaded"}), 400
 
-    inputs_dir = _intake_project_dir(draft["project_name"], "Inputs")
+    inputs_dir = _intake_project_dir(_draft_project_name(draft), "Inputs")
     stored = []
     for upload in uploads:
         if not upload or not upload.filename:
@@ -2511,7 +2534,7 @@ def intake_approve_route():
 
     plan_id = initiate_pipeline(
         brief_text,
-        project_name=draft["project_name"],
+        project_name=_draft_project_name(draft),
         brief_path=brief_path,
         task_summary=draft["task"],
     )
@@ -2525,7 +2548,7 @@ def intake_approve_route():
         "status": "pipeline_started",
         "plan_id": plan_id,
         "task": draft["task"],
-        "project_name": draft["project_name"],
+        "project_name": draft.get("project_name"),
         "brief_path": brief_path,
     })
 

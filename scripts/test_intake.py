@@ -35,7 +35,9 @@ def wipe_project(name):
 r = app.post("/pipeline/intake/start", json={"task": "Build a website for my dentist client"})
 draft = r.get_json()
 did = draft["draft_id"]
-project = draft["project_name"]
+check("naming the project is deferred off the click path", draft["project_name"] is None)
+# The name is derived on first real use (an upload), exactly as the app does it.
+project = jarvis._draft_project_name(jarvis._get_intake_draft(did))
 wipe_project(project)
 check("draft created, no pipeline yet", r.status_code == 200 and did and not STARTED)
 check("no plan row created", len(jarvis.PLAN_STORE) == 0 or all(p["id"] != "99" for p in jarvis.PLAN_STORE))
@@ -134,6 +136,8 @@ check("pipeline started once", len(STARTED) == 1 and res["plan_id"] == "99")
 check("short summary preserved for labels",
       STARTED[0]["task_summary"] == "Build a website for my dentist client")
 check("project name reused, so Inputs/ matches", STARTED[0]["project_name"] == project)
+check("a cancelled draft that never got named leaves nothing to clean",
+      jarvis._intake_discard({"draft_id": "ghost", "files": [], "project_name": None}) is None)
 
 brief_path = res["brief_path"]
 brief = open(brief_path, encoding="utf-8").read()
@@ -153,7 +157,8 @@ check("draft cleared after approval", jarvis._get_intake_draft(did) is None)
 genai.FAKE["response"] = FIRST_REPLY
 r = app.post("/pipeline/intake/start", json={"task": "Build a website for my dentist client"})
 twin = r.get_json()
-check("second job derives the same project name", twin["project_name"] == project)
+twin_name = jarvis._draft_project_name(jarvis._get_intake_draft(twin["draft_id"]))
+check("second job derives the same project name", twin_name == project)
 set_model_reply({"plan_text": "# Plan\n\nA second, different site."})
 app.post("/pipeline/intake/picture", json={"draft_id": twin["draft_id"]})
 r2 = app.post("/pipeline/intake/approve", json={"draft_id": twin["draft_id"]})
@@ -168,7 +173,8 @@ d2 = r.get_json()
 app.post("/pipeline/intake/upload", data={
     "draft_id": d2["draft_id"], "files": [(io.BytesIO(b"junk"), "junk.txt")]
 }, content_type="multipart/form-data")
-junk_dir = os.path.join(BASE, "Let Jarvis Handle It", d2["project_name"], "Inputs")
+junk_dir = os.path.join(BASE, "Let Jarvis Handle It",
+                        jarvis._draft_project_name(jarvis._get_intake_draft(d2["draft_id"])), "Inputs")
 check("cancel test file exists first", os.path.exists(os.path.join(junk_dir, "junk.txt")))
 app.post("/pipeline/intake/cancel", json={"draft_id": d2["draft_id"]})
 check("cancel removed the files", not os.path.exists(junk_dir))
@@ -184,11 +190,12 @@ keeper = r.get_json()
 app.post("/pipeline/intake/upload", data={
     "draft_id": keeper["draft_id"], "files": [(io.BytesIO(b"keep me"), "keeper.txt")]
 }, content_type="multipart/form-data")
-shared_dir = os.path.join(BASE, "Let Jarvis Handle It", keeper["project_name"], "Inputs")
+keeper_name = jarvis._draft_project_name(jarvis._get_intake_draft(keeper["draft_id"]))
+shared_dir = os.path.join(BASE, "Let Jarvis Handle It", keeper_name, "Inputs")
 
 intruder = app.post("/pipeline/intake/start", json={"task": "Shared folder job"}).get_json()
-check("second draft derives the same project folder",
-      intruder["project_name"] == keeper["project_name"])
+intruder_name = jarvis._draft_project_name(jarvis._get_intake_draft(intruder["draft_id"]))
+check("second draft derives the same project folder", intruder_name == keeper_name)
 app.post("/pipeline/intake/upload", data={
     "draft_id": intruder["draft_id"], "files": [(io.BytesIO(b"discard me"), "intruder.txt")]
 }, content_type="multipart/form-data")
