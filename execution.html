@@ -277,6 +277,9 @@
             flex-direction: column;
             gap: 10px;
             flex: 1;
+            /* Without this a flex child cannot shrink below its content, so the
+               overflow-y below never engages and long lists run off the panel. */
+            min-height: 0;
             overflow-y: auto;
             scrollbar-width: thin;
             scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
@@ -634,14 +637,14 @@
             </div>
             <p id="idle-panel-desc">Live view of all tasks in the second brain database.</p>
 
-            <div id="idle-panel-overview-section" style="display: flex; flex: 1; flex-direction: column; overflow: hidden;">
+            <div id="idle-panel-overview-section" style="display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden;">
                 <div class="section-title">TASKS & SUBTASKS</div>
                 <div class="tasks-live-list" id="tasks-live-list">
                     <div style="color: var(--text-muted); font-size: 12px;">Loading tasks...</div>
                 </div>
             </div>
 
-            <div id="idle-panel-detail-section" style="display: none; flex-direction: column; gap: 14px; overflow-y: auto;">
+            <div id="idle-panel-detail-section" style="display: none; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto;">
                 <div class="section-title">TASK DETAILS</div>
                 <div id="specific-task-meta" style="font-size: 11px; display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);"></div>
                 <div class="section-title">NOTES & SUBTASKS</div>
