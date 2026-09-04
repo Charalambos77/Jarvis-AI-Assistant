@@ -1513,6 +1513,28 @@ import logging
 logging.getLogger("werkzeug").setLevel(logging.WARNING)  # quiet the request logs
 
 
+@app.after_request
+def no_cache_html(response):
+    """Never let the webview serve a stale page.
+
+    The UI is plain HTML files on disk. When one of them changes, the running
+    app must show the new version \u2014 otherwise a fix that is genuinely in the
+    file looks like it did nothing, and the bug hunt goes looking in the wrong
+    place entirely. Only pages are covered; API responses are untouched.
+    """
+    if response.mimetype == "text/html":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        # Drop the validators too. Left in place, the browser stores them and
+        # asks "still unchanged?" on the next load — and Flask answers 304, which
+        # sends it right back to the cached copy. With nothing to revalidate
+        # against, every load fetches the file as it is on disk.
+        response.headers.pop("ETag", None)
+        response.headers.pop("Last-Modified", None)
+    return response
+
+
 @app.route("/")
 def root_page():
     return send_from_directory(BASE_DIR, "command_center.html")

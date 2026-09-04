@@ -42,16 +42,43 @@
             background-color: var(--bg-color);
             color: var(--text-main);
             font-family: 'Inter', sans-serif;
-            height: 100vh;
-            overflow: hidden;
+            /* The PAGE scrolls. With a fixed 100vh and overflow:hidden, a stage
+               holding a long brief simply ran off the bottom of the window with
+               no way to reach it \u2014 the container outgrew the viewport, got
+               clipped here, and the cards' height:100% then resolved against
+               that overgrown height so their own scrolling never engaged. */
+            min-height: 100vh;
+            overflow-x: hidden;
+            overflow-y: auto;
             display: flex;
             flex-direction: column;
             position: relative;
+
+            /* A visible page scrollbar, so it is obvious there is more below. */
+            scrollbar-width: thin;
+            scrollbar-color: rgba(6, 182, 212, 0.35) transparent;
 
             /* Dotted Grid Background */
             background-image:
                 radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
             background-size: 24px 24px;
+        }
+
+        body::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        body::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        body::-webkit-scrollbar-thumb {
+            background: rgba(6, 182, 212, 0.3);
+            border-radius: 5px;
+        }
+
+        body::-webkit-scrollbar-thumb:hover {
+            background: rgba(6, 182, 212, 0.55);
         }
 
         /* Subtle radial gradient vignette */
@@ -72,10 +99,14 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 20px 40px 0px 40px;
+            padding: 20px 40px 10px 40px;
             z-index: 10;
-            position: relative;
+            /* Sticky so the pipeline switcher and nav stay in reach once the
+               page runs past one screen. */
+            position: sticky;
+            top: 0;
             flex-shrink: 0;
+            background: var(--bg-color);
         }
 
         .logo {
@@ -152,8 +183,10 @@
             z-index: 5;
             flex-grow: 1;
             align-items: stretch;
-            overflow: hidden;
             width: 100%;
+            /* No fixed height and no clipping: the tallest stage sets the
+               height, the grid stretches the rest to match, page scrolls. */
+            min-height: calc(100vh - 120px);
         }
 
         /* Stage Columns styling */
@@ -211,9 +244,9 @@
             box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
             transition: all 0.3s ease;
             flex-grow: 1;
-            height: calc(100% - 50px);
-            overflow-y: auto;
-            scrollbar-width: none;
+            /* Grow to fit the content; the page scrolls to reach it. */
+            height: auto;
+            overflow: visible;
         }
 
         .stage-card::-webkit-scrollbar {
@@ -2290,6 +2323,7 @@
 
         window.addEventListener('load', drawConnectors);
         window.addEventListener('resize', drawConnectors);
+        window.addEventListener('scroll', drawConnectors);
         document.getElementById('pipeline').addEventListener('scroll', drawConnectors);
 
         // Report current page to Jarvis backend
