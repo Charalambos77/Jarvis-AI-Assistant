@@ -43,7 +43,9 @@ async def run_research_agent(
     brief = agent_config.get("brief", "")
     tools_needed = agent_config.get("tools_needed", ["google_search"])
 
-    declarations, handlers, unavailable = get_tools_for_execution_agent(tools_needed, project_name)
+    declarations, handlers, unavailable = get_tools_for_execution_agent(
+        tools_needed, project_name, context=f"{role}: {brief}"[:400]
+    )
 
     unavailable_note = ""
     if unavailable:

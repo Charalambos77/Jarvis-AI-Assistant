@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Section</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #05070A;
+            --panel: rgba(255,255,255,0.025);
+            --line: rgba(255,255,255,0.08);
+            --text: #E2E8F0;
+            --muted: #9CA3AF;
+            --dim: #4B5563;
+            --accent: #60A5FA;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        /* The page scrolls in its own column so the header stays put. */
+        .shell { display: flex; flex-direction: column; height: 100vh; }
+
+        header {
+            flex: 0 0 auto; padding: 22px 34px;
+            border-bottom: 1px solid var(--line);
+            display: flex; align-items: flex-start; gap: 24px;
+            background: rgba(8,10,14,0.9);
+        }
+        .id-block { flex: 1 1 auto; min-width: 0; }
+        .eyebrow {
+            font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin-bottom: 8px;
+        }
+        h1 {
+            margin: 0; font-size: 22px; font-weight: 700; color: #FFFFFF;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .brief {
+            margin-top: 10px; font-size: 13px; color: var(--muted);
+            line-height: 1.7; max-width: 900px; white-space: pre-wrap;
+        }
+        .top-right-nav { display: flex; gap: 10px; flex: 0 0 auto; }
+        .nav-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit;
+            font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+            text-transform: uppercase; padding: 12px 20px; border-radius: 8px;
+            cursor: pointer; transition: all .25s ease; text-align: center;
+        }
+        .nav-btn:hover {
+            background: rgba(255,255,255,0.07); color: #FFF;
+            border-color: rgba(255,255,255,0.25);
+        }
+
+        .body { flex: 1 1 auto; min-height: 0; display: flex; }
+        .main { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 26px 34px 60px; }
+        .side {
+            flex: 0 0 400px; border-left: 1px solid var(--line);
+            display: flex; flex-direction: column; min-height: 0;
+            background: rgba(255,255,255,0.012);
+        }
+
+        .card {
+            background: var(--panel); border: 1px solid var(--line);
+            border-radius: 12px; padding: 20px 22px; margin-bottom: 18px;
+        }
+        .card-head {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 14px; gap: 12px;
+        }
+        .card-title {
+            font-size: 11px; font-weight: 700; letter-spacing: 1.8px;
+            text-transform: uppercase; color: #FFFFFF;
+        }
+        .mini {
+            background: rgba(255,255,255,0.04); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit; font-size: 10px;
+            font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+            padding: 7px 14px; border-radius: 6px; cursor: pointer; transition: all .2s ease;
+        }
+        .mini:hover { color: #FFF; border-color: rgba(96,165,250,0.5); }
+        .mini:disabled { opacity: .45; cursor: not-allowed; }
+
+        .prose { font-size: 13px; line-height: 1.8; color: #CBD5E1; }
+        .prose:empty::before { content: "Nothing recorded yet."; color: var(--dim); }
+        .prose p { margin: 0 0 12px; }
+        .prose h3, .prose h4, .prose h5, .prose h6 {
+            margin: 20px 0 10px; font-size: 11px; font-weight: 700;
+            letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted);
+        }
+        .prose h3:first-child, .prose h4:first-child { margin-top: 0; }
+        .prose ul { margin: 0 0 12px; padding-left: 20px; }
+        .prose li { margin-bottom: 6px; }
+        .prose code {
+            background: rgba(255,255,255,0.06); border-radius: 4px;
+            padding: 2px 6px; font-size: 12px;
+        }
+        .prose .wikilink {
+            color: var(--accent); border-bottom: 1px dotted rgba(96,165,250,0.5);
+        }
+        textarea.edit {
+            width: 100%; min-height: 260px; resize: vertical;
+            background: rgba(0,0,0,0.35); border: 1px solid rgba(96,165,250,0.4);
+            border-radius: 8px; color: var(--text); font-family: inherit;
+            font-size: 13px; line-height: 1.8; padding: 14px; outline: none;
+        }
+
+        .row {
+            display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+            border: 1px solid var(--line); border-radius: 9px; margin-bottom: 9px;
+            transition: all .2s ease; background: rgba(255,255,255,0.015);
+        }
+        .row.click { cursor: pointer; }
+        .row.click:hover { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.06); }
+        .row-main { flex: 1 1 auto; min-width: 0; }
+        .row-title {
+            font-size: 13px; color: #E2E8F0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .row-sub { font-size: 10px; color: var(--dim); margin-top: 5px; letter-spacing: .6px; }
+        .badge {
+            font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+            padding: 4px 9px; border-radius: 5px; flex: 0 0 auto;
+            background: rgba(255,255,255,0.06); color: var(--muted);
+        }
+        .badge.running { background: rgba(52,211,153,0.15); color: #34D399; }
+        .badge.founding { background: rgba(167,139,250,0.15); color: #A78BFA; }
+        .empty { font-size: 12px; color: var(--dim); padding: 10px 2px; }
+
+        .chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .chip {
+            background: rgba(255,255,255,0.04); border: 1px solid var(--line);
+            border-radius: 20px; padding: 7px 14px; font-size: 11px; color: #CBD5E1;
+        }
+
+        /* ---- the section's own conversation ---- */
+        .chat-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--line); }
+        .chat-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 22px; }
+        .msg { margin-bottom: 16px; font-size: 13px; line-height: 1.7; }
+        .msg .who {
+            font-size: 9px; font-weight: 700; letter-spacing: 1.5px;
+            text-transform: uppercase; color: var(--dim); margin-bottom: 5px;
+        }
+        .msg.user .who { color: var(--accent); }
+        .msg .what { color: #CBD5E1; white-space: pre-wrap; }
+        .chat-input-row {
+            flex: 0 0 auto; padding: 16px 22px 20px; border-top: 1px solid var(--line);
+            display: flex; gap: 10px;
+        }
+        .chat-input-row input {
+            flex: 1 1 auto; background: rgba(255,255,255,0.03);
+            border: 1px solid var(--line); border-radius: 8px; color: var(--text);
+            font-family: inherit; font-size: 13px; padding: 12px 14px; outline: none;
+        }
+        .chat-input-row input:focus { border-color: rgba(96,165,250,0.6); }
+
+        /* Embedded in the information overlay: drop the page chrome. */
+        .embedded .top-right-nav .nav-btn:not(.keep) { display: none; }
+        .embedded header { padding-top: 18px; padding-bottom: 18px; }
+
+        ::-webkit-scrollbar { width: 9px; height: 9px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 5px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20); }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div class="id-block">
+            <div class="eyebrow">Section</div>
+            <h1 id="sec-name">Loading…</h1>
+            <div class="brief" id="sec-brief"></div>
+        </div>
+        <div class="top-right-nav" id="page-nav">
+            <button class="nav-btn keep" onclick="startPipelineHere()">New pipeline here</button>
+            <button class="nav-btn" onclick="go('command_center.html')">Brain</button>
+            <button class="nav-btn" onclick="go('execution.html')">Execution</button>
+        </div>
+    </header>
+
+    <div class="body">
+        <div class="main">
+            <div class="card">
+                <div class="card-head">
+                    <span class="card-title">What this section knows</span>
+                    <div style="display:flex; gap:8px;">
+                        <button class="mini" id="btn-refresh" onclick="refreshKnowledge()">Re-read pipelines</button>
+                        <button class="mini" id="btn-edit" onclick="toggleEditSummary()">Edit</button>
+                    </div>
+                </div>
+                <div class="prose" id="summary"></div>
+                <textarea class="edit" id="summary-edit" style="display:none"></textarea>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><span class="card-title">Pipelines</span></div>
+                <div id="pipelines"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><span class="card-title">Knowledge notes</span></div>
+                <div class="chip-list" id="knowledge"></div>
+                <div class="row-sub" id="folder-hint" style="margin-top:14px"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><span class="card-title">Tasks in this section</span></div>
+                <div id="tasks"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><span class="card-title">Notes in this section</span></div>
+                <div id="notes"></div>
+            </div>
+        </div>
+
+        <div class="side">
+            <div class="chat-head">
+                <span class="card-title">Talk about this section</span>
+                <div class="row-sub" style="margin-top:6px">
+                    Jarvis works on this section and remembers this conversation.
+                </div>
+            </div>
+            <div class="chat-log" id="chat-log"></div>
+            <div class="chat-input-row">
+                <input id="chat-input" placeholder="Ask about this section…" autocomplete="off">
+                <button class="mini" id="chat-send" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="sections_ui.js"></script>
+<script>
+    const PARAMS = new URLSearchParams(window.location.search);
+    const SECTION_ID = PARAMS.get("id") || "";
+
+    // Embedded inside the Section Information overlay, this page supplies only
+    // the content: the overlay already provides the frame, the title and a way
+    // out, and its own page navigation would strand you inside the iframe.
+    const EMBEDDED = PARAMS.get("embed") === "1";
+    if (EMBEDDED) {
+        document.documentElement.classList.add("embedded");
+    }
+    let sectionData = null;
+    let editingSummary = false;
+
+    // Embedded, every navigation must escape the iframe or the destination
+    // renders inside the information panel.
+    function go(url) {
+        if (EMBEDDED && window.top && window.top !== window) {
+            window.top.location.href = url;
+        } else {
+            window.location.href = url;
+        }
+    }
+
+    function esc(t) {
+        return String(t == null ? "" : t).replace(/[&<>"']/g, c =>
+            ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // The summary is a markdown document you also edit by hand, so it is shown
+    // formatted rather than as source. Escaped first: none of this trusts input.
+    function renderMarkdown(text) {
+        const lines = esc(text || "").split("\n");
+        const out = [];
+        let inList = false;
+        const inline = s => s
+            .replace(/\[\[([^\]]+)\]\]/g, '<span class="wikilink">$1</span>')
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+        lines.forEach(raw => {
+            const line = raw.trim();
+            const bullet = line.match(/^[-*]\s+(.*)$/);
+            if (bullet) {
+                if (!inList) { out.push("<ul>"); inList = true; }
+                out.push("<li>" + inline(bullet[1]) + "</li>");
+                return;
+            }
+            if (inList) { out.push("</ul>"); inList = false; }
+            if (!line) return;
+            const head = line.match(/^(#{1,6})\s+(.*)$/);
+            if (head) {
+                const level = Math.min(head[1].length + 2, 6);
+                out.push("<h" + level + ">" + inline(head[2]) + "</h" + level + ">");
+                return;
+            }
+            out.push("<p>" + inline(line) + "</p>");
+        });
+        if (inList) out.push("</ul>");
+        return out.join("");
+    }
+
+    async function load() {
+        if (!SECTION_ID) {
+            document.getElementById("sec-name").textContent = "No section chosen";
+            return;
+        }
+        const res = await fetch("/sections/" + encodeURIComponent(SECTION_ID));
+        if (!res.ok) {
+            document.getElementById("sec-name").textContent = "Section not found";
+            return;
+        }
+        sectionData = await res.json();
+        render();
+
+        // Working in this section from now on: scoped tools, its own memory.
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/enter", { method: "POST" })
+            .catch(() => {});
+    }
+
+    function render() {
+        const s = sectionData.section;
+        document.title = s.name + " — Jarvis Section";
+        document.getElementById("sec-name").textContent = s.name;
+        document.getElementById("sec-brief").textContent = s.brief || "";
+        if (!editingSummary) {
+            document.getElementById("summary").innerHTML = renderMarkdown(sectionData.summary);
+        }
+        document.getElementById("folder-hint").textContent =
+            "On disk: " + sectionData.folder + "  —  open this folder as an Obsidian vault to browse it.";
+
+        // Pipelines — clicking one shows it exactly the way execution mode does.
+        const pipes = document.getElementById("pipelines");
+        pipes.innerHTML = "";
+        if (!sectionData.pipelines.length) {
+            pipes.innerHTML = '<div class="empty">No pipelines yet.</div>';
+        }
+        sectionData.pipelines.forEach(p => {
+            const row = document.createElement("div");
+            row.className = "row click";
+            row.innerHTML =
+                '<div class="row-main">' +
+                    '<div class="row-title">' + esc(p.task || p.id) + '</div>' +
+                    '<div class="row-sub">ID ' + esc(p.id) + ' · ' +
+                        esc(String(p.phase || "").toUpperCase()) + '</div>' +
+                '</div>' +
+                (p.founding ? '<span class="badge founding">Founding</span>' : '') +
+                '<span class="badge ' + (p.status === "running" ? "running" : "") + '">' +
+                    esc(p.status || "") + '</span>';
+            row.onclick = () => {
+                // execution.html reads the pipeline it shows from here, and the
+                // section id keeps that view pinned to this section's work.
+                localStorage.setItem("jarvis_active_pipeline_id", p.id);
+                go("execution.html?section=" + encodeURIComponent(SECTION_ID));
+            };
+            pipes.appendChild(row);
+        });
+
+        const know = document.getElementById("knowledge");
+        know.innerHTML = "";
+        if (!sectionData.knowledge.length) {
+            know.innerHTML = '<div class="empty">No knowledge notes yet.</div>';
+        }
+        sectionData.knowledge.forEach(n => {
+            const chip = document.createElement("div");
+            chip.className = "chip";
+            chip.title = n.preview || "";
+            chip.textContent = n.name;
+            know.appendChild(chip);
+        });
+
+        renderList("tasks", sectionData.tasks, t => ({
+            title: t.content,
+            sub: (t.priority || "") + " · " + (t.status || "")
+        }));
+        renderList("notes", sectionData.notes, n => ({
+            title: n.content,
+            sub: n.tags || ""
+        }));
+
+        renderChat(sectionData.messages || []);
+    }
+
+    function renderList(id, items, shape) {
+        const box = document.getElementById(id);
+        box.innerHTML = "";
+        if (!items || !items.length) {
+            box.innerHTML = '<div class="empty">Nothing yet.</div>';
+            return;
+        }
+        items.forEach(item => {
+            const s = shape(item);
+            const row = document.createElement("div");
+            row.className = "row";
+            row.innerHTML =
+                '<div class="row-main">' +
+                    '<div class="row-title">' + esc(s.title) + '</div>' +
+                    (s.sub ? '<div class="row-sub">' + esc(s.sub) + '</div>' : '') +
+                '</div>';
+            box.appendChild(row);
+        });
+    }
+
+    function renderChat(messages) {
+        const log = document.getElementById("chat-log");
+        log.innerHTML = "";
+        if (!messages.length) {
+            log.innerHTML = '<div class="empty">Nothing said in this section yet.</div>';
+        }
+        messages.forEach(m => appendMessage(m.role, m.content, false));
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function appendMessage(role, text, scroll = true) {
+        const log = document.getElementById("chat-log");
+        const empty = log.querySelector(".empty");
+        if (empty) empty.remove();
+        const el = document.createElement("div");
+        el.className = "msg " + (role === "user" ? "user" : "jarvis");
+        el.innerHTML =
+            '<div class="who">' + (role === "user" ? "You" : "Jarvis") + '</div>' +
+            '<div class="what">' + esc(text) + '</div>';
+        log.appendChild(el);
+        if (scroll) log.scrollTop = log.scrollHeight;
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById("chat-input");
+        const btn = document.getElementById("chat-send");
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = "";
+        appendMessage("user", text);
+        btn.disabled = true;
+        try {
+            const res = await fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text })
+            });
+            const data = await res.json();
+            appendMessage("jarvis", data.reply || data.error || "No reply.");
+        } catch (e) {
+            appendMessage("jarvis", "Could not reach Jarvis.");
+        } finally {
+            btn.disabled = false;
+            input.focus();
+        }
+    }
+
+    document.getElementById("chat-input").addEventListener("keydown", e => {
+        if (e.key === "Enter") sendMessage();
+    });
+
+    function toggleEditSummary() {
+        const view = document.getElementById("summary");
+        const edit = document.getElementById("summary-edit");
+        const btn = document.getElementById("btn-edit");
+
+        if (!editingSummary) {
+            edit.value = sectionData.summary || "";
+            view.style.display = "none";
+            edit.style.display = "block";
+            btn.textContent = "Save";
+            editingSummary = true;
+            edit.focus();
+            return;
+        }
+
+        const text = edit.value;
+        btn.disabled = true;
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ summary: text })
+        }).then(() => {
+            sectionData.summary = text;
+            view.innerHTML = renderMarkdown(text);
+            edit.style.display = "none";
+            view.style.display = "block";
+            btn.textContent = "Edit";
+            editingSummary = false;
+        }).finally(() => { btn.disabled = false; });
+    }
+
+    function refreshKnowledge() {
+        const btn = document.getElementById("btn-refresh");
+        btn.disabled = true;
+        btn.textContent = "Reading…";
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/refresh", { method: "POST" })
+            .then(r => r.json())
+            .then(d => {
+                if (d.summary != null) {
+                    sectionData.summary = d.summary;
+                    if (!editingSummary) {
+                        document.getElementById("summary").innerHTML = renderMarkdown(d.summary);
+                    }
+                }
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.textContent = "Re-read pipelines";
+            });
+    }
+
+    function startPipelineHere() {
+        const task = prompt("What should this pipeline do? It will start knowing what this section knows.");
+        if (!task || !task.trim()) return;
+        fetch("/pipeline/intake/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task: task.trim(), section_id: SECTION_ID })
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (d.draft_id) {
+                    // The clarification gate lives on the command centre.
+                    sessionStorage.setItem("jarvis_intake_draft", d.draft_id);
+                    go("command_center.html?intake=" + encodeURIComponent(d.draft_id));
+                }
+            });
+    }
+
+    load();
+</script>
+</body>
+</html>

@@ -158,10 +158,24 @@ TOOLS = [
     },
     {
         "name": "get_tasks",
-        "description": "Get all tasks, optionally filtered by status (open, in_progress, done).",
+        "description": (
+            "Get tasks, optionally filtered by status (open, in_progress, done). "
+            "While working inside a section this returns that section's tasks; pass "
+            "scope to look outside it."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"status": {"type": "string", "enum": ["open", "in_progress", "done"]}},
+            "properties": {
+                "status": {"type": "string", "enum": ["open", "in_progress", "done"]},
+                "scope": {
+                    "type": "string",
+                    "enum": ["section", "brain", "everything"],
+                    "description": (
+                        "section (default inside a section), brain for the main task "
+                        "list outside any section, everything for both."
+                    ),
+                },
+            },
         },
     },
     {
@@ -197,10 +211,23 @@ TOOLS = [
     },
     {
         "name": "search_notes",
-        "description": "Search saved notes by content or tag.",
+        "description": (
+            "Search saved notes by content or tag. While working inside a section "
+            "this searches that section's notes; pass scope to look outside it."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"query": {"type": "string"}},
+            "properties": {
+                "query": {"type": "string"},
+                "scope": {
+                    "type": "string",
+                    "enum": ["section", "brain", "everything"],
+                    "description": (
+                        "section (default inside a section), brain for notes outside "
+                        "any section, everything for both."
+                    ),
+                },
+            },
             "required": ["query"],
         },
     },
@@ -829,17 +856,113 @@ if has_gemini():
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
-CHAT_SESSION = None
+# ---------------------------------------------------------------------------
+# Section focus
+#
+# Inside a section Jarvis works on that section: tasks and notes it creates
+# belong to it, and the ones it reads back are its own. Focused, not sealed —
+# it can still reach the wider brain, but only when it deliberately asks to.
+# ---------------------------------------------------------------------------
+
+ACTIVE_SECTION: dict | None = None
+
+# One chat session per section, so a section keeps its own thread of
+# conversation and the brain's chat is not polluted by it. Keyed by section id,
+# with "" for the brain itself.
+CHAT_SESSIONS: dict[str, object] = {}
+
+
+def set_active_section(section: dict | None):
+    """Enter a section, or leave it by passing None."""
+    global ACTIVE_SECTION
+    ACTIVE_SECTION = section or None
+
+
+def get_active_section() -> dict | None:
+    return ACTIVE_SECTION
+
+
+def clear_section_chat(section_id: str | None):
+    """Drop a cached session so the next message rebuilds it from stored history."""
+    CHAT_SESSIONS.pop(section_id or "", None)
+
+
+def _section_system_prompt(section: dict) -> str:
+    """The base prompt plus everything this section stands for."""
+    name = section.get("name") or section.get("folder")
+    lines = [
+        SYSTEM_PROMPT,
+        "",
+        f"YOU ARE CURRENTLY WORKING INSIDE THE SECTION '{name}'.",
+        "- Everything the user says refers to this section unless they say otherwise.",
+        "- Tasks and notes you create belong to this section automatically.",
+        "- get_tasks and search_notes return this section's items by default. To look "
+        "at the wider brain, pass scope='brain' (or 'everything'); do that only when "
+        "the user actually asks about things outside this section.",
+        "- The section's knowledge below is already established. Treat it as known.",
+        "",
+    ]
+    try:
+        import sections as section_store
+        lines.append(section_store.knowledge_digest(section, max_chars=4000))
+    except Exception as e:
+        print(f"[Coordinator] Could not load section knowledge: {e}")
+    return "\n".join(lines)
+
+
+def _session_config(section: dict | None):
+    """`config`, or a copy of it carrying the section's system prompt."""
+    if not section or config is None:
+        return config
+    return types.GenerateContentConfig(
+        system_instruction=_section_system_prompt(section),
+        tools=[{"function_declarations": TOOLS}],
+        tool_config=types.ToolConfig(include_server_side_tool_invocations=False),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+
+def _stored_history(section: dict | None) -> list:
+    """A section's saved conversation, replayed into a fresh chat session.
+
+    This is what makes a section remember: come back weeks later and the model
+    starts with what was already said there, not a blank slate.
+    """
+    if not section:
+        return []
+    try:
+        conn = db.get_connection(DB_PATH)
+        try:
+            messages = db.get_section_messages(conn, section["id"], limit=60)
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[Coordinator] Could not load section chat: {e}")
+        return []
+
+    history = []
+    for m in messages:
+        role = "user" if m["role"] == "user" else "model"
+        text = (m.get("content") or "").strip()
+        if not text:
+            continue
+        history.append(types.Content(role=role, parts=[types.Part(text=text)]))
+    return history
 
 
 def get_chat_session():
     if not has_gemini() or client is None:
         raise RuntimeError("Gemini is not configured. Set GEMINI_API_KEY in .env to use the assistant.")
 
-    global CHAT_SESSION
-    if CHAT_SESSION is None:
-        CHAT_SESSION = client.chats.create(model="gemini-2.5-flash", config=config)
-    return CHAT_SESSION
+    section = ACTIVE_SECTION
+    key = (section or {}).get("id", "") or ""
+    if key not in CHAT_SESSIONS:
+        CHAT_SESSIONS[key] = client.chats.create(
+            model="gemini-2.5-flash",
+            config=_session_config(section),
+            history=_stored_history(section),
+        )
+    return CHAT_SESSIONS[key]
 
 
 def format_tool_response(result: Any) -> str:
@@ -851,12 +974,36 @@ def format_tool_response(result: Any) -> str:
         return str(result)
 
 
+def _scope_to_section(tool_name: str, kwargs: dict) -> dict:
+    """Point the task and note tools at the section Jarvis is working inside.
+
+    `scope` is the model's way out: it is not a database argument, so it is
+    translated here and never reaches db.py.
+    """
+    scope = kwargs.pop("scope", None)
+    section = ACTIVE_SECTION
+
+    if tool_name in ("get_tasks", "search_notes"):
+        if scope == "everything":
+            kwargs["include_sections"] = True
+        elif scope == "brain":
+            pass                      # the default already means "outside any section"
+        elif section:
+            kwargs.setdefault("section_id", section["id"])
+        return kwargs
+
+    if tool_name in ("add_task", "add_note") and section and scope != "brain":
+        kwargs.setdefault("section_id", section["id"])
+    return kwargs
+
+
 def perform_tool_action(conn: Any, tool_name: str, **kwargs: Any) -> Any:
     if tool_name not in TOOL_IMPL:
         return {
             "status": "error",
             "error": f"Unknown tool '{tool_name}'. Available tools: {', '.join(sorted(TOOL_IMPL.keys()))}",
         }
+    kwargs = _scope_to_section(tool_name, kwargs)
     return TOOL_IMPL[tool_name](conn, **kwargs)
 
 

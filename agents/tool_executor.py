@@ -21,6 +21,7 @@ Two tiers:
                           it reports the limitation instead of hallucinating
                           success (see build_unavailable_notice below).
 """
+import json
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -81,6 +82,42 @@ def list_deliverables_impl(project_name: str, agent_id: str) -> dict:
     return {"status": "ok", "action": "list_deliverables", "files": files}
 
 
+def memory_patterns_search_impl(project_name: str, agent_id: str, query: str,
+                                task_type: str | None = None, outcome: str | None = None) -> dict:
+    """Read-only lookup over the memory_patterns table.
+
+    Brain asks for this on nearly every plan. It used to resolve to web search,
+    so an agent asking what Jarvis had learned before got search results off the
+    internet instead. This is the real thing: past wins and losses, nothing else.
+    """
+    try:
+        import db as _db
+        conn = _db.get_connection(os.path.join(BASE_DIR, "second_brain.db"))
+        try:
+            rows = _db.search_memory_patterns(conn, query or "", task_type=task_type, outcome=outcome)
+        finally:
+            conn.close()
+        return {
+            "status": "ok",
+            "action": "search_memory_patterns",
+            "query": query,
+            "count": len(rows),
+            "patterns": [
+                {
+                    "pattern": r.get("pattern"),
+                    "task_type": r.get("task_type"),
+                    "metric_name": r.get("metric_name"),
+                    "metric_value": r.get("metric_value"),
+                    "outcome": r.get("outcome"),
+                    "created_at": r.get("created_at"),
+                }
+                for r in rows
+            ],
+        }
+    except Exception as e:
+        return {"status": "error", "action": "search_memory_patterns", "error": str(e)}
+
+
 ALWAYS_ON_TOOLS = {
     "write_file": {
         "declaration": {
@@ -120,6 +157,28 @@ ALWAYS_ON_TOOLS = {
             "parameters": {"type": "object", "properties": {}},
         },
         "handler": list_deliverables_impl,
+    },
+    # Internal, read-only, no credentials — so it is always on rather than
+    # sitting behind the Plugging Gate asking for a key that cannot exist.
+    "memory_patterns": {
+        "declaration": {
+            "name": "search_memory_patterns",
+            "description": (
+                "Search Jarvis's own memory of what worked and what failed on past pipelines. "
+                "Returns real recorded patterns with their metrics and win/loss outcome. "
+                "This searches internal memory only — it does NOT search the web."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Text to match against remembered patterns."},
+                    "task_type": {"type": "string", "description": "Optional filter, e.g. 'research', 'video', 'code'."},
+                    "outcome": {"type": "string", "description": "Optional filter: 'win' or 'loss'."},
+                },
+                "required": ["query"],
+            },
+        },
+        "handler": memory_patterns_search_impl,
     },
 }
 
@@ -183,10 +242,9 @@ def web_search_impl(project_name: str, agent_id: str, query: str) -> dict:
 # Brain isn't guaranteed to phrase tools_needed consistently run to run — it's
 # an LLM generating a fresh name most times (arxiv_api, arxiv_search,
 # arxiv_search_api, arxiv_api_client, ... have all shown up for the exact
-# same underlying arXiv capability in different pipeline runs). An exact-match
-# alias table can't keep up with that, so exact aliases are just a fast path;
-# _resolve_tool_key() below falls back to keyword matching for anything not
-# in this table, which is what actually makes this durable.
+# same underlying arXiv capability in different pipeline runs). This exact
+# table is the fast, free, deterministic path; _resolve_tool_key() adds token
+# rules and, only for names nothing else recognises, one cached model call.
 TOOL_ALIASES = {
     "arxiv_search": "arxiv_api",
     "arxiv": "arxiv_api",
@@ -196,6 +254,14 @@ TOOL_ALIASES = {
     "internet_search": "google_search",
     "search": "google_search",
     "google_drive_api": "google_docs_api",  # same real handler creates+writes a Doc either way
+    "gdocs": "google_docs_api",
+    "gdrive": "google_docs_api",
+    "document_reader": "read_file",
+    "file_reader": "read_file",
+    "memory_search": "memory_patterns",
+    "search_memory_patterns": "memory_patterns",
+    "memory_query": "memory_patterns",
+    "memory_patterns_search": "memory_patterns",
 }
 
 
@@ -260,24 +326,211 @@ def google_docs_create_impl(project_name: str, agent_id: str, title: str, conten
 # a group if it contains ANY of the group's keywords. Keep "arxiv" ahead of
 # the generic search/web group so "arxiv_search_api" resolves to arxiv_api,
 # not google_search.
-_FUZZY_TOOL_GROUPS = [
-    ("arxiv_api", ("arxiv",)),
-    ("google_search", ("search", "web", "internet", "browse")),
+# Token rules, checked in order. A rule matches only when EVERY clause is
+# satisfied by at least one whole token of the requested name.
+#
+# Whole tokens, never substrings. The old matcher tested `"web" in key`, which
+# read "web" out of the middle of `text_generation_webui` and handed an agent
+# asking to drive a local LLM UI a Google web-search tool instead — and matched
+# "search" inside `search_memory_patterns`, so the memory lookup also silently
+# became a web search. A wrong tool bound quietly is worse than no tool: an
+# unresolved name is reported honestly, a mis-resolved one is used with
+# confidence. Anything a rule doesn't clearly claim falls through.
+_TOKEN_RULES = [
+    # (canonical key, [clause, clause, ...]) — most distinctive first.
+    ("arxiv_api", [{"arxiv"}]),
+    ("memory_patterns", [{"memory", "memories", "recall", "learnings"}]),
+    ("google_docs_api", [
+        {"google", "gdocs", "gdrive"},
+        {"doc", "docs", "document", "documents", "drive"},
+    ]),
+    # "search" alone is NOT distinctive — it appears in plenty of names that
+    # have nothing to do with the web, so a web word is required too. Word
+    # forms are listed out rather than stemmed: `web_browsing` has to land
+    # here deterministically instead of falling through to a model call.
+    ("google_search", [
+        {"web", "internet", "google", "online", "www"},
+        {"search", "searches", "searching", "browse", "browsing", "browser",
+         "query", "queries", "lookup", "retrieval", "scrape", "scraper", "scraping", "crawl"},
+    ]),
 ]
 
+# Generic filler an LLM tacks onto a capability name. Stripping these collapses
+# text_analysis_tool / text_analysis_tools / text_analysis_library onto one
+# name, so the same concept can't get three different answers on three runs.
+_GENERIC_SUFFIX_TOKENS = {
+    "tool", "tools", "api", "apis", "library", "libraries", "service", "services",
+    "framework", "frameworks", "sdk", "client", "access", "integration", "integrations",
+    "connector", "plugin", "software", "utility", "utilities", "module",
+}
 
-def _resolve_tool_key(raw_name: str) -> str:
-    """Best-effort mapping from whatever Brain called a tool to the canonical
-    REGISTRY_TOOLS key, so the exact wording Brain used this run doesn't
-    matter as long as the intent is recognizable."""
-    key = re.sub(r"[\s-]+", "_", (raw_name or "").strip().lower())
+
+def _strip_generic_suffixes(key: str) -> str:
+    tokens = [t for t in key.split("_") if t]
+    while len(tokens) > 1 and tokens[-1] in _GENERIC_SUFFIX_TOKENS:
+        tokens.pop()
+    return "_".join(tokens)
+
+_NORMALIZE_RE = re.compile(r"[\s\-./\\:]+")
+
+
+def _normalize_tool_name(raw_name: str) -> str:
+    key = _NORMALIZE_RE.sub("_", (raw_name or "").strip().lower())
+    return re.sub(r"_+", "_", key).strip("_")
+
+
+def _token_rule_match(key: str) -> str | None:
+    tokens = set(t for t in key.split("_") if t)
+    if not tokens:
+        return None
+    for canonical, clauses in _TOKEN_RULES:
+        if all(tokens & clause for clause in clauses):
+            return canonical
+    return None
+
+
+# One model call per never-before-seen name, then remembered. Names repeat
+# constantly across agents, cycles and runs, so this stays cheap — and the
+# decision stays the same on a resume instead of being re-rolled each time.
+_LLM_RESOLUTION_CACHE: dict[str, str] = {}
+_RESOLUTION_CACHE_PATH = os.path.join(BASE_DIR, "data", "tool_resolution_cache.json")
+_RESOLUTION_CACHE_LOADED = False
+
+
+def _load_resolution_cache() -> None:
+    global _RESOLUTION_CACHE_LOADED
+    if _RESOLUTION_CACHE_LOADED:
+        return
+    _RESOLUTION_CACHE_LOADED = True
+    try:
+        with open(_RESOLUTION_CACHE_PATH, "r", encoding="utf-8") as f:
+            stored = json.load(f)
+        if isinstance(stored, dict):
+            # Only keep entries that still point at a connector that exists —
+            # a cached answer must never outlive the connector it names.
+            known = set(REGISTRY_TOOLS) | set(ALWAYS_ON_TOOLS)
+            for k, v in stored.items():
+                if v == "" or v in known:
+                    _LLM_RESOLUTION_CACHE.setdefault(k, v)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[ToolResolver] Could not read resolution cache: {e}")
+
+
+def _save_resolution_cache() -> None:
+    try:
+        os.makedirs(os.path.dirname(_RESOLUTION_CACHE_PATH), exist_ok=True)
+        with open(_RESOLUTION_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(_LLM_RESOLUTION_CACHE, f, indent=2, sort_keys=True)
+    except Exception as e:
+        print(f"[ToolResolver] Could not write resolution cache: {e}")
+
+
+def _llm_resolve_tool_key(raw_name: str, context: str | None = None) -> str | None:
+    """Ask the model which real connector a name means — or none of them.
+
+    The answer is only ever accepted if it names a connector that actually
+    exists, so the model can decline but never invent a capability.
+    """
+    key = _normalize_tool_name(raw_name)
+    _load_resolution_cache()
+    if key in _LLM_RESOLUTION_CACHE:
+        cached = _LLM_RESOLUTION_CACHE[key]
+        return cached or None
+    if not GEMINI_API_KEY:
+        return None
+
+    # Always-on tools are offered too. Without them the model could only pick a
+    # credentialed service, so a request to "edit text" became Google Docs and
+    # the gate then asked for Google credentials on that agent's behalf — when
+    # write_file was right there, free, and already bound.
+    catalogue = "\n".join(
+        [f"- {name}: {spec['declaration']['description']} (already available, no setup)"
+         for name, spec in ALWAYS_ON_TOOLS.items()]
+        + [f"- {name}: {spec['declaration']['description']}"
+           for name, spec in REGISTRY_TOOLS.items()]
+    )
+    prompt = (
+        "An agent asked for a tool by name. Decide which of the real connectors "
+        "below actually provides that capability.\n\n"
+        f"REQUESTED TOOL NAME: {raw_name}\n"
+        + (f"WHAT THE AGENT IS DOING: {context}\n" if context else "")
+        + f"\nREAL CONNECTORS AVAILABLE:\n{catalogue}\n\n"
+        "Answer with the connector's exact name on a single line, or the single "
+        "word none.\n"
+        "Answer none when the request is not one of these capabilities — including "
+        "when it names a local program, a desktop app, a model runtime, a "
+        "programming library, or a general category of software rather than a "
+        "service these connectors reach. Guessing is worse than none: a wrong "
+        "match makes the agent act as though it has a capability it does not have."
+    )
+    try:
+        from google import genai
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        answer = _normalize_tool_name((resp.text or "").strip().splitlines()[0] if resp.text else "")
+    except Exception as e:
+        print(f"[ToolResolver] Could not resolve '{raw_name}' via model: {e}")
+        return None
+
+    known = set(REGISTRY_TOOLS) | set(ALWAYS_ON_TOOLS)
+    resolved = answer if answer in known else ""
+    if answer and not resolved and answer != "none":
+        print(f"[ToolResolver] Model suggested '{answer}' for '{raw_name}', which is not a real connector — treating as unavailable.")
+    _LLM_RESOLUTION_CACHE[key] = resolved
+    _save_resolution_cache()
+    return resolved or None
+
+
+def _resolve_tool_key(raw_name: str, context: str | None = None, allow_llm: bool = True) -> str:
+    """Map whatever an agent called a tool onto a canonical connector key.
+
+    Exact match, then the curated alias table, then whole-token rules — all
+    free and deterministic. Only a name none of those recognise reaches the
+    model, and its answer must name a connector that exists. Unresolvable
+    names come back unchanged so the caller reports them as unavailable.
+    """
+    key = _normalize_tool_name(raw_name)
+    if not key:
+        return key
     if key in REGISTRY_TOOLS:
         return key
+    # Always-on tools need no credentials and must never reach the model
+    # fallback — match them by their key and by the name agents actually call.
+    if key in ALWAYS_ON_TOOLS:
+        return key
+    for always_key, spec in ALWAYS_ON_TOOLS.items():
+        if key == spec["declaration"]["name"]:
+            return always_key
     if key in TOOL_ALIASES:
         return TOOL_ALIASES[key]
-    for canonical, keywords in _FUZZY_TOOL_GROUPS:
-        if any(kw in key for kw in keywords):
-            return canonical
+    # An enabled MCP server, by name — exact match only. MCP servers are
+    # user-configured, so their names are known strings, not something to guess at.
+    mcp_servers = _mcp_server_names()
+    if key in mcp_servers:
+        return MCP_KEY_PREFIX + key
+    ruled = _token_rule_match(key)
+    if ruled:
+        return ruled
+
+    # Same three tiers again on the name minus its generic filler, so
+    # "arxiv_search_api" and "arxiv_search" can't diverge.
+    stem = _strip_generic_suffixes(key)
+    if stem != key:
+        if stem in REGISTRY_TOOLS or stem in ALWAYS_ON_TOOLS:
+            return stem
+        if stem in TOOL_ALIASES:
+            return TOOL_ALIASES[stem]
+        ruled = _token_rule_match(stem)
+        if ruled:
+            return ruled
+
+    if allow_llm:
+        # Ask about the stem, so every variant of one concept shares an answer.
+        guessed = _llm_resolve_tool_key(stem, context)
+        if guessed:
+            return guessed
     return key
 
 REGISTRY_TOOLS = {
@@ -333,21 +586,22 @@ REGISTRY_TOOLS = {
 }
 
 
-def get_tools_for_execution_agent(tools_needed: list[str], project_name: str):
+def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, context: str | None = None):
     """
     Automatically resolves an execution agent's `tools_needed` (from the Brain's
     brief) into (gemini_function_declarations, handler_map, unavailable) —
     no manual per-agent wiring required.
 
     A tool is bound for real only if:
-      - it's an always-on tool (write_file/read_file/list_deliverables), or
+      - it's an always-on tool (files, internal memory search), or
       - its backing service is configured/up in api_registry.json (i.e. the
         user approved it at the API/MCP Plugging Gate) AND a real handler
         exists in REGISTRY_TOOLS.
 
     Anything requested but not resolvable is returned in `unavailable` so the
     agent's system prompt can tell it honestly, instead of it fabricating a
-    fake success for a tool that doesn't actually exist.
+    fake success for a tool that doesn't actually exist. `context` (the asking
+    agent's role/brief) only sharpens the model fallback for unfamiliar names.
     """
     from connectors.api_connector import get_service_status
 
@@ -362,15 +616,25 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str):
 
     unavailable = []
     for raw_name in (tools_needed or []):
-        raw_key = re.sub(r"[\s-]+", "_", (raw_name or "").strip().lower())
-        if raw_key in ("", "none", "n/a"):
+        raw_key = _normalize_tool_name(raw_name)
+        if raw_key in ("", "none", "n/a", "na"):
             continue
-        if raw_key in ("write_file", "read_file", "list_deliverables"):
-            continue  # already bound above, always-on
         if raw_key in ("document_reader", "file_reader"):
             continue  # covered by the always-on read_file tool
 
-        key = _resolve_tool_key(raw_key)
+        key = _resolve_tool_key(raw_key, context=context)
+
+        if key in ALWAYS_ON_TOOLS:
+            continue  # bound above for every agent, no credentials involved
+
+        if key.startswith(MCP_KEY_PREFIX):
+            server_name = key[len(MCP_KEY_PREFIX):]
+            if _bind_mcp_server(server_name, declarations, handlers, seen):
+                continue
+            unavailable.append(
+                f"{raw_name} (MCP server '{server_name}' is enabled but did not start — do not claim to have used it)"
+            )
+            continue
 
         if key in REGISTRY_TOOLS:
             # Check BOTH the exact name Brain used (raw_key) and the resolved
@@ -398,6 +662,153 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str):
             unavailable.append(f"{raw_name} (no real connector implemented yet — do not claim to have used it)")
 
     return declarations, handlers, unavailable
+
+
+# ---------------------------------------------------------------------------
+# MCP SERVERS — discovered at runtime, not declared here
+# ---------------------------------------------------------------------------
+
+MCP_KEY_PREFIX = "mcp:"
+
+# Gemini accepts only a subset of JSON Schema. MCP servers send whatever they
+# like ($schema, additionalProperties, anyOf, defaults...), and an unknown key
+# makes Gemini reject the whole declaration — which would silently cost the
+# agent every tool on that server.
+_SCHEMA_KEEP = {"type", "properties", "required", "items", "enum", "description"}
+
+
+def _sanitize_schema(schema):
+    if not isinstance(schema, dict):
+        return {"type": "string"}
+    out = {}
+    for k, v in schema.items():
+        if k not in _SCHEMA_KEEP:
+            continue
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {pk: _sanitize_schema(pv) for pk, pv in v.items()}
+        elif k == "items":
+            out[k] = _sanitize_schema(v)
+        else:
+            out[k] = v
+    if "type" not in out:
+        out["type"] = "object" if "properties" in out else "string"
+    if out["type"] == "object" and "properties" not in out:
+        out["properties"] = {}
+    return out
+
+
+def _mcp_function_name(server: str, tool: str) -> str:
+    """Namespaced so an MCP tool can never shadow a built-in.
+
+    The filesystem server offers its own read_file and write_file; without a
+    prefix they would overwrite the always-on handlers that keep agents
+    sandboxed inside the project's Deliverables folder.
+    """
+    raw = f"mcp_{server}_{tool}"
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", raw)
+    return safe[:64]
+
+
+def _mcp_server_names() -> dict:
+    try:
+        from connectors.mcp_client import enabled_servers
+        return enabled_servers()
+    except Exception:
+        return {}
+
+
+def _bind_mcp_server(server_name: str, declarations: list, handlers: dict, seen: set) -> bool:
+    """Add every tool a running MCP server offers. False if it isn't running."""
+    try:
+        from connectors.mcp_client import ensure_server_running, call_mcp_tool
+    except Exception as e:
+        print(f"[ToolResolver] MCP client unavailable: {e}")
+        return False
+
+    info = ensure_server_running(server_name)
+    if not info or info.get("status") != "up":
+        return False
+
+    for tool in info.get("tools", []):
+        fn_name = _mcp_function_name(server_name, tool["name"])
+        if fn_name in seen:
+            continue
+        declarations.append({
+            "name": fn_name,
+            "description": f"[MCP:{server_name}] {tool.get('description') or tool['name']}",
+            "parameters": _sanitize_schema(tool.get("input_schema")),
+        })
+
+        def _make_handler(srv=server_name, tname=tool["name"]):
+            def _handler(project_name: str, agent_id: str, **kwargs):
+                return call_mcp_tool(srv, tname, kwargs)
+            return _handler
+
+        handlers[fn_name] = _make_handler()
+        seen.add(fn_name)
+    return True
+
+
+def classify_requested_tools(names, context: str | None = None) -> dict:
+    """Sort raw tool names into what the Plugging Gate should actually ask about.
+
+    Returns {"connectable": {canonical: [raw names]}, "always_on": [...],
+             "not_a_service": [...]}.
+
+    `connectable` is the only bucket that can need a credential. `not_a_service`
+    is everything no connector provides — local binaries, model runtimes,
+    software categories. Asking the user for an API key for `nvidia-smi` was
+    never going to lead anywhere.
+    """
+    connectable: dict[str, list[str]] = {}
+    always_on: list[str] = []
+    not_a_service: list[str] = []
+
+    for raw in (names or []):
+        raw_key = _normalize_tool_name(raw)
+        if raw_key in ("", "none", "n/a", "na"):
+            continue
+        key = _resolve_tool_key(raw_key, context=context)
+        if key in ALWAYS_ON_TOOLS:
+            if raw not in always_on:
+                always_on.append(raw)
+        elif key in REGISTRY_TOOLS or key.startswith(MCP_KEY_PREFIX):
+            connectable.setdefault(key, [])
+            if raw not in connectable[key]:
+                connectable[key].append(raw)
+        elif raw not in not_a_service:
+            not_a_service.append(raw)
+
+    return {"connectable": connectable, "always_on": always_on, "not_a_service": not_a_service}
+
+
+def describe_connectable(key: str) -> dict:
+    """What the gate needs to render one required item: is it an API or an MCP
+    server, and is it actually usable right now (verified, not asserted)."""
+    if key.startswith(MCP_KEY_PREFIX):
+        server = key[len(MCP_KEY_PREFIX):]
+        try:
+            from connectors.mcp_client import ensure_server_running
+            info = ensure_server_running(server)
+        except Exception as e:
+            info = {"status": "down", "tools": [], "error": str(e)}
+        return {
+            "kind": "mcp",
+            "service": server,
+            "configured": info.get("status") == "up",
+            "current_status": info.get("status", "down"),
+            "error": info.get("error"),
+            "tools": [t["name"] for t in info.get("tools", [])],
+        }
+
+    from connectors.api_connector import get_service_status
+    status = get_service_status(key)
+    return {
+        "kind": "api",
+        "service": key,
+        "configured": status != "unknown",
+        "current_status": status,
+    }
 
 
 def run_tool(handler_map: dict, project_name: str, agent_id: str, tool_name: str, tool_args: dict) -> dict:

@@ -4553,7 +4553,35 @@
 
         let intakeState = null;
 
+        // The clarification modal only exists here, so a pipeline started from
+        // another page pulls the user over to the Brain. Remember where they came
+        // from and put them back there once the gate is done — being in execution
+        // mode and landing on the Brain is disorienting.
+        let intakeReturnTo = null;
+        const INTAKE_RETURN_PAGES = {
+            execution: 'execution.html',
+            plan: 'plan.html',
+            apis: 'provider_comparison.html'
+        };
+
+        function returnFromIntake(message) {
+            const target = intakeReturnTo;
+            intakeReturnTo = null;
+            if (!target) {
+                if (message) showFloatingNotification(message);
+                return;
+            }
+            // Navigating now would kill a toast raised here, so hand it over.
+            if (message) {
+                try { sessionStorage.setItem('jarvis_pending_toast', message); } catch (e) { /* toast is optional */ }
+            }
+            window.location.href = target;
+        }
+
         function resetIntakeState(draftId, task, projectName) {
+            // A fresh intake started here owns the page — never inherit an older
+            // handover's return target.
+            intakeReturnTo = null;
             intakeState = {
                 draftId,
                 task: task || '',
@@ -4615,7 +4643,9 @@
                     body: JSON.stringify({ task: draft.task })
                 });
                 const data = await res.json();
-                if (data.plan_id) showFloatingNotification(`Pipeline ${data.plan_id} started`);
+                intakeState = null;
+                returnFromIntake(data.plan_id ? `Pipeline ${data.plan_id} started` : null);
+                return;
             } catch (e) {
                 appendChatMessage('Could not start the pipeline. Is the server running?', 'system');
             }
@@ -5043,8 +5073,8 @@
                     details: intakeState.details
                 });
                 closeIntakeModal();
-                showFloatingNotification(`Pipeline ${data.plan_id} started — ${data.project_name}`);
                 intakeState = null;
+                returnFromIntake(`Pipeline ${data.plan_id} started — ${data.project_name}`);
             } catch (e) {
                 showFloatingNotification('Could not start the pipeline');
                 renderIntake();
@@ -5059,13 +5089,18 @@
             try {
                 await intakePost('/pipeline/intake/cancel', { draft_id: draftId });
             } catch (e) { /* the draft expires on its own anyway */ }
+            // Cancelling shouldn't strand them on the Brain either.
+            returnFromIntake(null);
         }
 
         // A pipeline started by voice on another page hands the draft over through
         // the URL, because /state gives a ui_action to whichever page polls first.
         (async function resumeHandedOverIntake() {
-            const draftId = new URLSearchParams(window.location.search).get('intake');
+            const params = new URLSearchParams(window.location.search);
+            const draftId = params.get('intake');
             if (!draftId) return;
+            // Only pages we know about, so a crafted link can't bounce anyone off-site.
+            const returnTo = INTAKE_RETURN_PAGES[params.get('from')] || null;
             // Clear it so a refresh does not re-open an ask the user already answered.
             history.replaceState(null, '', window.location.pathname);
             try {
@@ -5073,6 +5108,8 @@
                 if (!res.ok) return;
                 const draft = await res.json();
                 showIntakeAsk(draft.draft_id, draft.task, draft.project_name);
+                // After showIntakeAsk — resetIntakeState clears the return target.
+                intakeReturnTo = returnTo;
                 intakeState.details = draft.details || '';
                 intakeState.files = draft.files || [];
             } catch (e) {
@@ -5089,6 +5126,7 @@
         });
 
     </script>
+    <script src="sections_ui.js"></script>
 </body>
 
 </html>

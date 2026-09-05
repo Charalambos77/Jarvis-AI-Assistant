@@ -833,18 +833,49 @@
         </div>
       </div>
 
-      <!-- Right: Sticky Planner / Calculator -->
-      <div style="position: sticky; top: 24px; height: fit-content;">
-        <!-- Global Configured APIs Panel -->
+      <!-- Right: Connected tools / Planner.
+           Deliberately NOT sticky. Sticky pinned this column to the viewport,
+           so the panels slid down through the document as you scrolled and
+           never sat still. They stay where they are on load instead. -->
+      <div style="height: fit-content;">
+        <!-- Connected: every tool agents can actually use, APIs and MCP servers -->
         <div class="panel" style="border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);">
           <div class="panel-title" style="color: var(--emerald);">
-            <span>Global Active APIs</span>
+            <span>Connected</span>
             <span class="mono" id="configured-tools-count" style="font-size: 10px; background: rgba(16, 185, 129, 0.15); border: 1px solid var(--emerald); color: var(--emerald); padding: 2px 8px; border-radius: 12px;">0 Active</span>
           </div>
-          <p style="font-size: 11px; color: var(--text-muted); margin-top: -10px; margin-bottom: 12px;">APIs connected here are saved to your global environment and accessible across all current and future projects.</p>
-          <div class="stack-list" id="global-configured-tools-list">
-            <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px;">Loading global credentials...</div>
+          <p style="font-size: 11px; color: var(--text-muted); margin-top: -10px; margin-bottom: 12px;">
+            Everything your agents can reach, and what each one is doing right now. Changes here are global — every current and future project sees them.
+          </p>
+
+          <div style="font-size: 10px; letter-spacing: 1px; color: var(--text-muted); margin: 4px 0 6px; font-family: 'Space Mono', monospace;">APIs</div>
+          <div class="stack-list" id="connected-apis-list">
+            <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px;">Loading…</div>
           </div>
+
+          <div style="font-size: 10px; letter-spacing: 1px; color: var(--text-muted); margin: 14px 0 6px; font-family: 'Space Mono', monospace;">MCP SERVERS</div>
+          <div class="stack-list" id="connected-mcps-list">
+            <div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px;">Loading…</div>
+          </div>
+
+          <details style="margin-top: 14px;">
+            <summary style="font-size: 10px; letter-spacing: 1px; color: var(--text-muted); cursor: pointer; font-family: 'Space Mono', monospace;">ALWAYS ON</summary>
+            <div class="stack-list" id="connected-alwayson-list" style="margin-top: 6px;"></div>
+          </details>
+        </div>
+
+        <!-- Inline connect form, shown when a service needs credentials -->
+        <div class="panel" id="connect-form-panel" style="display: none; border-color: rgba(6, 182, 212, 0.4);">
+          <div class="panel-title" style="color: var(--cyan);">
+            <span id="connect-form-title">Connect</span>
+            <button onclick="closeConnectForm()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px;">✕</button>
+          </div>
+          <div id="connect-form-fields"></div>
+          <div id="connect-form-note" style="font-size: 10px; color: var(--text-muted); margin: 8px 0;"></div>
+          <button id="connect-form-submit" onclick="submitConnectForm()"
+                  style="width: 100%; padding: 8px; background: rgba(6,182,212,0.15); border: 1px solid rgba(6,182,212,0.5); color: var(--cyan); font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; border-radius: 6px; cursor: pointer;">
+            Connect
+          </button>
         </div>
 
         <!-- Selected Stack Panel -->
@@ -3524,6 +3555,23 @@
       toast.textContent = "Hello. I am Jarvis. How can I help you compare AI providers today?";
     }
 
+    // A page that sent us somewhere else (the clarification gate on the command
+    // centre) leaves its confirmation here, because its own toast dies with the
+    // navigation.
+    (function showHandedOverToast() {
+      let pending = null;
+      try {
+        pending = sessionStorage.getItem('jarvis_pending_toast');
+        if (pending) sessionStorage.removeItem('jarvis_pending_toast');
+      } catch (e) { return; }
+      if (!pending) return;
+      setTimeout(() => {
+        createJarvisToast();
+        const toast = document.getElementById('jarvis-toast');
+        if (toast) toast.textContent = pending;
+      }, 400);
+    })();
+
     // Report current page to Jarvis backend
     fetch('/jarvis/state-update', {
         method: 'POST',
@@ -3561,9 +3609,11 @@
             if (act.type === 'pipeline_intake_ask') {
               // The intake modal lives on the command centre, and /state hands a
               // ui_action to whichever page polls first — so carry the draft over
-              // instead of swallowing the ask here.
+              // instead of swallowing the ask here. `from` brings the user back
+              // here once the gate is done.
               window.location.href =
-                'command_center.html?intake=' + encodeURIComponent(act.draft_id);
+                'command_center.html?intake=' + encodeURIComponent(act.draft_id) +
+                '&from=apis';
             } else if (act.type === 'navigate' && act.url) {
               window.location.href = act.url;
             } else if (act.type === 'control_interface') {
@@ -3587,40 +3637,255 @@
         });
     }
 
+    // ---------------------------------------------------------------
+    // Connected panel — APIs and MCP servers, viewable and switchable
+    // ---------------------------------------------------------------
+    let connectedBusy = false;   // pauses the refresh while you're mid-action
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s == null ? '' : String(s);
+      return d.innerHTML;
+    }
+
+    function connectedToast(msg) {
+      const toast = document.getElementById('jarvis-toast');
+      if (!toast) return;
+      toast.textContent = msg;
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => { toast.textContent = 'Jarvis standing by.'; }, 5000);
+    }
+
     async function fetchGlobalConfiguredTools() {
+      if (connectedBusy) return;
       try {
-        const res = await fetch('/api/configured-tools');
+        const res = await fetch('/api/tools/overview');
         const data = await res.json();
-        const tools = data.tools || {};
-        const container = document.getElementById('global-configured-tools-list');
-        const countBadge = document.getElementById('configured-tools-count');
+        renderConnectedApis(data.apis || []);
+        renderConnectedMcps(data.mcps || []);
+        renderAlwaysOn(data.always_on || []);
 
-        const toolKeys = Object.keys(tools);
-        if (countBadge) countBadge.innerText = `${toolKeys.length} Active`;
-
-        if (toolKeys.length === 0) {
-          container.innerHTML = `<div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 10px; font-style: italic;">No active APIs configured yet. Connect tools in your plan or environmental setup.</div>`;
-          return;
-        }
-
-        let html = "";
-        toolKeys.forEach(key => {
-          const cfg = tools[key];
-          const method = cfg.method_id ? `(${cfg.method_id})` : '';
-          const updated = cfg.last_updated ? `Updated: ${cfg.last_updated}` : '';
-          html += `
-            <div class="stack-item" style="border-left: 3px solid var(--emerald); background: rgba(16, 185, 129, 0.05);">
-              <div>
-                <span class="stack-layer" style="color: var(--emerald);">${key}</span> ${method}
-                <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">${updated}</div>
-              </div>
-              <span class="stack-selection" style="color: #22c55e; font-size: 10px;">✅ ACTIVE</span>
-            </div>
-          `;
-        });
-        container.innerHTML = html;
+        const activeApis = (data.apis || []).filter(a => a.configured).length;
+        const activeMcps = (data.mcps || []).filter(m => m.status === 'up').length;
+        const badge = document.getElementById('configured-tools-count');
+        if (badge) badge.innerText = `${activeApis + activeMcps} Active`;
       } catch (err) {
-        console.error("Error fetching configured tools:", err);
+        console.error("Error fetching connected tools:", err);
+      }
+    }
+
+    function renderConnectedApis(apis) {
+      const container = document.getElementById('connected-apis-list');
+      if (!container) return;
+      if (!apis.length) {
+        container.innerHTML = `<div style="font-size:11px; color:var(--text-muted); text-align:center; padding:10px; font-style:italic;">No APIs known yet.</div>`;
+        return;
+      }
+      container.innerHTML = apis.map(a => {
+        const on = a.configured;
+        const colour = on ? 'var(--emerald)' : 'rgba(255,255,255,0.15)';
+        const bg = on ? 'rgba(16, 185, 129, 0.05)' : 'transparent';
+        // Connected but unusable is a real state worth naming: the registry
+        // says up, yet no handler exists, so no agent can call it.
+        const orphan = on && !a.has_handler;
+        const note = orphan
+          ? `<div style="font-size:9px; color:#fbbf24; margin-top:2px;">Connected, but Jarvis has no connector for it yet — agents can't call it.</div>`
+          : (a.has_handler
+              ? `<div style="font-size:9px; color:var(--text-muted); margin-top:2px;">Agents call it as <span class="mono">${esc(a.tool_name)}</span>${a.handled_by ? ` (via ${esc(a.handled_by)})` : ''}</div>`
+              : `<div style="font-size:9px; color:var(--text-muted); margin-top:2px;">No connector implemented.</div>`);
+        const meta = a.last_updated ? `<div style="font-size:9px; color:var(--text-muted);">Updated: ${esc(a.last_updated)}</div>` : '';
+        const btn = on
+          ? `<button onclick="disconnectApi('${esc(a.service)}')" style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); color:#f59e0b; font-size:9px; font-weight:700; padding:2px 8px; border-radius:6px; cursor:pointer;">DISCONNECT</button>`
+          : `<button onclick="openConnectForm('${esc(a.service)}', '${esc(a.auth)}')" style="background:rgba(6,182,212,0.15); border:1px solid rgba(6,182,212,0.4); color:var(--cyan); font-size:9px; font-weight:700; padding:2px 8px; border-radius:6px; cursor:pointer;">CONNECT</button>`;
+        return `
+          <div class="stack-item" style="border-left:3px solid ${colour}; background:${bg}; align-items:flex-start;">
+            <div style="flex:1; min-width:0;">
+              <span class="stack-layer" style="color:${on ? 'var(--emerald)' : '#9CA3AF'};">${esc(a.service)}</span>
+              <span style="font-size:9px; color:var(--text-muted);">${a.auth === 'oauth' ? '(OAuth)' : '(API key)'}</span>
+              ${note}${meta}
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+              <span class="stack-selection" style="color:${on ? '#22c55e' : '#6b7280'}; font-size:10px;">${on ? '✅ ENABLED' : '⭘ DISABLED'}</span>
+              ${btn}
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function renderConnectedMcps(mcps) {
+      const container = document.getElementById('connected-mcps-list');
+      if (!container) return;
+      if (!mcps.length) {
+        container.innerHTML = `<div style="font-size:11px; color:var(--text-muted); text-align:center; padding:10px; font-style:italic;">No MCP servers configured. Add one to mcp_registry.json.</div>`;
+        return;
+      }
+      container.innerHTML = mcps.map(m => {
+        const up = m.status === 'up';
+        const failed = m.status === 'down';
+        // "enabled" means switched on but not started yet — it starts when an
+        // agent or a gate first needs it. Not the same as running, and not a
+        // failure either, so it gets its own label rather than a scary one.
+        const idle = m.status === 'enabled';
+        const colour = up ? 'var(--emerald)' : (failed ? '#ef4444' : (idle ? 'rgba(6,182,212,0.5)' : 'rgba(255,255,255,0.15)'));
+        const label = up ? '✅ RUNNING' : (failed ? '❌ FAILED' : (idle ? '◷ ENABLED (idle)' : '⭘ DISABLED'));
+        const labelColour = up ? '#22c55e' : (failed ? '#fca5a5' : (idle ? '#06b6d4' : '#6b7280'));
+        const cmd = [m.command, ...(m.args || [])].join(' ');
+        const tools = (m.tools && m.tools.length)
+          ? `<div style="font-size:9px; color:var(--text-muted); margin-top:2px;">Tools: <span class="mono">${esc(m.tools.join(', '))}</span></div>`
+          : '';
+        const err = (failed && m.error)
+          ? `<div style="font-size:9px; color:#fca5a5; margin-top:2px;">${esc(String(m.error).slice(0, 160))}</div>`
+          : '';
+        const wantOn = !m.enabled;
+        const btnColour = m.enabled ? '245,158,11' : '6,182,212';
+        return `
+          <div class="stack-item" style="border-left:3px solid ${colour}; background:${up ? 'rgba(16,185,129,0.05)' : 'transparent'}; align-items:flex-start;">
+            <div style="flex:1; min-width:0;">
+              <span class="stack-layer" style="color:${up ? 'var(--emerald)' : '#9CA3AF'};">${esc(m.name)}</span>
+              <div style="font-size:9px; color:var(--text-muted); margin-top:2px;">${esc(m.description || '')}</div>
+              <div style="font-size:9px; color:#64748b; margin-top:2px; font-family:'Space Mono',monospace; word-break:break-all;">${esc(cmd)}</div>
+              ${tools}${err}
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+              <span class="stack-selection" style="color:${labelColour}; font-size:10px;">${label}</span>
+              <button onclick="toggleMcp('${esc(m.name)}', ${wantOn}, this)"
+                      style="background:rgba(${btnColour},0.15); border:1px solid rgba(${btnColour},0.4); color:rgb(${btnColour}); font-size:9px; font-weight:700; padding:2px 8px; border-radius:6px; cursor:pointer;">
+                ${m.enabled ? 'DISABLE' : 'ENABLE'}
+              </button>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function renderAlwaysOn(tools) {
+      const container = document.getElementById('connected-alwayson-list');
+      if (!container) return;
+      container.innerHTML = tools.map(t => `
+        <div class="stack-item" style="border-left:3px solid rgba(255,255,255,0.15);">
+          <div style="flex:1; min-width:0;">
+            <span class="stack-layer" style="color:#9CA3AF;">${esc(t.name)}</span>
+            <div style="font-size:9px; color:var(--text-muted);">${esc(String(t.description).slice(0, 90))}</div>
+          </div>
+          <span class="stack-selection" style="color:#6b7280; font-size:10px;">NO SETUP</span>
+        </div>`).join('');
+    }
+
+    async function toggleMcp(name, enable, btn) {
+      connectedBusy = true;
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = enable ? 'STARTING…' : 'STOPPING…';
+      try {
+        const res = await fetch('/api/mcp/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, enabled: enable })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'toggle failed');
+        connectedToast(
+          data.status === 'up' ? `MCP "${name}" running — ${data.tools.length} tool(s).`
+            : data.status === 'disabled' ? `MCP "${name}" disabled.`
+            : `MCP "${name}" could not start: ${data.error || 'unknown error'}`
+        );
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = original;
+        connectedToast(`Could not change "${name}": ${e.message}`);
+      } finally {
+        connectedBusy = false;
+        fetchGlobalConfiguredTools();
+      }
+    }
+
+    async function disconnectApi(service) {
+      if (!confirm(`Disconnect ${service}? Agents stop being offered it. Your stored credentials are kept, so you can reconnect without re-entering them.`)) return;
+      connectedBusy = true;
+      try {
+        const res = await fetch('/api/tools/disconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ service_name: service })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'failed');
+        connectedToast(`${service} disconnected.`);
+      } catch (e) {
+        connectedToast(`Could not disconnect ${service}: ${e.message}`);
+      } finally {
+        connectedBusy = false;
+        fetchGlobalConfiguredTools();
+      }
+    }
+
+    let connectingService = null;
+    let connectingAuth = 'api_key';
+
+    function openConnectForm(service, auth) {
+      connectingService = service;
+      connectingAuth = auth || 'api_key';
+      connectedBusy = true;
+      document.getElementById('connect-form-title').textContent = `Connect ${service}`;
+      const fields = document.getElementById('connect-form-fields');
+      const inputStyle = "width:100%; padding:7px 9px; margin-bottom:8px; background:rgba(0,0,0,0.4); border:1px solid var(--panel-border); color:#e5e7eb; font-family:'Space Mono',monospace; font-size:11px; border-radius:6px;";
+      if (connectingAuth === 'oauth') {
+        fields.innerHTML = `
+          <input id="cf-client-id" placeholder="OAuth Client ID" style="${inputStyle}">
+          <input id="cf-client-secret" type="password" placeholder="OAuth Client Secret" style="${inputStyle}">`;
+        document.getElementById('connect-form-note').textContent =
+          'Your browser will open for consent. Approve there, and the tokens are stored for you.';
+      } else {
+        fields.innerHTML = `<input id="cf-api-key" type="password" placeholder="API key" style="${inputStyle}">`;
+        document.getElementById('connect-form-note').textContent =
+          'Saved to your .env and marked active for every project.';
+      }
+      document.getElementById('connect-form-panel').style.display = 'block';
+      document.getElementById('connect-form-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function closeConnectForm() {
+      document.getElementById('connect-form-panel').style.display = 'none';
+      connectingService = null;
+      connectedBusy = false;
+      fetchGlobalConfiguredTools();
+    }
+
+    async function submitConnectForm() {
+      if (!connectingService) return;
+      const btn = document.getElementById('connect-form-submit');
+      let credentials = {};
+      if (connectingAuth === 'oauth') {
+        const id = (document.getElementById('cf-client-id').value || '').trim();
+        const secret = (document.getElementById('cf-client-secret').value || '').trim();
+        if (!id || !secret) { connectedToast('Both Client ID and Client Secret are required.'); return; }
+        credentials = { client_id: id, client_secret: secret };
+      } else {
+        const key = (document.getElementById('cf-api-key').value || '').trim();
+        if (!key) { connectedToast('An API key is required.'); return; }
+        credentials = { api_key: key };
+      }
+
+      btn.disabled = true;
+      btn.textContent = connectingAuth === 'oauth' ? 'Waiting for consent…' : 'Connecting…';
+      try {
+        const res = await fetch('/api/connect-tool', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            service_name: connectingService,
+            credentials,
+            method_id: connectingAuth
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'connect failed');
+        connectedToast(`${connectingService} connected.`);
+        closeConnectForm();
+      } catch (e) {
+        connectedToast(`Could not connect ${connectingService}: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Connect';
       }
     }
 

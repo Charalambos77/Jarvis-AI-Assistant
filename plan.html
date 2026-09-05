@@ -1084,6 +1084,97 @@
             }
         }
 
+        // The gate payload now says who needs each service and how they asked for
+        // it. `purpose` only exists when the research happened to describe the
+        // same service, so it can't be read blindly any more.
+        function gateItemSubtitle(r) {
+            if (r.purpose) return String(r.purpose).slice(0, 80) + '...';
+            const who = (r.required_by_agents || []).length;
+            if (who) return `Needed by ${who} agent${who > 1 ? 's' : ''}`;
+            if (r.kind === 'mcp') return 'MCP server';
+            return 'Required by this pipeline';
+        }
+
+        // Which phase asked for a service. Driven by required_by_agents (agent ids
+        // carry their own cycle/exec suffix); recommended_by is the older shape and
+        // stays as a fallback so historical plans still group correctly.
+        function gateItemCategory(r) {
+            const sources = (r.required_by_agents && r.required_by_agents.length)
+                ? r.required_by_agents
+                : (Array.isArray(r.recommended_by) ? r.recommended_by : []);
+            const joined = sources.join(', ').toLowerCase();
+            if (!joined) return { category: 'brain', label: 'Brain' };
+            const cycle = joined.match(/cycle\s*(\d+)/);
+            if (cycle) return { category: `cycle${cycle[1]}`, label: sources.join(', ') };
+            if (joined.includes('exec')) return { category: 'execution', label: sources.join(', ') };
+            return { category: 'brain', label: sources.join(', ') };
+        }
+
+        // The gate's data is a snapshot taken when the gate opened, so toggling a
+        // server can't change it. Re-read the servers' live status and patch the
+        // MCP entries in place, so the card shows what is true right now.
+        async function refreshGateModal() {
+            try {
+                const res = await fetch('/api/mcp/servers');
+                if (!res.ok) return;
+                const byName = {};
+                ((await res.json()).servers || []).forEach(s => { byName[s.name] = s; });
+
+                const patch = (recs) => (recs || []).forEach(r => {
+                    if (r.kind !== 'mcp' || !byName[r.service]) return;
+                    const s = byName[r.service];
+                    r.current_status = s.status;
+                    r.configured = s.status === 'up';
+                    r.tools = s.tools || [];
+                    r.error = s.error || null;
+                });
+
+                const plan = plansCache.find(p => p.id === modalPlanId)
+                    || plansCache.find(p => p.id === selectedPlanId);
+                if (activeGateData) patch(activeGateData.tool_recommendations);
+                if (plan && plan.gate_data) patch(plan.gate_data.tool_recommendations);
+
+                const data = activeGateData || (plan ? plan.gate_data : null);
+                if (data) renderModalContent(lastGateId || 'api_mcp_plugging', data);
+            } catch (e) {
+                console.error('Could not refresh the gate view:', e);
+            }
+        }
+
+        async function toggleMcpServer(name, enable, btn) {
+            const original = btn ? btn.textContent : '';
+            if (btn) { btn.disabled = true; btn.textContent = enable ? 'Starting…' : 'Stopping…'; }
+            try {
+                const res = await fetch('/api/mcp/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, enabled: enable })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'toggle failed');
+                const toast = document.querySelector('.jarvis-toast');
+                if (toast) {
+                    toast.innerText = data.status === 'up'
+                        ? `MCP "${name}" connected — ${data.tools.length} tool(s).`
+                        : data.status === 'disabled'
+                            ? `MCP "${name}" disabled.`
+                            : `MCP "${name}" could not start: ${data.error || 'unknown error'}`;
+                    toast.classList.add('show');
+                    setTimeout(() => toast.classList.remove('show'), 4000);
+                }
+                // Re-render from the gate's own data so the card shows real status.
+                if (typeof refreshGateModal === 'function') refreshGateModal();
+            } catch (e) {
+                if (btn) { btn.disabled = false; btn.textContent = original; }
+                const toast = document.querySelector('.jarvis-toast');
+                if (toast) {
+                    toast.innerText = `Could not change "${name}": ${e.message}`;
+                    toast.classList.add('show');
+                    setTimeout(() => toast.classList.remove('show'), 4000);
+                }
+            }
+        }
+
         function isApiOrMcp(serviceName) {
             if (!serviceName) return false;
             const s = serviceName.toLowerCase();
@@ -1157,8 +1248,26 @@
         }
 
         // Poll sessions list
+        // Pipelines already inside a section must not offer to become one again.
+        let sectionPlanIds = new Set();
+
+        async function refreshSectionPlanIds() {
+            try {
+                const res = await fetch('/sections');
+                const data = await res.json();
+                const ids = new Set();
+                (data.sections || []).forEach(s => (s.plan_ids || []).forEach(id => ids.add(id)));
+                sectionPlanIds = ids;
+            } catch (e) {
+                // A failed lookup must not hide the plans themselves; the worst
+                // case is offering a button the server then refuses.
+                console.warn('Could not load sections:', e);
+            }
+        }
+
         async function fetchPlans() {
             try {
+                await refreshSectionPlanIds();
                 const res = await fetch('/plans');
                 const data = await res.json();
                 const plans = data.plans || [];
@@ -1241,11 +1350,25 @@
                     badgeClass = 'waiting';
                 }
 
+                // A finished pipeline can become a lasting section: its work stops
+                // being a one-off run and turns into standing knowledge that later
+                // pipelines build on.
+                // The handler is attached below rather than inlined: a project name
+                // carrying a quote would otherwise break out of the onclick attribute
+                // and the click would fall through to opening the plan.
+                const offerSection = !sectionPlanIds.has(plan.id) && plan.status !== 'running';
+                const makeSectionBtn = offerSection
+                    ? `<span class="plan-status-badge js-make-section" style="background: rgba(96,165,250,0.15); border: 1px solid #60A5FA; color: #60A5FA; margin-left: 6px;"
+                        title="Turn this pipeline into a section you can keep building on">
+                        + Make section
+                    </span>`
+                    : "";
+
                 const dateStr = new Date(plan.timestamp * 1000).toLocaleString();
                 card.innerHTML = `
                     <div class="plan-card-header">
                         <span class="plan-id-badge">ID: ${plan.id}</span>
-                        <span class="plan-status-badge ${badgeClass}" ${badgeOnclick}>${statusText}</span>${forceReexecuteBtn}
+                        <span class="plan-status-badge ${badgeClass}" ${badgeOnclick}>${statusText}</span>${forceReexecuteBtn}${makeSectionBtn}
                     </div>
                     <div class="plan-task">${plan.task}</div>
                     <div class="plan-meta">
@@ -1253,6 +1376,15 @@
                         <span>${dateStr}</span>
                     </div>
                 `;
+
+                const sectionBtn = card.querySelector('.js-make-section');
+                if (sectionBtn) {
+                    sectionBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        JarvisSections.createFrom(plan.id, plan.project_name || '');
+                    });
+                }
+
                 grid.appendChild(card);
             });
         }
@@ -1270,6 +1402,25 @@
             fetchPlans();
             setTimeout(drawConnectors, 100);
         }
+
+        // A page that sent us somewhere else (the clarification gate on the command
+        // centre) leaves its confirmation here, because its own toast dies with the
+        // navigation.
+        (function showHandedOverToast() {
+            let pending = null;
+            try {
+                pending = sessionStorage.getItem('jarvis_pending_toast');
+                if (pending) sessionStorage.removeItem('jarvis_pending_toast');
+            } catch (e) { return; }
+            if (!pending) return;
+            setTimeout(() => {
+                const toast = document.querySelector('.jarvis-toast');
+                if (!toast) return;
+                toast.innerText = pending;
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 4000);
+            }, 400);
+        })();
 
         async function resumePipeline(planId, forceReexecute) {
             forceReexecute = !!forceReexecute;
@@ -1543,8 +1694,8 @@
                              <div class="step-row" style="margin-bottom: 8px; display: flex; align-items: flex-start; gap: 8px;">
                                  <input type="checkbox" class="panel-gate-check" value="${r.service}" id="panel-check-${idx}" ${isChecked}>
                                  <label for="panel-check-${idx}" style="font-size: 11px; line-height: 1.3; color: #FFF; cursor: pointer; text-align: left;">
-                                     <strong>Tool: ${r.service}</strong><br>
-                                     <span style="color: var(--text-muted);">${r.purpose.slice(0, 80)}...</span>
+                                     <strong>${r.kind === 'mcp' ? 'MCP' : 'Tool'}: ${r.service}</strong><br>
+                                     <span style="color: var(--text-muted);">${gateItemSubtitle(r)}</span>
                                  </label>
                              </div>
                          `;
@@ -1763,23 +1914,9 @@
                 }
 
                 recs.forEach((r, idx) => {
-                    const recByStr = (r.recommended_by && Array.isArray(r.recommended_by)) ? r.recommended_by.join(', ') : "Brain";
-                    const recByLower = recByStr.toLowerCase();
-
-                    let category = "brain";
-                    if (recByLower.includes("exec")) {
-                        category = "execution";
-                    } else {
-                        const match = recByLower.match(/cycle\s*(\d+)/);
-                        if (match) {
-                            const cycleKey = `cycle${match[1]}`;
-                            if (!groups[cycleKey]) groups[cycleKey] = [];
-                            category = cycleKey;
-                        }
-                    }
-
+                    const { category, label } = gateItemCategory(r);
                     if (!groups[category]) groups[category] = [];
-                    groups[category].push({ tool: r, originalIndex: idx, recBy: recByStr });
+                    groups[category].push({ tool: r, originalIndex: idx, recBy: label });
                 });
 
                 const categories = Object.keys(groups);
@@ -1813,6 +1950,43 @@
                             const idx = item.originalIndex;
                             const recBy = item.recBy;
                             const isChecked = currentlyChecked.has(r.service) ? "checked" : "";
+
+                            // An MCP server is switched on, not credentialed. It has no
+                            // API key to fetch and no signup page to visit, so it gets its
+                            // own card: a toggle, the live handshake result, and the tools
+                            // it actually exposes.
+                            if (r.kind === 'mcp') {
+                                const up = r.current_status === 'up';
+                                const idle = r.current_status === 'enabled';
+                                const mcpStatus = up
+                                    ? `<span style="color:#a7f3d0; font-size:11px;">Status: ✅ Running</span>`
+                                    : idle
+                                        ? `<span style="color:#67e8f9; font-size:11px;">Status: ◷ Enabled, starts when needed</span>`
+                                        : `<span style="color:#fca5a5; font-size:11px;">Status: ⭘ Not running</span>`;
+                                const errHtml = (!up && r.error)
+                                    ? `<br><span style="color:#fca5a5; font-size:10px;">${htmlAttrEscape(String(r.error)).slice(0, 200)}</span>`
+                                    : "";
+                                const toolsHtml = (r.tools && r.tools.length)
+                                    ? `<br><strong style="color: var(--text-muted);">Tools it provides:</strong> <span style="font-family: 'Space Mono', monospace; font-size:10px;">${r.tools.join(', ')}</span>`
+                                    : "";
+                                const btnLabel = up ? 'Disable' : 'Enable';
+                                const btnColour = up ? '245, 158, 11' : '6, 182, 212';
+                                html += `
+                                    <div class="step-row" style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                        <input type="checkbox" id="check-${idx}" value="${r.service}" ${isChecked}>
+                                        <label for="check-${idx}">
+                                            <strong>MCP server: ${r.service}</strong> (Needed by: ${recBy})<br>
+                                            ${mcpStatus}
+                                            <button onclick='event.preventDefault(); toggleMcpServer("${htmlAttrEscape(r.service)}", ${up ? 'false' : 'true'}, this)'
+                                                    style="background: rgba(${btnColour}, 0.15); border: 1px solid rgba(${btnColour}, 0.4); color: rgb(${btnColour}); font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px; cursor: pointer; margin-left: 8px;">${btnLabel}</button>
+                                            ${errHtml}
+                                            ${toolsHtml}
+                                        </label>
+                                    </div>
+                                `;
+                                return;
+                            }
+
                             const prosText = (r.pros && Array.isArray(r.pros) && r.pros.length > 0) ? r.pros.join(', ') : "None";
                             const consText = (r.cons && Array.isArray(r.cons) && r.cons.length > 0) ? r.cons.join(', ') : "None";
                             const purposeText = r.purpose || "No purpose provided.";
@@ -1894,6 +2068,24 @@
                     }
                     html += `</div>`;
                 });
+
+                // Things agents asked for that no connector provides. Shown so the
+                // list isn't silently swallowed, but read-only — there is no key to
+                // give for a local binary or a category of software, and the agents
+                // are told plainly they don't have these.
+                const notConnectable = data.not_connectable || [];
+                if (notConnectable.length) {
+                    html += `
+                        <div style="margin-top: 14px; padding: 10px 12px; border: 1px dashed rgba(255,255,255,0.12); border-radius: 6px; background: rgba(255,255,255,0.02);">
+                            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">
+                                Requested but not connectable — nothing for you to do. The agents are told they don't have these:
+                            </div>
+                            <div style="font-family: 'Space Mono', monospace; font-size: 10px; color: #94a3b8;">
+                                ${notConnectable.map(n => htmlAttrEscape(String(n))).join(' · ')}
+                            </div>
+                        </div>
+                    `;
+                }
             } else if (gateId === "final_qa") {
                 const plan = plansCache.find(p => p.id === selectedPlanId);
                 const results = Array.isArray(data) ? data : (data.exec_results || (plan ? plan.exec_results : []) || []);
@@ -2384,9 +2576,11 @@
                         if (act.type === 'pipeline_intake_ask') {
                             // The intake modal lives on the command centre, and /state
                             // hands a ui_action to whichever page polls first — so carry
-                            // the draft over instead of swallowing the ask here.
+                            // the draft over instead of swallowing the ask here. `from`
+                            // brings the user back here once the gate is done.
                             window.location.href =
-                                'command_center.html?intake=' + encodeURIComponent(act.draft_id);
+                                'command_center.html?intake=' + encodeURIComponent(act.draft_id) +
+                                '&from=plan';
                         } else if (act.type === 'navigate' && act.url) {
                             window.location.href = act.url;
                         } else if (act.type === 'control_interface') {
@@ -2425,6 +2619,7 @@
             </div>
         </div>
     </div>
+    <script src="sections_ui.js"></script>
 </body>
 
 </html>

@@ -4,6 +4,29 @@ import io, os, json, shutil, sys
 import jarvis
 from google import genai
 
+# The suite drives the model by writing genai.FAKE["response"] and expects the
+# next Gemini call to hand that string straight back. Nothing in the real SDK
+# provides that, so the stub lives here: one fake client standing in for
+# jarvis.client, which is the only route the intake code takes to a model.
+genai.FAKE = {"response": '{"questions": []}'}
+
+
+class _FakeResponse:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeModels:
+    def generate_content(self, model=None, contents=None, **kwargs):
+        return _FakeResponse(genai.FAKE.get("response", ""))
+
+
+class _FakeClient:
+    models = _FakeModels()
+
+
+jarvis.client = _FakeClient()
+
 BASE = jarvis.BASE_DIR
 app = jarvis.app.test_client()
 
