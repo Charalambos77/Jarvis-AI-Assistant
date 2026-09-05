@@ -52,10 +52,17 @@ jarvis.handle_request = lambda text: f"Noted: {text}"
 # contexts are kept so the tests can prove what Jarvis was actually shown.
 MODEL_CONTEXTS = []
 NEXT_QUESTIONS = []
+# What the crew call returns, when a test wants the model's judgement rather
+# than the mechanical crew the code falls back to.
+NEXT_CREW = []
 
 
 def fake_model(instruction, context_text, parts=None):
     MODEL_CONTEXTS.append({"instruction": instruction, "context": context_text})
+    if "STANDING CREW" in instruction:
+        if not NEXT_CREW:
+            raise RuntimeError("no crew stubbed")
+        return NEXT_CREW.pop(0)
     if "the cleaned" in instruction:
         return {"plan_text": "CLEANED: " + instruction.split("EDITED TEXT:\n")[-1]}
     if '"brief_text"' in instruction:
@@ -101,6 +108,62 @@ mem = os.path.join(PROJECT_DIR, "memory", "high_value")
 os.makedirs(mem, exist_ok=True)
 with open(os.path.join(mem, "market_analyst_cycle1.json"), "w", encoding="utf-8") as f:
     f.write('{"pricing_findings": "Rental prices in Limassol peak in August at 90 euro a day."}')
+
+# The pipeline's real agent plan, exactly as save_agent_plan_file leaves it: a
+# readable page ending in the whole plan as JSON. This is what a section's
+# standing crew is built from, so the fixture has to be the real shape.
+AGENT_PLAN = """{
+  "task_summary": "Research the Cyprus car rental market",
+  "cycles": [
+    {
+      "cycle_id": 1,
+      "domain": "Market Pricing",
+      "goal": "What renting costs in Limassol, and when",
+      "lead_specialist": {
+        "agent_id": "market_analyst_cycle1",
+        "role": "Market Analyst",
+        "brief": "Own what the Limassol rental market charges and when it peaks.",
+        "tools_needed": ["google_search"],
+        "memory_query": "rental pricing"
+      },
+      "advisory_agents": [
+        {
+          "agent_id": "seasonality_analyst_cycle1_adv_1",
+          "role": "Seasonality Analyst",
+          "brief": "Own how demand moves through the year.",
+          "tools_needed": ["google_search"]
+        },
+        {
+          "agent_id": "ghost_cycle1_adv_2",
+          "role": "Ghost Analyst",
+          "brief": ""
+        }
+      ]
+    },
+    {
+      "cycle_id": 2,
+      "domain": "Fleet Operations",
+      "goal": "What keeping the cars on the road costs",
+      "lead_specialist": {
+        "agent_id": "fleet_cost_analyst_cycle2",
+        "role": "Fleet Cost Analyst",
+        "brief": "Own the cost of running and maintaining the fleet."
+      },
+      "advisory_agents": [
+        {
+          "agent_id": "market_analyst_cycle2_adv_1",
+          "role": "Market Analyst",
+          "brief": "Own what the Limassol rental market charges and when it peaks."
+        }
+      ]
+    }
+  ]
+}"""
+plans_dir = os.path.join(PROJECT_DIR, "Implementation plan", "Agents")
+os.makedirs(plans_dir, exist_ok=True)
+with open(os.path.join(plans_dir, "agent_plan_1.md"), "w", encoding="utf-8") as f:
+    f.write("# Agent Spawn Plan - Plan ID: 1\n\n## Full JSON Payload\n```json\n"
+            + AGENT_PLAN + "\n```\n")
 
 conn = db.get_connection(TMP_DB)
 db.save_pipeline(conn, {
@@ -350,6 +413,37 @@ check("cancelling leaves the other draft's file alone", os.path.exists(dropped))
 check("cancelling created no section",
       all(s["folder"] != FOLDER2 for s in app.get("/sections").get_json()["sections"]))
 
+# The last thing the gate does, once the brief is settled: propose the crew.
+NEXT_CREW.append({"departments": [
+    {"domain": "Model Selection", "goal": "Which models are candidates",
+     "agents": [
+         {"role": "Benchmark Analyst", "brief": "Own the standing comparison of candidates.",
+          "is_lead": True, "tools_needed": ["google_search"],
+          "from_agent_ids": ["benchmark_analyst_cycle1"], "why": "Ran in the founding pipeline."},
+         {"role": "Quantization Expert", "brief": "Own the quantization floor per model.",
+          "from_agent_ids": [], "why": "Nothing on disk covers this yet."}]},
+    {"domain": "Nobody Home", "goal": "A label with no agents", "agents": []}]})
+r = app.post("/sections/intake/crew", json={"draft_id": sdraft})
+check("the gate proposes a crew before anything is created", r.status_code == 200)
+proposed = r.get_json()["crew"]
+check("a baby section with nobody in it never reaches the screen",
+      [d["domain"] for d in proposed["departments"]] == ["Model Selection"])
+check("the counts are what the footer shows",
+      r.get_json()["counts"] == {"departments": 1, "agents": 2})
+check("an agent_id no pipeline here ever ran is not honoured",
+      all(a["origin"] == "brief" for a in proposed["departments"][0]["agents"]))
+check("proposing a crew writes nothing",
+      not os.path.exists(section_store.crew_path(FOLDER2)))
+
+# The user cuts one, and that is what gets created.
+proposed["departments"][0]["agents"] = [
+    a for a in proposed["departments"][0]["agents"] if a["role"] != "Quantization Expert"]
+r = app.post("/sections/intake/crew/set", json={"draft_id": sdraft, "crew": proposed})
+check("their edit to the crew is kept on the draft",
+      [a["role"] for a in r.get_json()["crew"]["departments"][0]["agents"]] == ["Benchmark Analyst"])
+check("editing the crew still writes nothing",
+      not os.path.exists(section_store.crew_path(FOLDER2)))
+
 r = app.post("/sections/create", json={"draft_id": sdraft})
 check("the draft creates the section", r.status_code == 200)
 SID2 = r.get_json()["section"]["id"]
@@ -357,6 +451,9 @@ detail = app.get(f"/sections/{SID2}").get_json()
 check("the section's brief is the one that was corrected",
       "A local coding assistant, on my own box." in detail["section"]["brief"])
 check("the drops survive into the section", os.path.exists(dropped))
+check("the crew the user approved is the one that was stood up",
+      [a["role"] for d in detail["crew"]["departments"] for a in d["agents"]]
+      == ["Benchmark Analyst"])
 
 record = r.get_json()["brief_path"]
 with open(record, encoding="utf-8") as f:
@@ -369,7 +466,116 @@ check("a spent draft cannot create a second section",
       app.post("/sections/create", json={"draft_id": sdraft}).status_code == 400)
 app.post(f"/sections/{SID2}/delete")
 
-# ---- 11. closing a section never destroys the work -------------------------
+# ---- 11. the standing crew -------------------------------------------------
+# A section's crew is what the dashboard draws at rest and what the Brain plans
+# from. The thing worth proving is that none of it is invented: every agent
+# comes from one that really ran, and every claim about that is checked.
+
+crew = section_store.read_crew(FOLDER)
+domains = [d["domain"] for d in crew["departments"]]
+check("creating a section stood up a crew", os.path.exists(section_store.crew_path(FOLDER)))
+check("its baby sections are the pipeline's own cycles",
+      domains == ["Market Pricing", "Fleet Operations"])
+
+roles = [a["role"] for d in crew["departments"] for a in d["agents"]]
+check("the agents are the ones that really ran",
+      "Market Analyst" in roles and "Fleet Cost Analyst" in roles)
+check("an agent with no brief is not an agent", "Ghost Analyst" not in roles)
+check("a role that ran in two cycles is one standing agent",
+      roles.count("Market Analyst") == 1)
+
+analyst = next(a for d in crew["departments"] for a in d["agents"]
+               if a["role"] == "Market Analyst")
+check("it carries both of the agent_ids it ran as",
+      sorted(analyst["from_agent_ids"]) == ["market_analyst_cycle1", "market_analyst_cycle2_adv_1"])
+check("its evidence is what it actually recorded",
+      "pricing findings" in analyst["evidence"])
+check("every baby section has exactly one lead",
+      all(sum(1 for a in d["agents"] if a["is_lead"]) == 1 for d in crew["departments"]))
+
+check("the crew is readable in the folder as markdown",
+      os.path.exists(os.path.join(knowledge, section_store.CREW_NOTE)))
+detail = app.get(f"/sections/{SID}").get_json()
+check("the dashboard is handed the crew",
+      [d["domain"] for d in detail["crew"]["departments"]] == domains)
+
+# The crew is only worth drawing if it is also what the next pipeline is planned
+# from — otherwise the constellation is decoration.
+section_row = jarvis.load_section(SID)
+seed = section_store.crew_seed_text(section_row)
+check("the crew is handed to a new pipeline", "Market Analyst" in seed)
+check("with the rule that stops it re-inventing the cast",
+      "reuse that agent's exact role name" in seed)
+check("and it reached the brief the agents actually worked from",
+      "The standing crew of section" in brief)
+
+# A claim that an agent really ran is checked against the folder, because an
+# invented agent wearing a Founding badge is the worst thing this could produce.
+faked = section_store.verify_crew_provenance(FOLDER, section_store.normalise_crew({
+    "departments": [{"domain": "Invented", "agents": [
+        {"role": "Imaginary Strategist", "brief": "Sounds useful.",
+         "origin": "founding", "from_agent_ids": ["never_existed_cycle9"]}]}]}))
+invented = faked["departments"][0]["agents"][0]
+check("an agent_id that never existed is thrown away", invented["from_agent_ids"] == [])
+check("and the agent stops claiming it ran", invented["origin"] == "brief")
+
+# Editing from the dashboard, and the edit surviving a re-read.
+edited = {"departments": [d for d in crew["departments"] if d["domain"] == "Market Pricing"]}
+edited["departments"][0]["agents"] = [
+    a for a in edited["departments"][0]["agents"] if a["role"] != "Seasonality Analyst"]
+r = app.post(f"/sections/{SID}/crew", json={"crew": edited})
+check("the crew can be edited from the dashboard", r.status_code == 200)
+saved = r.get_json()["crew"]
+check("what was dropped is gone",
+      [d["domain"] for d in saved["departments"]] == ["Market Pricing"]
+      and [a["role"] for a in saved["departments"][0]["agents"]] == ["Market Analyst"])
+check("and it is recorded as retired rather than merely absent",
+      "seasonality analyst" in saved["retired_roles"]
+      and "fleet operations" in saved["retired_domains"])
+
+r = app.post(f"/sections/{SID}/refresh")
+grown = r.get_json()["crew"]
+check("re-reading the pipelines does not undo the edit",
+      [d["domain"] for d in grown["departments"]] == ["Market Pricing"]
+      and [a["role"] for a in grown["departments"][0]["agents"]] == ["Market Analyst"])
+
+# A department a later pipeline introduces does get added, because the crew
+# grows with the section.
+LATER = dict(section_store.crew_from_agent_plans(FOLDER))
+LATER["departments"] = [{"id": "d_new", "domain": "Insurance", "goal": "Cover",
+                         "origin": "founding", "from_plan_ids": ["77"],
+                         "agents": [{"role": "Insurance Analyst", "brief": "Own cover and excess.",
+                                     "is_lead": True, "origin": "founding",
+                                     "from_agent_ids": [], "from_plan_ids": ["77"],
+                                     "evidence": [], "why": ""}]}]
+after = section_store.merge_crew(grown, LATER)
+check("a later pipeline can add a baby section",
+      [d["domain"] for d in after["departments"]] == ["Market Pricing", "Insurance"])
+
+# What the normaliser refuses, since it is the last thing between a bad crew and
+# the constellation.
+cleaned = section_store.normalise_crew({"departments": [
+    {"domain": "Empty", "agents": []},
+    {"domain": "Two Leads", "agents": [
+        {"role": "First", "brief": "A job.", "is_lead": True},
+        {"role": "Second", "brief": "Another job.", "is_lead": True},
+        {"role": "First", "brief": "The same job again."},
+        {"role": "No Brief", "brief": ""}]},
+    {"domain": "two leads", "agents": [{"role": "Third", "brief": "A job."}]}]})
+check("a baby section with nobody in it is dropped",
+      [d["domain"] for d in cleaned["departments"]] == ["Two Leads"])
+check("a duplicated role is dropped",
+      [a["role"] for a in cleaned["departments"][0]["agents"]] == ["First", "Second"])
+check("only one agent leads",
+      [a["is_lead"] for a in cleaned["departments"][0]["agents"]] == [True, False])
+
+# The gate's crew stage: proposed on the draft, and nothing written by it.
+r = app.post("/sections/intake/start",
+             json={"plan_id": "1", "name": "Never", "brief": "Never created."})
+check("the gate refuses a pipeline that is already a section (crew stage too)",
+      r.status_code == 409)
+
+# ---- 12. closing a section never destroys the work -------------------------
 check("deleting the section succeeds",
       app.post(f"/sections/{SID}/delete").status_code == 200)
 check("the section is gone", app.get(f"/sections/{SID}").status_code == 404)

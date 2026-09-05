@@ -849,6 +849,12 @@ def _intake_context_text(draft: dict) -> str:
             "known \u2014 never ask the user about it, and do not plan to research it "
             "again:\n" + section_store.knowledge_digest(section, max_chars=4000)
         )
+        crew_text = section_store.crew_seed_text(section, max_chars=2500)
+        if crew_text:
+            lines.append(
+                "THE SECTION ALREADY HAS THESE AGENTS. Never ask the user who should do "
+                "the work \u2014 this is settled:\n" + crew_text
+            )
     lines.append(f"ORIGINAL REQUEST:\n{draft.get('task', '')}")
     details = (draft.get("details") or "").strip()
     lines.append(f"\nDETAILS THE USER WROTE:\n{details if details else '(none given)'}")
@@ -1050,6 +1056,12 @@ def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
     section = _section_for_draft(draft)
     if section:
         out += ["---", "", section_store.knowledge_digest(section), ""]
+        # The section's standing crew is the roster the Brain plans from, so a
+        # pipeline started here adapts the agents that already did this work
+        # rather than inventing a fresh cast that duplicates them.
+        crew_text = section_store.crew_seed_text(section)
+        if crew_text:
+            out += ["---", "", crew_text, ""]
 
     out += ["---", "", "## How to use this brief", _INTAKE_BRIEF_RULE, ""]
     return "\n".join(out)
@@ -2884,6 +2896,7 @@ def create_section_draft(plan: dict, name: str, brief: str) -> dict:
         "pending_questions": [],
         "rounds": 0,
         "brief_text": None,          # the painted section brief, once written
+        "crew": None,                # the standing agents, proposed once the brief is settled
         "stage": "brief",
         "created": _time.time(),
         "touched": _time.time(),
@@ -3074,6 +3087,101 @@ def _section_draft_paint(draft: dict) -> dict:
     return {"brief_text": brief_text or _section_draft_fallback_brief(draft)}
 
 
+_CREW_RULES = (
+    "- Every department is one distinct standing concern of this section, named the way the "
+    "work is named — not a stage of a process, and never 'Research' or 'General'.\n"
+    "- STRICT SINGLE-PURPOSE ROLES. One agent, one job. Never bundle two into a compound "
+    "role: no 'SEO & Virality Specialist', no 'Metadata and Description Writer'. Split them.\n"
+    "- Reuse the exact role names of agents that really ran wherever the job is the same, so "
+    "their findings on disk stay credited to them.\n"
+    "- Where two cycles ran near-duplicate roles, merge them into ONE agent and list both of "
+    "their agent_ids in from_agent_ids. That is the point of doing this.\n"
+    "- Every agent needs a brief that says what it OWNS in this section for good — a standing "
+    "responsibility, not a task from one run. An agent you cannot write a real brief for does "
+    "not belong here; leave it out.\n"
+    "- Do not pad. A section with three honest departments is better than six invented ones, "
+    "and an agent that duplicates another is worse than no agent at all.\n"
+    "- from_agent_ids must contain agent_ids copied exactly from the material above. Never "
+    "invent one; leave the list empty for an agent that is genuinely new.\n"
+    "- 'why' is one short sentence of provenance the user will read: what it ran as and what "
+    "it recorded, or which words of theirs it exists for.\n"
+)
+
+
+def _section_crew_material(draft: dict) -> str:
+    """The real agents behind this section, plus what it now says it is for."""
+    folder = draft["folder"]
+    parts = [
+        f"THE SECTION: {draft.get('name') or folder}",
+        "",
+        "WHAT THIS SECTION IS FOR (just settled with the user):",
+        (draft.get("brief_text") or draft.get("brief") or "(not written)").strip(),
+    ]
+    material = section_store.crew_material(folder)
+    parts += [
+        "",
+        "THE AGENTS THAT ACTUALLY RAN IN THIS SECTION'S PIPELINES — their real agent_ids, "
+        "their briefs, and what each one recorded to disk. This is the only source for a "
+        "standing agent:",
+        material or "(no agent plan survives on disk for this pipeline)",
+    ]
+    notes = section_store.knowledge_notes(folder)
+    if notes:
+        parts += ["", "KNOWLEDGE THE SECTION ALREADY HOLDS (topic notes on disk):",
+                  "\n".join(f"- {n['name']}" for n in notes[:30])]
+    return "\n".join(parts)
+
+
+def _section_draft_crew(draft: dict) -> dict:
+    """Propose the section's standing crew, once the brief is settled.
+
+    The mechanical crew is built first and is what gets used if anything goes
+    wrong, so the section always ends up with a constellation built from agents
+    that really ran. The model's job on top of that is judgement the code cannot
+    do: merging near-duplicate roles, and adding the one or two agents the
+    user's brief needs that no pipeline has covered yet.
+    """
+    folder = draft["folder"]
+    mechanical = section_store.crew_from_agent_plans(folder)
+
+    instruction = (
+        "You are the Brain of the Jarvis multi-agent system. A finished pipeline is becoming a "
+        "SECTION: a lasting workspace that later pipelines start inside. Give the section its "
+        "STANDING CREW — the departments and named agents it keeps between pipelines, drawn on "
+        "its dashboard and handed to you as the starting roster every time work begins here.\n\n"
+        "Build it from the agents that really ran, listed below with their real agent_ids. "
+        "Organise, merge and keep; invent only where the section's stated purpose needs someone "
+        "no pipeline has covered.\n\n"
+        "RULES:\n" + _CREW_RULES + "\n"
+        "Reply with JSON only:\n"
+        "{\"departments\": [{\"domain\": \"...\", \"goal\": \"...\", \"agents\": ["
+        "{\"role\": \"...\", \"brief\": \"...\", \"is_lead\": true, \"tools_needed\": [\"...\"], "
+        "\"memory_query\": \"...\", \"from_agent_ids\": [\"...\"], \"why\": \"...\"}]}]}"
+    )
+
+    try:
+        data = _ask_model_json(instruction, _section_crew_material(draft),
+                               _intake_file_parts(draft))
+    except Exception as e:
+        print(f"[Sections] Crew planning failed: {e}")
+        return {"crew": mechanical, "degraded": (
+            "Jarvis could not reach the model, so this crew is the founding pipeline's own "
+            "cycles and agents exactly as they ran. You can edit it, or create the section "
+            "and rebuild the crew later."
+        )}
+
+    crew = section_store.normalise_crew(data, keep_ids=False)
+    # Every claim of provenance is checked against the folder before the user is
+    # shown a badge saying an agent really ran.
+    crew = section_store.verify_crew_provenance(folder, crew)
+    if not crew.get("departments"):
+        return {"crew": mechanical, "degraded": (
+            "Jarvis could not make a crew out of that, so this is the founding pipeline's own "
+            "cycles and agents."
+        )}
+    return {"crew": crew}
+
+
 def _section_draft_record(draft: dict, final_brief: str) -> str | None:
     """Write the full clarification record into the section's Brief/ folder.
 
@@ -3102,6 +3210,18 @@ def _section_draft_record(draft: dict, final_brief: str) -> str | None:
         out.append("")
 
     out += ["## The section brief", final_brief, ""]
+
+    crew = draft.get("crew")
+    if crew and crew.get("departments"):
+        out.append("## The crew as created")
+        out.append("")
+        for dept in crew["departments"]:
+            out.append(f"### {dept['domain']}")
+            for agent in dept["agents"]:
+                lead = " — lead" if agent.get("is_lead") else ""
+                out.append(f"- **{agent['role']}**{lead} ({agent.get('origin', 'brief')}): "
+                           f"{agent['brief']}")
+            out.append("")
 
     try:
         brief_dir = section_store.section_dir(draft["folder"], "Brief")
@@ -3184,10 +3304,25 @@ def sections_create_route():
         with SECTION_DRAFTS_LOCK:
             SECTION_DRAFTS.pop(draft["draft_id"], None)
 
+    # The crew the user approved, or — on the skip path, where they were never
+    # shown one — the founding pipeline's own cycles and agents. Either way a
+    # section is never created without a constellation.
+    crew = (draft or {}).get("crew")
+    if not (crew and crew.get("departments")):
+        crew = section_store.crew_from_agent_plans(folder)
+    try:
+        # Roles Jarvis merged away or the user dropped are recorded as retired
+        # now, or the first re-read of the pipelines would hand them all back.
+        crew = section_store.mark_retired(crew, section_store.crew_from_agent_plans(folder))
+        section_store.write_crew(folder, crew, name)
+    except Exception as e:
+        print(f"[Sections] Could not write the crew: {e}")
+
     # The founding pipeline's memory becomes the section's first knowledge.
     refresh_section_knowledge(section)
     return jsonify({"status": "created", "section": _section_card(section),
-                    "brief_path": record_path})
+                    "brief_path": record_path,
+                    "crew": section_store.crew_counts(crew)})
 
 
 @app.route("/sections/intake/start", methods=["POST"])
@@ -3344,6 +3479,57 @@ def section_intake_picture_route():
     return jsonify({"brief_text": draft["brief_text"], "degraded": result.get("degraded")})
 
 
+@app.route("/sections/intake/crew", methods=["POST"])
+def section_intake_crew_route():
+    """Propose the crew, after the brief is settled and before anything exists.
+
+    This is the last thing the gate does: by now Jarvis has the founding
+    pipeline's findings, the user's brief, their answers and their files, which
+    is everything needed to say who this section keeps. Nothing is written —
+    the crew lives on the draft until Create section.
+    """
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    # A corrected brief may have arrived with this call; the crew is planned
+    # against what the user actually settled on.
+    with SECTION_DRAFTS_LOCK:
+        if (data.get("brief_text") or "").strip():
+            draft["brief_text"] = data["brief_text"].strip()
+
+    set_orb("thinking")
+    result = _section_draft_crew(draft)
+    set_orb("idle")
+
+    with SECTION_DRAFTS_LOCK:
+        draft["crew"] = result["crew"]
+        draft["stage"] = "crew"
+    return jsonify({"crew": result["crew"], "degraded": result.get("degraded"),
+                    "counts": section_store.crew_counts(result["crew"])})
+
+
+@app.route("/sections/intake/crew/set", methods=["POST"])
+def section_intake_crew_set_route():
+    """The user's edits to the proposed crew. Still nothing on disk."""
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    crew = section_store.normalise_crew(data.get("crew"))
+    # Their edits are theirs, but a badge claiming an agent really ran still has
+    # to be true, so provenance is re-checked rather than taken from the client.
+    crew = section_store.verify_crew_provenance(draft["folder"], crew)
+    # Whatever they took out stays out when the pipelines are re-read later.
+    crew = section_store.mark_retired(
+        crew, section_store.crew_from_agent_plans(draft["folder"]))
+    with SECTION_DRAFTS_LOCK:
+        draft["crew"] = crew
+    return jsonify({"crew": crew, "counts": section_store.crew_counts(crew)})
+
+
 @app.route("/sections/intake/edit", methods=["POST"])
 def section_intake_edit_route():
     """Clean up the user's edit and hand it back — never create."""
@@ -3396,6 +3582,7 @@ def section_detail_route(section_id):
 
     return jsonify({
         "section": _section_card(section),
+        "crew": section_store.read_crew(section["folder"]),
         "summary": section_store.summary_body(section["folder"]),
         "knowledge": [
             {"name": n["name"], "preview": n["preview"]}
@@ -3517,9 +3704,48 @@ def section_refresh_route(section_id):
     if not section:
         return jsonify({"error": "section not found"}), 404
     refresh_section_knowledge(section)
+    crew = grow_section_crew(section)
     coordinator.clear_section_chat(section_id)
     return jsonify({"status": "refreshed",
-                    "summary": section_store.summary_body(section["folder"])})
+                    "summary": section_store.summary_body(section["folder"]),
+                    "crew": crew})
+
+
+@app.route("/sections/<section_id>/crew", methods=["POST"])
+def section_crew_route(section_id):
+    """Save the crew as the user edited it on the dashboard."""
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+
+    data = request.get_json(force=True) or {}
+    crew = section_store.normalise_crew(data.get("crew"))
+    crew = section_store.verify_crew_provenance(section["folder"], crew)
+    crew = section_store.mark_retired(
+        crew, section_store.crew_from_agent_plans(section["folder"]))
+    section_store.write_crew(section["folder"], crew, section.get("name", ""))
+    # The crew is part of what Jarvis is told about the section it is working in.
+    coordinator.clear_section_chat(section_id)
+    return jsonify({"status": "saved", "crew": crew,
+                    "counts": section_store.crew_counts(crew)})
+
+
+def grow_section_crew(section: dict) -> dict:
+    """Fold whatever the section's pipelines have run since into the crew.
+
+    Additive, like the knowledge notes: a later pipeline can add a department or
+    an agent, and extends the provenance of one already standing, but never
+    rewrites or removes what is there — including anything edited by hand.
+    """
+    folder = section["folder"]
+    try:
+        standing = section_store.read_crew(folder)
+        grown = section_store.merge_crew(standing, section_store.crew_from_agent_plans(folder))
+        section_store.write_crew(folder, grown, section.get("name", ""))
+        return grown
+    except Exception as e:
+        print(f"[Sections] Could not grow the crew: {e}")
+        return section_store.read_crew(folder)
 
 
 @app.route("/sections/<section_id>/upload", methods=["POST"])

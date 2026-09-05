@@ -248,6 +248,72 @@
     }
     .jsec-wikilink { color: #93C5FD; }
 
+    /* ---- the crew stage: the standing agents, before anything is created ---- */
+    .jsec-crew-note {
+        border: 1px dashed rgba(255,255,255,0.14); border-radius: 10px;
+        padding: 14px 16px; font-size: 12px; color: #9CA3AF;
+        line-height: 1.8; margin-bottom: 16px;
+    }
+    .jsec-crew-note b { color: #93C5FD; font-weight: 600; }
+    .jsec-dept {
+        border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+        margin-bottom: 14px; overflow: hidden; background: rgba(255,255,255,0.015);
+    }
+    .jsec-dept-head {
+        display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .jsec-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; margin-top: 4px; }
+    .jsec-grow { flex: 1 1 auto; min-width: 0; }
+    .jsec-dept-name {
+        font-size: 12px; font-weight: 700; letter-spacing: 2.5px;
+        text-transform: uppercase; color: #FFFFFF;
+    }
+    .jsec-dept-goal { font-size: 11.5px; color: #9CA3AF; margin-top: 5px; line-height: 1.6; }
+    .jsec-src {
+        font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+        padding: 4px 9px; border-radius: 5px; flex: 0 0 auto; white-space: nowrap;
+    }
+    .jsec-src.founding { background: rgba(167,139,250,0.14); color: #A78BFA; }
+    .jsec-src.merged { background: rgba(252,211,77,0.13); color: #FCD34D; }
+    .jsec-src.brief { background: rgba(96,165,250,0.14); color: #93C5FD; }
+    .jsec-ag {
+        display: flex; gap: 12px; padding: 13px 16px;
+        border-top: 1px solid rgba(255,255,255,0.045);
+    }
+    .jsec-ag:first-of-type { border-top: none; }
+    .jsec-tag {
+        font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+        border-radius: 4px; padding: 3px 7px; height: fit-content; margin-top: 2px;
+        flex: 0 0 auto;
+    }
+    .jsec-tag.lead { background: #EAE6EE; color: #0A0D13; }
+    .jsec-tag.adv { border: 1px solid rgba(255,255,255,0.14); color: #6B7280; }
+    .jsec-role { font-size: 13px; color: #FFFFFF; font-weight: 600; }
+    .jsec-ag-brief { font-size: 11.5px; color: #9CA3AF; line-height: 1.65; margin-top: 5px; }
+    .jsec-why { font-size: 10px; color: #5b6879; line-height: 1.6; margin-top: 6px; }
+    .jsec-why code {
+        background: rgba(255,255,255,0.05); border-radius: 3px;
+        padding: 1px 4px; color: #93C5FD; font-size: 9.5px;
+    }
+    .jsec-acts { flex: 0 0 auto; display: flex; gap: 6px; align-items: flex-start; }
+    .jsec-tiny {
+        background: transparent; border: 1px solid rgba(255,255,255,0.10); color: #6B7280;
+        font-family: inherit; font-size: 9px; font-weight: 600; letter-spacing: .8px;
+        text-transform: uppercase; padding: 5px 9px; border-radius: 5px; cursor: pointer;
+        transition: all .2s ease;
+    }
+    .jsec-tiny:hover { color: #FFFFFF; border-color: rgba(255,255,255,0.3); }
+    .jsec-tiny.warn:hover { color: #F87171; border-color: rgba(248,113,113,0.5); }
+    .jsec-addrow { padding: 11px 16px; border-top: 1px solid rgba(255,255,255,0.045); }
+    .jsec-field {
+        width: 100%; background: rgba(0,0,0,0.35); border: 1px solid rgba(96,165,250,0.4);
+        border-radius: 7px; color: #E2E8F0; font-family: inherit; font-size: 12.5px;
+        padding: 9px 11px; outline: none; margin-bottom: 8px;
+    }
+    textarea.jsec-field { min-height: 78px; resize: vertical; line-height: 1.65; }
+    .jsec-empty-crew { font-size: 12.5px; color: #6B7280; line-height: 1.8; }
+
     /* ---- the section information overlay ---- */
     .jsec-info {
         position: fixed; inset: 0; z-index: 9050;
@@ -820,7 +886,7 @@
                 draft.editing = true;
                 renderBriefText();
             }),
-            footButton("Create section", "primary", createSection)
+            footButton("Continue", "primary", proposeCrew)
         ]);
     }
 
@@ -841,37 +907,275 @@
             });
     }
 
+    // ---- stage 4: the crew ----
+    //
+    // The last thing before the commit point, and the only stage that could not
+    // have run earlier: who this section keeps depends on what the user just
+    // said it is for. Every agent shown carries where it came from, because a
+    // roster you cannot check is a roster you cannot trust.
+
+    var CREW_COLORS = ["#22D3EE", "#60A5FA", "#34D399", "#F87171",
+                       "#FB7185", "#FCD34D", "#A78BFA", "#818CF8"];
+
+    function proposeCrew() {
+        setBusy("Working out who this section keeps…");
+        return post("/sections/intake/crew", {
+            draft_id: draft.draftId,
+            brief_text: draft.briefText
+        })
+        .then(function (data) {
+            draft.crew = data.crew || { departments: [] };
+            draft.crewDegraded = data.degraded || "";
+            draft.editing = null;
+            renderCrewStage();
+        })
+        .catch(function (e) {
+            // The crew is not worth losing the section over: the server builds
+            // one from the pipeline's own cycles when none is handed to it.
+            draft.crew = { departments: [] };
+            draft.crewDegraded = (e.message || "Jarvis could not plan the crew.") +
+                " Creating the section will stand up the founding pipeline's own cycles instead.";
+            renderCrewStage();
+        });
+    }
+
+    function crewCounts() {
+        var depts = (draft.crew && draft.crew.departments) || [];
+        var agents = 0;
+        depts.forEach(function (d) { agents += (d.agents || []).length; });
+        return depts.length + (depts.length === 1 ? " baby section · " : " baby sections · ") +
+               agents + (agents === 1 ? " agent" : " agents");
+    }
+
+    function renderCrewStage() {
+        draft.busy = false;
+        var depts = (draft.crew && draft.crew.departments) || [];
+        setHead(draft.name || "Make this a section",
+                "The standing agents of this section. Every pipeline started here begins " +
+                "from them — cut anything that does not earn its place.");
+
+        var html = "";
+        if (draft.crewDegraded) html += '<div class="jsec-note">' + esc(draft.crewDegraded) + "</div>";
+
+        html += '<div class="jsec-crew-note">Every agent below is traceable. ' +
+            '<b>Founding</b> means the pipeline really ran it and its findings are on disk. ' +
+            '<b>Merged</b> means two near-duplicate roles were folded into one. ' +
+            '<b>New</b> means it exists because of what you wrote, and nothing on disk ' +
+            'covers it yet. Nothing here was invented from the section’s name.</div>';
+
+        if (!depts.length) {
+            html += '<div class="jsec-empty-crew">No crew planned. Creating the section will ' +
+                    'stand up the founding pipeline’s own cycles and agents.</div>';
+        }
+
+        depts.forEach(function (dept, di) {
+            var color = CREW_COLORS[di % CREW_COLORS.length];
+            html += '<div class="jsec-dept">' +
+                '<div class="jsec-dept-head">' +
+                    '<span class="jsec-dot" style="background:' + color +
+                        ';box-shadow:0 0 12px ' + color + '"></span>' +
+                    '<div class="jsec-grow">' + deptHeadHtml(dept, di) + "</div>" +
+                    '<span class="jsec-src ' + esc(dept.origin || "brief") + '">' +
+                        esc(originLabel(dept.origin)) + "</span>" +
+                    '<div class="jsec-acts">' +
+                        '<button class="jsec-tiny" data-act="dept-edit" data-d="' + di + '">Rename</button>' +
+                        '<button class="jsec-tiny warn" data-act="dept-drop" data-d="' + di + '">Drop</button>' +
+                    "</div>" +
+                "</div>";
+
+            (dept.agents || []).forEach(function (agent, ai) {
+                html += '<div class="jsec-ag">' +
+                    '<span class="jsec-tag ' + (agent.is_lead ? "lead" : "adv") + '">' +
+                        (agent.is_lead ? "Lead" : "Adv") + "</span>" +
+                    '<div class="jsec-grow">' + agentHtml(agent, di, ai) + "</div>" +
+                    '<div class="jsec-acts">' +
+                        '<button class="jsec-tiny" data-act="ag-edit" data-d="' + di +
+                            '" data-a="' + ai + '">Edit</button>' +
+                        '<button class="jsec-tiny warn" data-act="ag-drop" data-d="' + di +
+                            '" data-a="' + ai + '">Drop</button>' +
+                    "</div>" +
+                "</div>";
+            });
+
+            html += '<div class="jsec-addrow">' +
+                '<button class="jsec-tiny" data-act="ag-add" data-d="' + di +
+                '">+ Add an agent here</button></div></div>';
+        });
+
+        panelBody().innerHTML = '<div class="jsec-fade">' + html + "</div>";
+        wireCrewButtons();
+
+        setFooter([
+            footButton("Cancel", "danger", cancelDraft),
+            footButton("Back to the brief", "ghost", function () {
+                draft.editing = false;
+                renderBriefText();
+            }),
+            footButton("Create section", "primary", createSection)
+        ]);
+        setStatus(crewCounts());
+    }
+
+    function originLabel(origin) {
+        if (origin === "founding") return "Founding";
+        if (origin === "merged") return "Merged";
+        return "New";
+    }
+
+    function editing(kind, di, ai) {
+        var e = draft.editing;
+        return e && e.kind === kind && e.d === di && (ai === undefined || e.a === ai);
+    }
+
+    function deptHeadHtml(dept, di) {
+        if (editing("dept", di)) {
+            return '<input class="jsec-field" id="jsec-dept-name" value="' +
+                       esc(dept.domain) + '" placeholder="What this baby section is about">' +
+                   '<textarea class="jsec-field" id="jsec-dept-goal" ' +
+                       'placeholder="What it is for, in one line">' + esc(dept.goal || "") +
+                   "</textarea>" +
+                   '<button class="jsec-tiny" data-act="save" data-d="' + di + '">Save</button> ' +
+                   '<button class="jsec-tiny" data-act="cancel-edit">Cancel</button>';
+        }
+        return '<div class="jsec-dept-name">' + esc(dept.domain) + "</div>" +
+               (dept.goal ? '<div class="jsec-dept-goal">' + esc(dept.goal) + "</div>" : "");
+    }
+
+    function agentHtml(agent, di, ai) {
+        if (editing("ag", di, ai)) {
+            return '<input class="jsec-field" id="jsec-ag-role" value="' + esc(agent.role) +
+                       '" placeholder="One role, one job — e.g. Quantization Expert">' +
+                   '<textarea class="jsec-field" id="jsec-ag-brief" ' +
+                       'placeholder="What this agent owns in this section, for good">' +
+                       esc(agent.brief || "") + "</textarea>" +
+                   '<button class="jsec-tiny" data-act="save" data-d="' + di +
+                       '" data-a="' + ai + '">Save</button> ' +
+                   '<button class="jsec-tiny" data-act="cancel-edit">Cancel</button>';
+        }
+        var why = agent.why ? '<div class="jsec-why">' + renderWhy(agent.why) + "</div>" : "";
+        return '<div class="jsec-role">' + esc(agent.role) + "</div>" +
+               '<div class="jsec-ag-brief">' + esc(agent.brief || "") + "</div>" + why;
+    }
+
+    // Provenance names real agent_ids, so `backticks` are rendered as code.
+    function renderWhy(text) {
+        return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>");
+    }
+
+    function wireCrewButtons() {
+        Array.prototype.forEach.call(panelBody().querySelectorAll("[data-act]"), function (btn) {
+            btn.addEventListener("click", function () {
+                var di = parseInt(btn.getAttribute("data-d"), 10);
+                var ai = parseInt(btn.getAttribute("data-a"), 10);
+                var depts = draft.crew.departments;
+                switch (btn.getAttribute("data-act")) {
+                    case "dept-edit": draft.editing = { kind: "dept", d: di }; break;
+                    case "dept-drop": depts.splice(di, 1); draft.editing = null; break;
+                    case "ag-edit": draft.editing = { kind: "ag", d: di, a: ai }; break;
+                    case "ag-drop":
+                        depts[di].agents.splice(ai, 1);
+                        // A department with nobody in it is a label, not a baby
+                        // section — the server drops it, so the screen does too.
+                        if (!depts[di].agents.length) depts.splice(di, 1);
+                        else if (!depts[di].agents.some(function (a) { return a.is_lead; })) {
+                            depts[di].agents[0].is_lead = true;
+                        }
+                        draft.editing = null;
+                        break;
+                    case "ag-add":
+                        depts[di].agents.push({ role: "", brief: "", is_lead: false,
+                                                origin: "brief", from_agent_ids: [],
+                                                why: "Added by you at creation." });
+                        draft.editing = { kind: "ag", d: di, a: depts[di].agents.length - 1 };
+                        break;
+                    case "save": saveCrewEdit(di, ai); break;
+                    case "cancel-edit": cancelCrewEdit(); break;
+                }
+                renderCrewStage();
+            });
+        });
+    }
+
+    function saveCrewEdit(di, ai) {
+        var depts = draft.crew.departments;
+        if (draft.editing && draft.editing.kind === "dept") {
+            var name = panelBody().querySelector("#jsec-dept-name");
+            var goal = panelBody().querySelector("#jsec-dept-goal");
+            if (name && name.value.trim()) depts[di].domain = name.value.trim();
+            if (goal) depts[di].goal = goal.value.trim();
+        } else {
+            var role = panelBody().querySelector("#jsec-ag-role");
+            var brief = panelBody().querySelector("#jsec-ag-brief");
+            var agent = depts[di].agents[ai];
+            if (role) agent.role = role.value.trim();
+            if (brief) agent.brief = brief.value.trim();
+            // An agent with no role or no brief has no job; the server would
+            // drop it anyway, so don't let it linger on screen pretending.
+            if (!agent.role || !agent.brief) {
+                depts[di].agents.splice(ai, 1);
+                if (!depts[di].agents.length) depts.splice(di, 1);
+            }
+        }
+        draft.editing = null;
+    }
+
+    function cancelCrewEdit() {
+        // A row added and then abandoned was never a real agent.
+        if (draft.editing && draft.editing.kind === "ag") {
+            var agents = draft.crew.departments[draft.editing.d].agents;
+            var agent = agents[draft.editing.a];
+            if (agent && !agent.role && !agent.brief) {
+                agents.splice(draft.editing.a, 1);
+                if (!agents.length) draft.crew.departments.splice(draft.editing.d, 1);
+            }
+        }
+        draft.editing = null;
+    }
+
     // ---- the commit point ----
 
     function createSection() {
         var createdSection = null;
+        var hadCrew = !!(draft.crew && (draft.crew.departments || []).length);
         setBusy("Creating the section…");
 
-        post("/sections/create", {
-            draft_id: draft.draftId || "",
-            plan_id: draft.planId,
-            name: draft.name,
-            brief: draft.brief
-        })
-        .then(function (data) {
-            createdSection = data.section;
-            var id = createdSection.id;
-            // Only the skip path still has files in hand: with a draft they were
-            // uploaded before the questions.
-            if (!pendingFiles.length || draft.filesUploaded) return id;
-            var form = new FormData();
-            pendingFiles.forEach(function (f) { form.append("files", f); });
-            return fetch("/sections/" + id + "/upload", { method: "POST", body: form })
-                .then(function () { return id; });
-        })
-        .then(function (id) {
-            closeModal();
-            enterSection(createdSection || { id: id });
-        })
-        .catch(function (e) {
-            if (draft.briefText) renderBriefText(); else renderBriefStage();
-            setStatus(e.message || "Could not create the section.");
-        });
+        // The crew as the user left it goes up first: the draft is what the
+        // creation reads, and this is the last moment it can be corrected.
+        var ready = (draft.draftId && draft.crew)
+            ? post("/sections/intake/crew/set",
+                   { draft_id: draft.draftId, crew: draft.crew }).catch(function () {})
+            : Promise.resolve();
+
+        ready
+            .then(function () {
+                return post("/sections/create", {
+                    draft_id: draft.draftId || "",
+                    plan_id: draft.planId,
+                    name: draft.name,
+                    brief: draft.brief
+                });
+            })
+            .then(function (data) {
+                createdSection = data.section;
+                var id = createdSection.id;
+                // Only the skip path still has files in hand: with a draft they
+                // were uploaded before the questions.
+                if (!pendingFiles.length || draft.filesUploaded) return id;
+                var form = new FormData();
+                pendingFiles.forEach(function (f) { form.append("files", f); });
+                return fetch("/sections/" + id + "/upload", { method: "POST", body: form })
+                    .then(function () { return id; });
+            })
+            .then(function (id) {
+                closeModal();
+                enterSection(createdSection || { id: id });
+            })
+            .catch(function (e) {
+                if (hadCrew) renderCrewStage();
+                else if (draft.briefText) renderBriefText();
+                else renderBriefStage();
+                setStatus(e.message || "Could not create the section.");
+            });
     }
 
     // Cancel means it never happened: no section, and the files dropped along
@@ -905,6 +1209,8 @@
             briefText: "",
             degraded: "",
             editing: false,
+            crew: null,
+            crewDegraded: "",
             filesUploaded: false,
             busy: false
         };

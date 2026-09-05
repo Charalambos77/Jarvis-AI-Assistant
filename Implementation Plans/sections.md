@@ -439,3 +439,176 @@ takes to a model. No production code was changed to make it pass.
   reads whatever is in the folder's `memory/` at the time; pipelines that wrote nothing there
   contribute nothing.
 - **Moving a pipeline between sections**, or a section that spans more than one folder.
+
+---
+
+# The crew — a section's standing agents
+
+**Status:** Implemented
+
+## 10. The problem this part solves
+
+A section had a dashboard made of cards. A pipeline had a constellation. So the
+thing a section *is* — a live workspace with agents in it — was visible only
+while a pipeline happened to be running, and vanished the moment it finished.
+An inactive section looked like a filing cabinet.
+
+A section is an active pipeline that outlived its run. It should look like one.
+
+## 11. What a crew is
+
+```
+Let Jarvis Handle It/<Section>/
+├── Crew.json                       ← the standing agents
+└── Knowledge/
+    └── The crew.md                 ← the same thing, readable
+```
+
+```json
+{
+  "version": 1,
+  "departments": [
+    { "id": "dept_performance", "domain": "Performance", "goal": "...",
+      "origin": "founding|merged|brief", "from_plan_ids": ["8f21"],
+      "agents": [
+        { "role": "Quantization Expert", "brief": "what it owns, for good",
+          "is_lead": false, "tools_needed": [...], "memory_query": "...",
+          "origin": "founding", "from_agent_ids": ["quantization_expert_cycle2_adv_1"],
+          "from_plan_ids": ["8f21"], "evidence": ["q4 k m floor"],
+          "why": "one line of provenance the user reads" } ] } ],
+  "retired_roles": [], "retired_domains": []
+}
+```
+
+A **department is a "baby section"**: one standing concern of the section, drawn
+as one wedge of the constellation. Its agents are the section's, not one run's.
+
+The shape deliberately mirrors `/api/agent_graph`, because `section.html` draws it
+with the same geometry `execution.html` uses — same `CYCLE_COLORS`, same dept
+node, same chained agents, same `.department-label` at radius. A section at rest
+and a pipeline running are one visual idea, and dormant is expressed as opacity
+rather than as a second drawing.
+
+## 12. Where a crew comes from
+
+Nothing is invented from the section's name. The chain is:
+
+| Source | What it gives |
+|---|---|
+| `Implementation plan/Agents/agent_plan_<id>.md` | The **real** agent plan. `save_agent_plan_file` writes the whole plan as a fenced JSON block, so the actual cycles, domains, goals, roles, briefs and `agent_id`s survive the process that made them. `agent_plans_on_disk` reads them back. |
+| `memory/{high_value,general}/<agent_id>.json` | What each agent genuinely **recorded**. The pipeline names the file after the agent, so `agent_evidence` attributes topics exactly rather than by guess. |
+| The section brief from the gate | What the section is *for* — the only thing that can justify an agent no pipeline has covered yet. |
+
+| Function (`sections.py`) | Purpose |
+|---|---|
+| `crew_from_agent_plans` | The **floor**: one department per cycle, its real agents, merging only exact role repeats. Runs with no model at all. |
+| `normalise_crew` | The last thing between a bad crew and the constellation: no nameless department, no department with nobody in it, **no agent without a brief**, no role repeated across the section, exactly one lead per department, capped at 8 departments (one per constellation colour) and 6 agents each. |
+| `verify_crew_provenance` | Checks every claim against the folder. An `agent_id` that is not in a plan on disk is thrown away; the evidence is replaced by what that id really recorded; an agent left with nothing behind it is demoted from *Founding* to *New*. |
+| `mark_retired` / `merge_crew` | Growth without loss. |
+| `crew_seed_text` | What the Brain is handed when a pipeline starts here. |
+
+**Only exact role matches are merged mechanically.** Deciding that two
+differently-named roles are the same job is a judgement, and a judgement guessed
+by string similarity is exactly the stupid result this must not produce — so the
+model does that, and its answer is then checked.
+
+**An agent with no brief is not an agent.** Dropping it is the difference
+between a crew and a list of job titles.
+
+## 13. The gate's fourth stage
+
+`/sections/intake/crew` runs after the brief is painted and before anything
+exists, because who a section keeps depends on what the user just said it is
+for. It writes nothing: the crew lives on the draft until **Create section**.
+
+The screen shows provenance per agent, so a roster the user cannot check is
+never presented as one:
+
+| Badge | Means |
+|---|---|
+| **Founding** | The pipeline really ran it; its findings are on disk. |
+| **Merged** | Two near-duplicate roles from different cycles, folded into one. |
+| **New** | It exists because of the brief, and says which words. |
+
+`/sections/intake/crew/set` takes the user's edits; provenance is re-verified
+there rather than trusted from the client. On the skip path — *Create section
+without questions* — no crew stage is shown and creation falls back to
+`crew_from_agent_plans`, so **a section is never created without a
+constellation**.
+
+## 14. Growth, and why hand edits survive
+
+A crew grows on **Re-read pipelines** (`/sections/<id>/refresh` →
+`grow_section_crew`). `merge_crew` may add a department or an agent and may
+extend the provenance of one already standing — new fact — but never rewrites or
+removes anything, including hand edits.
+
+That alone would have a bug: a crew where Jarvis merged two duplicate roles into
+one would get the duplicate handed straight back on the next re-read, and a
+dropped agent would reappear. So every save records what is *absent* relative to
+the mechanical crew in `retired_roles` / `retired_domains`, and `merge_crew`
+honours it. A role folded into another agent and a role deliberately dropped are
+both retired: either way it must not come back on its own.
+
+## 15. Why the constellation is not decoration
+
+`crew_seed_text` is appended to `_intake_brief_markdown` — the brief the Brain
+plans against — and a shorter form goes into `_intake_context_text` so the
+clarification gate never asks who should do the work. It carries the rule that
+does the actual work:
+
+> where a cycle you need is covered by a standing agent, reuse that agent's
+> exact role name so its earlier work is credited to it, and add a new agent
+> only where nothing standing covers the work.
+
+Reused role names are also what lets the dashboard light up: `section.html`
+polls `/api/agent_graph/<plan_id>` for the section's running pipeline and matches
+live agents to standing ones by normalised role. Departments with an agent in the
+run go to full colour, the agent actually working takes the green ring, the core
+turns green and sleeping labels dim. Execution mode remains one click away and
+is not reimplemented.
+
+## 16. The dashboard
+
+`section.html` is now the constellation with the panels floating over it: the
+cards became a left rail, the conversation stays right, and **Hide panels**
+clears both. The constellation is centred on the corridor *between* the rails
+rather than on the page, so hiding the panels re-centres it; and because a
+department's name is as long as its name, the labels are measured once drawn and
+nudged back inside the corridor — a name half-hidden under a panel is worse than
+an off-centre one.
+
+Clicking a department or a named agent opens the inspector: what it owns, its
+tools, whether it is in the current run, and where it came from — the real
+`agent_id`s and the topics it recorded. Editing happens there too (rename, edit,
+add, drop), saving through `/sections/<id>/crew`.
+
+## 17. Testing
+
+`scripts/test_sections.py` is at 117 assertions, up from 80. The crew ones prove
+the parts that would otherwise rot quietly:
+
+- creation stands up a crew, and its baby sections are the founding pipeline's
+  own cycles;
+- an agent with no brief never becomes an agent;
+- a role that ran in two cycles is one standing agent carrying both `agent_id`s,
+  and its evidence is what it actually recorded;
+- an `agent_id` no pipeline here ever ran is thrown away and the agent stops
+  claiming it ran;
+- the crew reaches the brief the agents work from, with the rule that stops the
+  Brain re-inventing the cast;
+- the gate proposes a crew and writes nothing, a department with nobody in it
+  never reaches the screen, and the crew the user approved is the one stood up;
+- an edit survives a re-read, while a later pipeline can still add a department;
+- the normaliser's refusals: empty departments, duplicate roles, two leads.
+
+The fixture writes a real `agent_plan_1.md` in the shape `save_agent_plan_file`
+produces, including one agent with an empty brief and one role repeated across
+two cycles, because those are the cases the rules exist for.
+
+## 18. Not built
+
+- **Growing the crew the moment a pipeline finishes.** Growth is on
+  *Re-read pipelines*, as ruled.
+- **Re-planning a crew from scratch after creation.** The crew grows and is
+  edited; there is no "throw it away and re-derive" button.
