@@ -35,6 +35,7 @@ import webview
 
 import db
 import sections as section_store
+import command_gate
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -193,6 +194,15 @@ def load_pipelines_from_db():
 
 # Load persisted plans on startup
 load_pipelines_from_db()
+
+# The Antigravity CLI is allowed to run commands only while a build is actually
+# running. If Jarvis was killed mid-build that permission could still be sitting
+# in the CLI's settings, so it is cleared here before anything can start.
+try:
+    from connectors import antigravity as _antigravity
+    _antigravity.clear_command_grant()
+except Exception as e:
+    print(f"Could not clear the Antigravity command permission: {e}")
 
 
 # --- Jarvis User & Identity Layer ---
@@ -1687,6 +1697,16 @@ def sections_ui_script():
     return send_from_directory(BASE_DIR, "sections_ui.js")
 
 
+@app.route("/nav_ui.js")
+def nav_ui_script():
+    return send_from_directory(BASE_DIR, "nav_ui.js")
+
+
+@app.route("/mic_ui.js")
+def mic_ui_script():
+    return send_from_directory(BASE_DIR, "mic_ui.js")
+
+
 @app.route("/plan.html")
 def plan_page():
     return send_from_directory(BASE_DIR, "plan.html")
@@ -1711,6 +1731,16 @@ def agent_talk_task_log_page():
 @app.route("/provider_comparison.html")
 def provider_comparison_page():
     return send_from_directory(BASE_DIR, "provider_comparison.html")
+
+
+@app.route("/commands.html")
+def commands_page():
+    return send_from_directory(BASE_DIR, "commands.html")
+
+
+@app.route("/library.html")
+def library_page():
+    return send_from_directory(BASE_DIR, "library.html")
 
 
 @app.route("/api/console_logs", methods=["GET"])
@@ -1803,6 +1833,17 @@ def state():
         FOCUS_TASK_IDS = []
         UI_ACTION = None
         return res
+
+@app.route("/jarvis/mic", methods=["GET"])
+def mic_state():
+    """Whether the microphone is muted, and nothing else.
+
+    The mute button lives on more than one screen now, and /state could not be
+    what they read: serving it clears the one-shot focus and UI-action fields,
+    so a second page polling it would swallow events meant for the Brain.
+    """
+    return jsonify({"mic_muted": MIC_MUTED})
+
 
 @app.route("/jarvis/mute-mic", methods=["POST"])
 def mute_mic():
@@ -1978,6 +2019,332 @@ def gate_data():
         "status": state.get("gate_status"),
         "data": state.get("gate_data"),
         "plan_id": plan_id or state.get("plan_id"),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Commands — the review page for everything the Antigravity CLI wants to run.
+#
+# /commands/ask is not called by the browser. The Antigravity CLI calls it,
+# through the hook in scripts/agy_command_gate.py, and the request stays open
+# while the command sits on the page waiting for an answer. Everything else
+# here is the page itself: what is waiting, what was decided before, and the
+# standing "always allow" rules.
+# ---------------------------------------------------------------------------
+
+def _owning_run(project: str) -> tuple[str, str]:
+    """Which pipeline and section a command in this project belongs to.
+
+    The hook knows the project for certain and the pipeline only when Jarvis
+    put it in the environment, so this fills the gap: a command can only be
+    asked about while its build is running, and a running build in a project is
+    the pipeline that asked.
+    """
+    plan_id = ""
+    if project:
+        with ACTIVE_PIPELINE_LOCK:
+            active = set(ACTIVE_PIPELINE_THREADS)
+        with PLAN_STORE_LOCK:
+            matching = [p for p in PLAN_STORE if p.get("project_name") == project]
+        running = [p for p in matching if p["id"] in active]
+        pick = running or matching
+        if pick:
+            plan_id = max(pick, key=lambda p: p.get("timestamp") or 0)["id"]
+
+    section_id = ""
+    conn = db.get_connection(DB_PATH)
+    try:
+        section = db.get_section_by_folder(conn, project) if project else None
+        section_id = (section or {}).get("id") or ""
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return plan_id, section_id
+
+
+@app.route("/commands/ask", methods=["POST"])
+def commands_ask():
+    """The Antigravity CLI asking permission to run one terminal command."""
+    data = request.get_json(force=True) or {}
+    command = (data.get("command") or "").strip()
+    if not command:
+        return jsonify({"decision": "deny", "reason": "No command was sent for review."})
+
+    project = (data.get("project") or "").strip()
+    plan_id = (data.get("plan_id") or "").strip()
+    section_id = (data.get("section_id") or "").strip()
+    if not plan_id or not section_id:
+        found_plan, found_section = _owning_run(project)
+        plan_id = plan_id or found_plan
+        section_id = section_id or found_section
+
+    def announce():
+        push_message("system", (
+            f"Antigravity wants to run `{command}` in {project or 'a project'}. "
+            "Waiting for your answer on the Commands page."
+        ))
+
+    result = command_gate.ask(
+        command,
+        project=project,
+        plan_id=plan_id,
+        section_id=section_id,
+        conversation_id=(data.get("conversation_id") or "").strip(),
+        cwd=(data.get("cwd") or "").strip(),
+        on_change=announce,
+    )
+    return jsonify(result)
+
+
+@app.route("/commands/pending", methods=["GET"])
+def commands_pending():
+    """What is waiting for an answer right now."""
+    return jsonify({
+        "pending": command_gate.pending(),
+        "wait_seconds": command_gate.WAIT_SECONDS,
+    })
+
+
+@app.route("/commands/decide", methods=["POST"])
+def commands_decide():
+    """Allow, always-allow or reject one waiting command."""
+    data = request.get_json(force=True) or {}
+    request_id = (data.get("request_id") or "").strip()
+    decision = (data.get("decision") or "").strip().lower()
+    if not request_id:
+        return jsonify({"error": "request_id is required — without it the wrong command "
+                                 "could be answered when more than one is waiting."}), 400
+
+    result = command_gate.decide(
+        request_id,
+        decision,
+        reason=(data.get("reason") or "").strip(),
+        project_scope=bool(data.get("this_project_only")),
+    )
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/commands/log", methods=["GET"])
+def commands_log():
+    """Everything already decided, newest first."""
+    conn = db.get_connection(DB_PATH)
+    try:
+        entries = db.get_commands(
+            conn,
+            plan_id=(request.args.get("plan_id") or "").strip() or None,
+            project=(request.args.get("project") or "").strip() or None,
+            limit=int(request.args.get("limit") or 300),
+        )
+    finally:
+        conn.close()
+    return jsonify({"commands": entries})
+
+
+@app.route("/commands/rules", methods=["GET"])
+def commands_rules():
+    """The standing 'always allow' answers, and the list nothing can override."""
+    conn = db.get_connection(DB_PATH)
+    try:
+        rules = db.get_command_rules(conn)
+    finally:
+        conn.close()
+    return jsonify({"rules": rules, "denylist": command_gate.denylist_descriptions()})
+
+
+@app.route("/commands/rules/delete", methods=["POST"])
+def commands_rules_delete():
+    """Take back an 'always allow'."""
+    data = request.get_json(force=True) or {}
+    try:
+        rule_id = int(data.get("rule_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "rule_id is required."}), 400
+    conn = db.get_connection(DB_PATH)
+    try:
+        removed = db.delete_command_rule(conn, rule_id)
+    finally:
+        conn.close()
+    return jsonify({"status": "deleted" if removed else "not_found"})
+
+
+# ---------------------------------------------------------------------------
+# Library — one place to find a finished piece of work again.
+#
+# Everything Jarvis produces already exists somewhere: pipelines in the plan
+# store, sections in the database, files in "Let Jarvis Handle It". What was
+# missing was any way to go from "that car rental site we built" to the run
+# that built it and the files it left behind, without remembering a plan id.
+# This assembles that view — sections holding their pipelines, pipelines
+# holding their outputs — and the page does the searching over it.
+# ---------------------------------------------------------------------------
+
+# Not worth listing and not what anyone is looking for: dependency trees,
+# version control, and the hook this project was given.
+_LIBRARY_SKIP_DIRS = {
+    ".git", ".agents", "node_modules", "__pycache__", ".venv", "venv",
+    "dist", "build", ".next", ".cache",
+}
+_LIBRARY_FILE_CAP = 400
+
+
+def _project_files(folder: str) -> list[dict]:
+    """The files a project actually contains, newest first.
+
+    Agents write into Deliverables; the Antigravity CLI builds in the project
+    root. Both are the work, so both are listed, with the path kept relative so
+    it stays readable and can be handed straight to /api/open-artifact.
+    """
+    root = os.path.join(BASE_DIR, "Let Jarvis Handle It", folder)
+    if not os.path.isdir(root):
+        return []
+
+    files = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _LIBRARY_SKIP_DIRS]
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            try:
+                stat = os.stat(full)
+            except OSError:
+                continue
+            files.append({
+                "name": name,
+                "path": os.path.relpath(full, BASE_DIR).replace("\\", "/"),
+                "rel": os.path.relpath(full, root).replace("\\", "/"),
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+            })
+            if len(files) >= _LIBRARY_FILE_CAP:
+                break
+        if len(files) >= _LIBRARY_FILE_CAP:
+            break
+
+    files.sort(key=lambda f: f["modified"], reverse=True)
+    return files
+
+
+def _library_pipeline(plan: dict, active_ids: set) -> dict:
+    """A pipeline reduced to what the Library needs to show and search on.
+
+    Plans go back a long way and older ones do not all hold the shape the
+    current pipeline writes — `cycles` in particular is sometimes a list of
+    strings. The Library is a place to find old work, so it has to survive
+    reading old work; anything unrecognised just counts as nothing.
+    """
+    cycles = [c for c in (plan.get("cycles") or []) if isinstance(c, dict)]
+    results = plan.get("exec_results") or []
+    return {
+        "id": plan.get("id"),
+        "task": plan.get("task_summary") or plan.get("task") or "",
+        "full_task": plan.get("task") or "",
+        "project_name": plan.get("project_name") or "",
+        "status": plan.get("status") or "",
+        "phase": plan.get("phase") or "",
+        "gate_status": plan.get("gate_status") or "",
+        "timestamp": plan.get("timestamp") or 0,
+        "active": plan.get("id") in active_ids,
+        "agent_count": sum(len(c.get("agents") or []) for c in cycles),
+        "deliverable_count": len(results) if isinstance(results, list) else 0,
+    }
+
+
+@app.route("/api/library", methods=["GET"])
+def library_index():
+    """Sections, their pipelines, and the files each project holds."""
+    with ACTIVE_PIPELINE_LOCK:
+        active_ids = set(ACTIVE_PIPELINE_THREADS)
+    with PLAN_STORE_LOCK:
+        plans = [p.copy() for p in PLAN_STORE]
+
+    plans_by_id = {p.get("id"): p for p in plans}
+
+    conn = db.get_connection(DB_PATH)
+    try:
+        sections = db.get_sections(conn)
+        section_plan_ids = {
+            s["id"]: db.get_section_plan_ids(conn, s["id"]) for s in sections
+        }
+        command_counts = {}
+        for row in db.get_commands(conn, limit=2000):
+            key = row.get("plan_id") or ""
+            command_counts[key] = command_counts.get(key, 0) + 1
+    finally:
+        conn.close()
+
+    filed = set()
+    section_views = []
+    for section in sections:
+        ids = section_plan_ids.get(section["id"], [])
+        founding = section.get("founding_plan_id")
+        if founding and founding not in ids:
+            ids = [founding] + ids
+        filed.update(ids)
+
+        pipelines = [
+            _library_pipeline(plans_by_id[pid], active_ids)
+            for pid in ids if pid in plans_by_id
+        ]
+        pipelines.sort(key=lambda p: p["timestamp"], reverse=True)
+        for p in pipelines:
+            p["command_count"] = command_counts.get(p["id"], 0)
+
+        files = _project_files(section.get("folder") or "")
+        section_views.append({
+            "id": section["id"],
+            "name": section.get("name") or "",
+            "folder": section.get("folder") or "",
+            "brief": section.get("brief") or "",
+            "created_at": section.get("created_at") or "",
+            "pipelines": pipelines,
+            "files": files,
+            "file_count": len(files),
+            "last_activity": max(
+                [p["timestamp"] for p in pipelines] +
+                [f["modified"] for f in files] + [0]
+            ),
+            "running": any(p["active"] for p in pipelines),
+        })
+
+    section_views.sort(key=lambda s: s["last_activity"], reverse=True)
+
+    # A pipeline that never became a section is still work worth finding. It is
+    # grouped by its project folder so several runs at the same thing read as
+    # one body of work rather than as unrelated rows.
+    loose: dict[str, dict] = {}
+    for plan in plans:
+        if plan.get("id") in filed:
+            continue
+        folder = plan.get("project_name") or "Unfiled"
+        group = loose.setdefault(folder, {
+            "folder": folder, "pipelines": [], "files": _project_files(folder),
+        })
+        entry = _library_pipeline(plan, active_ids)
+        entry["command_count"] = command_counts.get(entry["id"], 0)
+        group["pipelines"].append(entry)
+
+    loose_views = []
+    for group in loose.values():
+        group["pipelines"].sort(key=lambda p: p["timestamp"], reverse=True)
+        group["file_count"] = len(group["files"])
+        group["last_activity"] = max(
+            [p["timestamp"] for p in group["pipelines"]] +
+            [f["modified"] for f in group["files"]] + [0]
+        )
+        group["running"] = any(p["active"] for p in group["pipelines"])
+        loose_views.append(group)
+    loose_views.sort(key=lambda g: g["last_activity"], reverse=True)
+
+    return jsonify({
+        "sections": section_views,
+        "unfiled": loose_views,
+        "totals": {
+            "sections": len(section_views),
+            "pipelines": len(plans),
+            "running": len(active_ids),
+        },
     })
 
 

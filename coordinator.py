@@ -624,8 +624,80 @@ TOOLS = [
         "name": "read_metrics",
         "description": "Read all currently tracked metrics and their values/thresholds.",
         "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "delegate_build",
+        "description": (
+            "Hand a real software build job to the Antigravity CLI, a coding agent that works "
+            "inside one project's folder. Use it when the user asks you to actually build, "
+            "scaffold, fix or run something — a site, an app, a script that has to work — "
+            "because it can edit files, run the build and fix what breaks, which you cannot. "
+            "Do not use it to answer questions, write prose, or manage tasks and notes.\n\n"
+            "It works in a project folder under 'Let Jarvis Handle It' and never in Jarvis's "
+            "own source. Inside a section the section's folder is used automatically; "
+            "otherwise name the project. It takes minutes, so tell the user you are starting "
+            "before you call it, and report honestly afterwards — especially if it says "
+            "commands were refused, which means that part did not happen."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "instruction": {
+                    "type": "string",
+                    "description": (
+                        "The job, stated concretely: what to build, with what, and how you "
+                        "would know it worked. It cannot ask questions."
+                    ),
+                },
+                "project": {
+                    "type": "string",
+                    "description": (
+                        "Project folder name under 'Let Jarvis Handle It'. Optional inside a "
+                        "section, which supplies its own."
+                    ),
+                },
+                "timeout_minutes": {
+                    "type": "integer",
+                    "description": "How long to allow, 1-30. Defaults to 10.",
+                },
+            },
+            "required": ["instruction"],
+        },
     }
 ]
+
+
+def delegate_build_impl(instruction: str, project: str | None = None,
+                        timeout_minutes: int = 10) -> dict:
+    """Jarvis hands a build job to the Antigravity CLI.
+
+    The project is never guessed: inside a section it is that section's folder,
+    otherwise the caller has to name one. Defaulting to anything would mean
+    a coding agent editing a folder the user did not choose.
+    """
+    from connectors import antigravity
+
+    if not antigravity.is_available():
+        return {"status": "error", "error": (
+            "The Antigravity CLI is not available on this machine, so I cannot delegate "
+            "building. Install it, or ask me to write the files myself."
+        )}
+
+    section = get_active_section()
+    folder = (project or "").strip() or (section or {}).get("folder") or ""
+    if not folder:
+        return {"status": "error", "error": (
+            "No project chosen. Ask the user which project folder to build in, or enter a "
+            "section first — I will not pick one for them."
+        )}
+
+    minutes = max(1, min(int(timeout_minutes or 10), 30))
+    return antigravity.run(
+        instruction, folder, timeout=minutes * 60,
+        # So a command this build asks to run shows up on the Commands page
+        # filed under the section it came from, not on its own.
+        section_id=(section or {}).get("id"),
+    )
 
 
 def focus_tasks_impl(task_ids):
@@ -676,6 +748,7 @@ TOOL_IMPL = {
     "update_note": lambda conn, **kw: db.update_note(conn, **kw),
     "complete_note": lambda conn, **kw: db.complete_note(conn, **kw),
     "focus_tasks": lambda conn, **kw: focus_tasks_impl(**kw),
+    "delegate_build": lambda conn, **kw: delegate_build_impl(**kw),
     "call_external_api": lambda conn, **kw: call_external_api(conn, **kw),
     "call_mcp": lambda conn, **kw: call_mcp(conn, **kw),
     "google_search": lambda conn, query: outsource_google_search(query),

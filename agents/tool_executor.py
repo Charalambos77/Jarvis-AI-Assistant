@@ -184,6 +184,66 @@ ALWAYS_ON_TOOLS = {
 
 
 # ---------------------------------------------------------------------------
+# LOCAL-BINARY TOOLS — a third tier.
+#
+# Not always-on, because the binary may not be installed; not registry-gated,
+# because there is no service and no credential to approve at the Plugging
+# Gate. What decides whether an agent gets these is simply whether the program
+# exists on this machine.
+# ---------------------------------------------------------------------------
+
+def delegate_build_impl(project_name: str, agent_id: str, instruction: str,
+                        timeout_minutes: int = 10) -> dict:
+    """Hand a build job to the Antigravity CLI and wait for it."""
+    from connectors import antigravity
+
+    minutes = max(1, min(int(timeout_minutes or 10), 30))
+    result = antigravity.run(instruction, project_name, timeout=minutes * 60)
+    result["agent_id"] = agent_id
+    return result
+
+
+LOCAL_TOOLS = {
+    "antigravity_cli": {
+        "declaration": {
+            "name": "delegate_build",
+            "description": (
+                "Hand a concrete software build job to the Antigravity CLI, a coding agent "
+                "that works in this project's own folder. Use it when the work needs many "
+                "rounds of edit-run-check that you cannot do yourself: scaffolding a project, "
+                "installing dependencies, running a build or test suite and fixing what "
+                "breaks, or changing code across several existing files.\n\n"
+                "Do NOT use it for writing prose, research, or a single self-contained file — "
+                "write those yourself with write_file, which is faster and stays visible.\n\n"
+                "Give it one specific job with the outcome stated. It cannot ask you "
+                "questions, so anything you leave vague it will decide for itself. It may "
+                "report that commands were refused: that means the work did not happen, and "
+                "you must say so rather than reporting success."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instruction": {
+                        "type": "string",
+                        "description": (
+                            "The job, stated concretely: what to build, where, with what, "
+                            "and how you will know it worked."
+                        ),
+                    },
+                    "timeout_minutes": {
+                        "type": "integer",
+                        "description": "How long to allow, 1-30. Defaults to 10.",
+                    },
+                },
+                "required": ["instruction"],
+            },
+        },
+        "handler": delegate_build_impl,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # REGISTRY-GATED TOOLS — real handlers, only offered when the backing
 # service is configured (status != "unknown" in api_registry.json)
 # ---------------------------------------------------------------------------
@@ -613,6 +673,18 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, co
         declarations.append(spec["declaration"])
         handlers[spec["declaration"]["name"]] = spec["handler"]
         seen.add(spec["declaration"]["name"])
+
+    # Bound when the program is actually on this machine. Nothing is said to
+    # the agent when it is missing: an execution agent that never hears about
+    # a builder writes the file itself, which is the right fallback.
+    from connectors import antigravity
+    if antigravity.is_available():
+        for name, spec in LOCAL_TOOLS.items():
+            fn_name = spec["declaration"]["name"]
+            if fn_name not in seen:
+                declarations.append(spec["declaration"])
+                handlers[fn_name] = spec["handler"]
+                seen.add(fn_name)
 
     unavailable = []
     for raw_name in (tools_needed or []):

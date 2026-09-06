@@ -1046,6 +1046,11 @@
     <div class="top-right-nav">
         <button class="nav-btn active" id="btn-brain">Brain</button>
         <button class="nav-btn" id="btn-plan">Plan</button>
+        <button class="nav-btn" id="btn-library">Library</button>
+        <!-- Carries a count when the builder is waiting on an answer, so a
+             parked command is visible from the Brain rather than only on its
+             own page. -->
+        <button class="nav-btn" id="btn-commands">Commands</button>
         <button class="nav-btn" id="btn-apis">APIs/MCPs</button>
     </div>
 
@@ -3665,6 +3670,8 @@
         const buttons = {
             brain: document.getElementById('btn-brain'),
             plan: document.getElementById('btn-plan'),
+            library: document.getElementById('btn-library'),
+            commands: document.getElementById('btn-commands'),
             apis: document.getElementById('btn-apis')
         };
 
@@ -3691,10 +3698,23 @@
             window.location.href = 'plan.html';
         });
 
+        buttons.library.addEventListener('click', () => {
+            syncUiState({ current_page: "Library Page" });
+            window.location.href = 'library.html';
+        });
+
+        buttons.commands.addEventListener('click', () => {
+            syncUiState({ current_page: "Commands Page" });
+            window.location.href = 'commands.html';
+        });
+
         buttons.apis.addEventListener('click', () => {
             syncUiState({ current_page: "APIs/MCPs Page" });
             window.location.href = 'provider_comparison.html';
         });
+
+        // The waiting-command count on the Commands button is kept by
+        // nav_ui.js, so it reads the same here as it does on every other page.
 
         function openTasksPanel() {
             const panel = document.getElementById('side-panel');
@@ -5126,6 +5146,8 @@
         });
 
     </script>
+    <script src="nav_ui.js"></script>
+    <script src="mic_ui.js"></script>
     <script src="sections_ui.js"></script>
 </body>
 

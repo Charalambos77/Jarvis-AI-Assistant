@@ -84,6 +84,38 @@ CREATE TABLE IF NOT EXISTS pipelines (
     timestamp REAL NOT NULL,
     data TEXT NOT NULL
 );
+
+-- Every terminal command the Antigravity CLI has asked to run, and what was
+-- decided about it. This is a log, not a queue: a command still waiting for an
+-- answer lives in memory in command_gate.py, and only lands here once it has
+-- been allowed, rejected or timed out. Kept so the Commands page can show what
+-- a pipeline actually ran rather than only what it asked for.
+CREATE TABLE IF NOT EXISTS agy_commands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT NOT NULL UNIQUE,
+    command TEXT NOT NULL,           -- the command line, verbatim
+    signature TEXT NOT NULL,         -- normalised form the rules match on
+    project TEXT,                    -- project folder it was asked in
+    plan_id TEXT,                    -- pipeline that delegated the build
+    section_id TEXT,
+    conversation_id TEXT,            -- agy's own id, for tying a run together
+    decision TEXT NOT NULL,          -- allowed | rejected
+    decided_by TEXT NOT NULL,        -- user | rule | denylist | timeout | unreachable
+    reason TEXT NOT NULL DEFAULT '',
+    asked_at TEXT NOT NULL,
+    decided_at TEXT
+);
+
+-- "Always allow" answers. A rule is matched against every segment of a command
+-- line, so allowing `npm install` never allows `npm install && something else`.
+CREATE TABLE IF NOT EXISTS agy_command_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signature TEXT NOT NULL,         -- e.g. "npm install", "git status"
+    scope TEXT NOT NULL DEFAULT '',  -- '' = every project, else one folder name
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE (signature, scope)
+);
 """
 
 
@@ -685,3 +717,77 @@ def get_section_messages(conn: sqlite3.Connection, section_id: str, limit: int =
         (section_id, limit),
     ).fetchall()
     return [dict(r) for r in reversed(rows)]
+
+
+# ---------- Antigravity command log & rules ----------
+#
+# The Antigravity CLI can edit files on its own, but every terminal command it
+# wants to run comes here first. These two tables are what the Commands page
+# reads: the log of what was asked and decided, and the standing "always allow"
+# answers that let a later run through without asking again.
+
+def log_command(conn: sqlite3.Connection, entry: dict) -> int:
+    """Record one decided command. Ignores a repeat of the same request_id."""
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO agy_commands
+           (request_id, command, signature, project, plan_id, section_id,
+            conversation_id, decision, decided_by, reason, asked_at, decided_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            entry["request_id"], entry["command"], entry["signature"],
+            entry.get("project"), entry.get("plan_id"), entry.get("section_id"),
+            entry.get("conversation_id"), entry["decision"], entry["decided_by"],
+            entry.get("reason") or "", entry["asked_at"], entry.get("decided_at") or _now(),
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_commands(conn: sqlite3.Connection, plan_id: str | None = None,
+                 project: str | None = None, limit: int = 300) -> list[dict]:
+    """The command log, newest first, optionally narrowed to one run or project."""
+    sql = "SELECT * FROM agy_commands"
+    clauses, params = [], []
+    if plan_id:
+        clauses.append("plan_id = ?")
+        params.append(plan_id)
+    if project:
+        clauses.append("project = ?")
+        params.append(project)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def add_command_rule(conn: sqlite3.Connection, signature: str, scope: str = "",
+                     reason: str = "") -> int:
+    """Store an 'always allow'. Re-allowing the same thing refreshes the reason."""
+    conn.execute(
+        """INSERT INTO agy_command_rules (signature, scope, reason, created_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT (signature, scope)
+           DO UPDATE SET reason = excluded.reason""",
+        (signature, scope or "", reason or "", _now()),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id FROM agy_command_rules WHERE signature = ? AND scope = ?",
+        (signature, scope or ""),
+    ).fetchone()
+    return row["id"] if row else 0
+
+
+def get_command_rules(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM agy_command_rules ORDER BY signature, scope"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_command_rule(conn: sqlite3.Connection, rule_id: int) -> bool:
+    cur = conn.execute("DELETE FROM agy_command_rules WHERE id = ?", (rule_id,))
+    conn.commit()
+    return cur.rowcount > 0

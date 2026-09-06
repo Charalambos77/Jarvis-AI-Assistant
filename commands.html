@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Commands</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #05070A;
+            --panel: rgba(255,255,255,0.025);
+            --line: rgba(255,255,255,0.08);
+            --text: #E2E8F0;
+            --muted: #9CA3AF;
+            --dim: #4B5563;
+            --accent: #60A5FA;
+            --go: #34D399;
+            --no: #F87171;
+            --warn: #FBBF24;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        .shell { display: flex; flex-direction: column; height: 100vh; }
+
+        header {
+            flex: 0 0 auto; padding: 22px 34px;
+            border-bottom: 1px solid var(--line);
+            display: flex; align-items: flex-start; gap: 24px;
+            background: rgba(8,10,14,0.9);
+        }
+        .id-block { flex: 1 1 auto; min-width: 0; }
+        .eyebrow {
+            font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin-bottom: 8px;
+        }
+        h1 { margin: 0; font-size: 22px; font-weight: 700; color: #FFF; }
+        .sub { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.7; max-width: 780px; }
+        .top-right-nav { display: flex; gap: 10px; flex: 0 0 auto; }
+        .nav-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit;
+            font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+            text-transform: uppercase; padding: 12px 20px; border-radius: 8px;
+            cursor: pointer; transition: all .25s ease;
+        }
+        .nav-btn:hover { background: rgba(255,255,255,0.07); color: #FFF; border-color: rgba(255,255,255,0.25); }
+        .nav-btn.active { background: #FFF; color: #000; border-color: #FFF; }
+
+        .body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 26px 34px 70px; }
+        .body::-webkit-scrollbar { width: 10px; }
+        .body::-webkit-scrollbar-track { background: transparent; }
+        .body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 6px; }
+        .body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+        .section-title {
+            font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin: 30px 0 14px; display: flex; align-items: center; gap: 10px;
+        }
+        .section-title:first-child { margin-top: 0; }
+        .count-pill {
+            background: rgba(255,255,255,0.06); border-radius: 20px; padding: 2px 9px;
+            font-size: 10px; letter-spacing: 1px; color: var(--muted);
+        }
+        .count-pill.live { background: rgba(251,191,36,0.16); color: var(--warn); }
+
+        .card {
+            background: var(--panel); border: 1px solid var(--line);
+            border-radius: 12px; padding: 20px 22px; margin-bottom: 14px;
+        }
+        .card.waiting { border-color: rgba(251,191,36,0.42); background: rgba(251,191,36,0.04); }
+
+        .cmd {
+            font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #FFF;
+            background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 8px;
+            padding: 13px 15px; word-break: break-all; line-height: 1.6;
+        }
+        .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 13px; }
+        .badge {
+            font-size: 10.5px; letter-spacing: .6px; padding: 4px 10px; border-radius: 6px;
+            background: rgba(255,255,255,0.05); color: var(--muted); border: 1px solid var(--line);
+        }
+        .badge.link { cursor: pointer; }
+        .badge.link:hover { color: #FFF; border-color: rgba(255,255,255,0.28); }
+        .badge.go { background: rgba(52,211,153,0.13); color: var(--go); border-color: rgba(52,211,153,0.25); }
+        .badge.no { background: rgba(248,113,113,0.13); color: var(--no); border-color: rgba(248,113,113,0.25); }
+        .badge.warn { background: rgba(251,191,36,0.14); color: var(--warn); border-color: rgba(251,191,36,0.28); }
+
+        .breakdown { margin-top: 14px; font-size: 12px; color: var(--muted); line-height: 1.9; }
+        .breakdown b { color: var(--text); font-weight: 500; }
+        .sig { font-family: 'JetBrains Mono', monospace; color: var(--accent); font-size: 12px; }
+
+        .timer { margin-top: 15px; }
+        .timer-bar { height: 3px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
+        .timer-fill { height: 100%; background: var(--warn); transition: width 1s linear; }
+        .timer-text { font-size: 11px; color: var(--dim); margin-top: 7px; }
+
+        .decide { margin-top: 17px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        input[type=text] {
+            flex: 1 1 240px; min-width: 200px;
+            background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); font-family: inherit; font-size: 12.5px; padding: 10px 13px;
+        }
+        input[type=text]:focus { outline: none; border-color: rgba(96,165,250,0.45); }
+        .btn {
+            border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text);
+            font-family: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: .8px;
+            padding: 10px 16px; border-radius: 8px; cursor: pointer; transition: all .2s ease;
+            white-space: nowrap;
+        }
+        .btn:hover { background: rgba(255,255,255,0.08); }
+        .btn.go { border-color: rgba(52,211,153,0.4); color: var(--go); }
+        .btn.go:hover { background: rgba(52,211,153,0.13); }
+        .btn.always { border-color: rgba(96,165,250,0.4); color: var(--accent); }
+        .btn.always:hover { background: rgba(96,165,250,0.13); }
+        .btn.no { border-color: rgba(248,113,113,0.4); color: var(--no); }
+        .btn.no:hover { background: rgba(248,113,113,0.13); }
+        .btn.tiny { padding: 6px 11px; font-size: 10.5px; }
+        .scope {
+            display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted);
+            cursor: pointer; user-select: none;
+        }
+
+        .empty {
+            border: 1px dashed var(--line); border-radius: 12px; padding: 26px;
+            font-size: 12.5px; color: var(--dim); line-height: 1.8;
+        }
+
+        .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+        select {
+            background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); font-family: inherit; font-size: 12px; padding: 9px 12px;
+        }
+        select:focus { outline: none; border-color: rgba(96,165,250,0.45); }
+
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            text-align: left; font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase;
+            color: var(--dim); font-weight: 600; padding: 0 12px 10px; border-bottom: 1px solid var(--line);
+        }
+        td { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.045); font-size: 12.5px; vertical-align: top; }
+        tr:hover td { background: rgba(255,255,255,0.018); }
+        td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #FFF; word-break: break-all; max-width: 420px; }
+        td.why { color: var(--muted); max-width: 300px; }
+        .when { color: var(--dim); white-space: nowrap; font-size: 11.5px; }
+
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 1000px) { .two-col { grid-template-columns: 1fr; } }
+        .rule-row {
+            display: flex; align-items: center; gap: 12px; padding: 11px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.045);
+        }
+        .rule-row:last-child { border-bottom: none; }
+        .rule-row .sig { flex: 1 1 auto; }
+        .deny-row {
+            padding: 9px 0; font-size: 12.5px; color: var(--muted); line-height: 1.6;
+            border-bottom: 1px solid rgba(255,255,255,0.045); display: flex; gap: 10px;
+        }
+        .deny-row:last-child { border-bottom: none; }
+        .deny-row::before { content: "✕"; color: var(--no); flex: 0 0 auto; }
+        .note { font-size: 12px; color: var(--dim); line-height: 1.8; margin-bottom: 14px; }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div class="id-block">
+            <div class="eyebrow">Jarvis · Antigravity</div>
+            <h1>Commands</h1>
+            <div class="sub">
+                The builder can write files on its own. Anything it wants to <em>run</em> stops here
+                first. Answer and it goes ahead; ignore it and after ten minutes it is refused and the
+                build carries on without that step.
+            </div>
+        </div>
+        <!-- Filled in by nav_ui.js, which gives every page the same set. -->
+        <div class="top-right-nav"></div>
+    </header>
+
+    <div class="body">
+        <div class="section-title">
+            Waiting on you <span class="count-pill" id="pending-count">0</span>
+        </div>
+        <div id="pending"></div>
+
+        <div class="section-title">Already decided</div>
+        <div class="filters">
+            <input type="text" id="search" placeholder="Search commands, projects, reasons…" oninput="renderLog()">
+            <select id="filter-scope" onchange="renderLog()"><option value="">Every project</option></select>
+            <select id="filter-decision" onchange="renderLog()">
+                <option value="">Allowed and refused</option>
+                <option value="allowed">Allowed only</option>
+                <option value="rejected">Refused only</option>
+            </select>
+        </div>
+        <div id="log"></div>
+
+        <div class="section-title">Standing answers</div>
+        <div class="two-col">
+            <div class="card">
+                <div class="eyebrow">Always allowed</div>
+                <div class="note">
+                    Matched against every part of a command line, so allowing <span class="sig">npm install</span>
+                    never allows <span class="sig">npm install</span> followed by something else.
+                </div>
+                <div id="rules"></div>
+            </div>
+            <div class="card">
+                <div class="eyebrow">Never allowed</div>
+                <div class="note">
+                    Refused before you are asked, and no "always allow" can cover them. Built in, not editable —
+                    one wrong click on any of these is not something a git diff can undo.
+                </div>
+                <div id="denylist"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let logCache = [];
+let waitSeconds = 600;
+// The reason typed against a waiting command, kept across the 2-second repaint
+// so a sentence being written is never wiped out mid-word.
+const draft = {};
+
+function ago(iso) {
+    const t = typeof iso === "number" ? iso * 1000 : Date.parse(iso);
+    if (!t) return "";
+    const s = Math.floor((Date.now() - t) / 1000);
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+}
+
+function openPipeline(planId) {
+    if (!planId) return;
+    localStorage.setItem('jarvis_active_pipeline_id', planId);
+    location.href = 'plan.html';
+}
+
+/* ---------- waiting ---------- */
+
+function renderPending(items) {
+    const host = document.getElementById('pending');
+    const pill = document.getElementById('pending-count');
+    pill.textContent = items.length;
+    pill.className = items.length ? "count-pill live" : "count-pill";
+
+    if (!items.length) {
+        host.innerHTML = `<div class="empty">
+            Nothing is waiting. When a build asks to run a command it appears here, and Jarvis
+            says so out loud in the Brain feed.
+        </div>`;
+        return;
+    }
+
+    host.innerHTML = items.map(item => {
+        const pct = Math.max(0, Math.min(100, (item.expires_in / waitSeconds) * 100));
+        const mins = Math.floor(item.expires_in / 60), secs = item.expires_in % 60;
+        const segs = (item.segments || []);
+        const sigs = [...new Set(segs.map(signatureOf))];
+        return `
+        <div class="card waiting">
+            <div class="badges">
+                ${item.project ? `<span class="badge">${esc(item.project)}</span>` : ""}
+                ${item.plan_id ? `<span class="badge link" onclick="openPipeline('${esc(item.plan_id)}')">Pipeline ${esc(item.plan_id)} →</span>` : ""}
+                <span class="badge">asked ${esc(ago(item.asked_ts))}</span>
+            </div>
+            <div class="cmd">${esc(item.command)}</div>
+            ${segs.length > 1 ? `<div class="breakdown"><b>This runs ${segs.length} commands:</b><br>` +
+                segs.map(s => `· <span class="sig">${esc(s)}</span>`).join("<br>") + `</div>` : ""}
+            <div class="breakdown">
+                <b>Always allow would remember:</b> ${sigs.map(s => `<span class="sig">${esc(s)}</span>`).join(", ")}
+            </div>
+            <div class="timer">
+                <div class="timer-bar"><div class="timer-fill" style="width:${pct}%"></div></div>
+                <div class="timer-text">Refused automatically in ${mins}m ${String(secs).padStart(2, "0")}s if nobody answers.</div>
+            </div>
+            <div class="decide">
+                <input type="text" id="why-${item.request_id}" placeholder="Why — optional, saved with the decision"
+                       value="${esc(draft[item.request_id] || "")}"
+                       oninput="draft['${item.request_id}'] = this.value">
+                <label class="scope">
+                    <input type="checkbox" id="scope-${item.request_id}"> this project only
+                </label>
+                <button class="btn always" onclick="decide('${item.request_id}','always')">Always allow</button>
+                <button class="btn go" onclick="decide('${item.request_id}','allow')">Allow once</button>
+                <button class="btn no" onclick="decide('${item.request_id}','reject')">Reject</button>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+/* The same rule the backend uses, so the page can promise exactly what an
+   "always allow" will remember before it is clicked. */
+function signatureOf(segment) {
+    const tokens = String(segment).trim().split(/\s+/).filter(Boolean);
+    while (tokens.length && /^\w+=/.test(tokens[0])) tokens.shift();
+    if (!tokens.length) return "";
+    let program = tokens[0].replace(/^["']|["']$/g, "").split(/[\\/]/).pop().toLowerCase();
+    if (program.endsWith(".exe")) program = program.slice(0, -4);
+    const parts = [program];
+    const looksLikeSub = t => t && /^[A-Za-z][\w-]*$/.test(t);
+    if (looksLikeSub(tokens[1])) {
+        const sub = tokens[1].toLowerCase();
+        parts.push(sub);
+        if (["run", "run-script", "exec", "x", "dlx"].includes(sub) && looksLikeSub(tokens[2])) {
+            parts.push(tokens[2].toLowerCase());
+        }
+    }
+    return parts.join(" ");
+}
+
+async function decide(requestId, decision) {
+    const why = (document.getElementById('why-' + requestId) || {}).value || "";
+    const scoped = (document.getElementById('scope-' + requestId) || {}).checked || false;
+    const res = await fetch('/commands/decide', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            request_id: requestId, decision, reason: why, this_project_only: scoped
+        })
+    });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    delete draft[requestId];
+    refresh();
+}
+
+/* ---------- log ---------- */
+
+function renderLog() {
+    const host = document.getElementById('log');
+    const q = document.getElementById('search').value.trim().toLowerCase();
+    const scope = document.getElementById('filter-scope').value;
+    const dec = document.getElementById('filter-decision').value;
+
+    const rows = logCache.filter(r => {
+        if (dec && r.decision !== dec) return false;
+        if (scope && (r.project || "") !== scope) return false;
+        if (!q) return true;
+        return [r.command, r.project, r.reason, r.plan_id, r.decided_by]
+            .some(v => String(v || "").toLowerCase().includes(q));
+    });
+
+    if (!rows.length) {
+        host.innerHTML = `<div class="empty">Nothing decided yet that matches.</div>`;
+        return;
+    }
+
+    const who = {
+        user: "you", rule: "an always-allow", denylist: "the denylist",
+        timeout: "nobody answered", unreachable: "Jarvis was down"
+    };
+    host.innerHTML = `<table><thead><tr>
+        <th>Command</th><th>Where</th><th>Decision</th><th>Why</th><th>When</th>
+    </tr></thead><tbody>` + rows.map(r => `
+        <tr>
+            <td class="mono">${esc(r.command)}</td>
+            <td>
+                ${r.project ? `<span class="badge">${esc(r.project)}</span> ` : ""}
+                ${r.plan_id ? `<span class="badge link" onclick="openPipeline('${esc(r.plan_id)}')">Pipeline ${esc(r.plan_id)}</span>` : ""}
+            </td>
+            <td><span class="badge ${r.decision === 'allowed' ? 'go' : 'no'}">
+                ${r.decision === 'allowed' ? 'Ran' : 'Refused'}</span>
+                <div class="when" style="margin-top:6px">by ${esc(who[r.decided_by] || r.decided_by)}</div>
+            </td>
+            <td class="why">${esc(r.reason || "—")}</td>
+            <td class="when">${esc(ago(r.decided_at || r.asked_at))}</td>
+        </tr>`).join("") + `</tbody></table>`;
+}
+
+function refreshScopeOptions() {
+    const select = document.getElementById('filter-scope');
+    const current = select.value;
+    const projects = [...new Set(logCache.map(r => r.project).filter(Boolean))].sort();
+    select.innerHTML = `<option value="">Every project</option>` +
+        projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    select.value = current;
+}
+
+/* ---------- rules ---------- */
+
+function renderRules(rules, denylist) {
+    const host = document.getElementById('rules');
+    host.innerHTML = rules.length ? rules.map(r => `
+        <div class="rule-row">
+            <span class="sig">${esc(r.signature)}</span>
+            <span class="badge">${r.scope ? esc(r.scope) : "every project"}</span>
+            <button class="btn tiny no" onclick="dropRule(${r.id})">Take back</button>
+        </div>`).join("")
+        : `<div class="empty">Nothing is always-allowed yet. Answer a waiting command with
+           "Always allow" and it will be remembered here.</div>`;
+
+    document.getElementById('denylist').innerHTML =
+        denylist.map(d => `<div class="deny-row"><span>${esc(d)}</span></div>`).join("");
+}
+
+async function dropRule(id) {
+    await fetch('/commands/rules/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule_id: id })
+    });
+    refresh();
+}
+
+/* ---------- polling ---------- */
+
+async function refresh() {
+    try {
+        const [p, l, r] = await Promise.all([
+            fetch('/commands/pending').then(x => x.json()),
+            fetch('/commands/log').then(x => x.json()),
+            fetch('/commands/rules').then(x => x.json())
+        ]);
+        waitSeconds = p.wait_seconds || 600;
+        renderPending(p.pending || []);
+        logCache = l.commands || [];
+        refreshScopeOptions();
+        renderLog();
+        renderRules(r.rules || [], r.denylist || []);
+    } catch (e) { /* Jarvis restarting; the next tick picks it up. */ }
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+  <script src="nav_ui.js"></script>
+  <script src="sections_ui.js"></script>
+</body>
+</html>
