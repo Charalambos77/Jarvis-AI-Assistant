@@ -34,6 +34,8 @@ from flask import Flask, request, jsonify, send_from_directory
 import webview
 
 import db
+import sections as section_store
+import command_gate
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -152,6 +154,29 @@ AGENT_OBS_LOCK = threading.Lock()
 PLAN_STORE: list[dict] = []            # list of all active/past plans
 PLAN_STORE_LOCK = threading.Lock()
 
+# --- Pipeline Intake Drafts (clarification gate) ---
+# A draft is everything the user has told us about a pipeline BEFORE the
+# pipeline exists: their typed details, uploaded files, and the running Q&A.
+# Deliberately NOT persisted to SQLite — cancelling an intake must leave no
+# trace at all, so an abandoned draft dies with the process (or with the
+# janitor below).
+INTAKE_DRAFTS: dict[str, dict] = {}
+INTAKE_DRAFTS_LOCK = threading.Lock()
+INTAKE_DRAFT_TTL = 6 * 3600            # seconds before an untouched draft is swept
+
+# --- Section Drafts (the same gate, for turning a pipeline into a section) ---
+# Everything the user has told us about a section BEFORE the section exists:
+# the name and brief they typed, the files they dropped, and the running Q&A.
+# Not persisted either — cancelling must leave no section and no files behind.
+SECTION_DRAFTS: dict[str, dict] = {}
+SECTION_DRAFTS_LOCK = threading.Lock()
+
+# Gemini can read these natively; everything else is stored and referenced by
+# path so the agents can open it themselves.
+INTAKE_READABLE_MIMES = ("image/", "application/pdf", "text/")
+INTAKE_MAX_INLINE_BYTES = 15 * 1024 * 1024   # per-file cap on what we inline into a prompt
+
+
 ACTIVE_PIPELINE_THREADS = set()
 ACTIVE_PIPELINE_LOCK = threading.Lock()
 
@@ -169,6 +194,15 @@ def load_pipelines_from_db():
 
 # Load persisted plans on startup
 load_pipelines_from_db()
+
+# The Antigravity CLI is allowed to run commands only while a build is actually
+# running. If Jarvis was killed mid-build that permission could still be sitting
+# in the CLI's settings, so it is cleared here before anything can start.
+try:
+    from connectors import antigravity as _antigravity
+    _antigravity.clear_command_grant()
+except Exception as e:
+    print(f"Could not clear the Antigravity command permission: {e}")
 
 
 # --- Jarvis User & Identity Layer ---
@@ -514,10 +548,23 @@ def jarvis_tool_listener(name, args, result):
             }
 
 def get_snapshot_local():
+    # Inside a section the snapshot is that section's: showing the brain's task
+    # list here would have Jarvis answering about work that is not in front of
+    # the user, and acting on the wrong ids.
+    section = coordinator.get_active_section()
+    section_id = section["id"] if section else None
+
     conn = db.get_connection(DB_PATH)
     try:
-        tasks_list = db.get_tasks(conn)
-        notes_rows = conn.execute("SELECT * FROM notes WHERE status = 'open'").fetchall()
+        tasks_list = db.get_tasks(conn, section_id=section_id)
+        if section_id:
+            notes_rows = conn.execute(
+                "SELECT * FROM notes WHERE status = 'open' AND section_id = ?", (section_id,)
+            ).fetchall()
+        else:
+            notes_rows = conn.execute(
+                "SELECT * FROM notes WHERE status = 'open' AND section_id IS NULL"
+            ).fetchall()
         notes_list = [dict(r) for r in notes_rows]
     finally:
         conn.close()
@@ -530,6 +577,7 @@ def get_snapshot_local():
 
     snapshot["tasks"] = tasks_list
     snapshot["notes"] = notes_list
+    snapshot["section"] = {"id": section["id"], "name": section["name"]} if section else None
     snapshot["acks"] = list(JARVIS_ACK_QUEUE)
     return snapshot
 
@@ -610,11 +658,12 @@ def update_task_log_file(plan_id: str, event: dict):
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"pipeline_{plan_id}.md")
 
-    plan_events = []
+    # Snapshot under the lock (a fast C-level copy), then filter outside it.
+    # This runs on every agent event and the log only grows, so scanning it while
+    # holding the lock stalled the observability endpoints the execution page polls.
     with AGENT_OBS_LOCK:
-        for e in AGENT_EVENT_LOG:
-            if e.get("plan_id") == plan_id:
-                plan_events.append(e)
+        all_events = list(AGENT_EVENT_LOG)
+    plan_events = [e for e in all_events if e.get("plan_id") == plan_id]
 
     content = f"# Pipeline Task Log - Plan ID: {plan_id}\n"
     content += f"- **Task:** {plan_data.get('task')}\n"
@@ -663,7 +712,431 @@ def update_task_log_file(plan_id: str, event: dict):
     except Exception as e:
         print(f"Failed to update task log file: {e}")
 
-def initiate_pipeline(task: str) -> str:
+# ---------------------------------------------------------------------------
+# Pipeline Intake — the clarification gate that runs BEFORE a pipeline exists
+#
+# Flow: details + files  ->  gap questions, one at a time  ->  a written plan
+# the user can edit  ->  approval.  Only the approval step creates a pipeline.
+# ---------------------------------------------------------------------------
+
+def load_section(section_id: str) -> dict | None:
+    """A section by id, or None. Opens and closes its own connection."""
+    if not section_id:
+        return None
+    conn = db.get_connection(DB_PATH)
+    try:
+        return db.get_section(conn, section_id)
+    except Exception as e:
+        print(f"[Sections] Could not load {section_id}: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def _section_for_draft(draft: dict) -> dict | None:
+    return load_section(draft.get("section_id"))
+
+
+def _draft_project_name(draft: dict) -> str:
+    """The draft's project folder name, derived on first use.
+
+    get_project_name() is a synchronous Gemini round-trip. Doing it while the
+    user is waiting for the "want to give me more details?" prompt — itself
+    nested inside another Gemini call — stalls the UI for seconds before
+    anything appears. Nothing needs the name until a file is uploaded or the
+    brief is written, so pay for it then.
+    """
+    with INTAKE_DRAFTS_LOCK:
+        name = draft.get("project_name")
+    if name:
+        return name
+
+    # Inside a section, everything belongs in that section's folder — a new
+    # pipeline must not scatter its work into a folder of its own.
+    section = _section_for_draft(draft)
+    if section:
+        with INTAKE_DRAFTS_LOCK:
+            draft["project_name"] = section["folder"]
+        return section["folder"]
+
+    name = get_project_name(draft["task"])
+    with INTAKE_DRAFTS_LOCK:
+        draft["project_name"] = name
+    return name
+
+
+def _intake_project_dir(project_name: str, *parts: str) -> str:
+    """Path inside this project's folder, creating it on the way."""
+    path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, *parts)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _intake_safe_filename(name: str) -> str:
+    """Strip any directory component so an upload can only land in Inputs/."""
+    import re
+    base = os.path.basename((name or "").replace("\\", "/")).strip()
+    base = re.sub(r'[^A-Za-z0-9._ -]', "_", base)
+    return base[:120] or "upload"
+
+
+def _delete_draft_uploads(draft: dict):
+    """Delete only the files THIS draft uploaded.
+
+    Never wipe the project's Inputs/ folder wholesale: get_project_name derives
+    that folder from the task text, so a second, similar request lands in the
+    same folder as an earlier pipeline. Cancelling the new draft must not take
+    the older pipeline's files with it \u2014 it may still be running on them.
+    """
+    for f in draft.get("files", []):
+        try:
+            if os.path.exists(f["path"]):
+                os.remove(f["path"])
+        except Exception as e:
+            print(f"[Intake] Could not delete {f.get('name')}: {e}")
+
+    # Tidy up the folders this draft created, but only while they are empty.
+    project_name = draft.get("project_name")
+    if not project_name:
+        return          # never named, so nothing was ever written for it
+    project = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name)
+    for path in (os.path.join(project, "Inputs"), project):
+        try:
+            if os.path.isdir(path) and not os.listdir(path):
+                os.rmdir(path)
+        except Exception as e:
+            print(f"[Intake] Could not remove empty folder {path}: {e}")
+
+
+def _prune_intake_drafts():
+    """Drop drafts nobody came back to, along with the files they uploaded."""
+    import time as _time
+    cutoff = _time.time() - INTAKE_DRAFT_TTL
+    with INTAKE_DRAFTS_LOCK:
+        stale = [d for d in INTAKE_DRAFTS.values() if d.get("touched", 0) < cutoff]
+        for draft in stale:
+            INTAKE_DRAFTS.pop(draft["draft_id"], None)
+    for draft in stale:
+        if not draft.get("approved"):
+            _delete_draft_uploads(draft)
+
+
+def _get_intake_draft(draft_id: str):
+    import time as _time
+    with INTAKE_DRAFTS_LOCK:
+        draft = INTAKE_DRAFTS.get((draft_id or "").strip())
+        if draft:
+            draft["touched"] = _time.time()
+        return draft
+
+
+def _intake_file_parts(draft: dict) -> list:
+    """Inline the files Gemini can actually read (images, PDFs, text)."""
+    parts = []
+    for f in draft.get("files", []):
+        mime = f.get("mime") or "application/octet-stream"
+        if not mime.startswith(INTAKE_READABLE_MIMES):
+            continue
+        try:
+            if os.path.getsize(f["path"]) > INTAKE_MAX_INLINE_BYTES:
+                continue
+            with open(f["path"], "rb") as fh:
+                parts.append(types.Part.from_bytes(data=fh.read(), mime_type=mime))
+        except Exception as e:
+            print(f"[Intake] Could not inline {f.get('name')}: {e}")
+    return parts
+
+
+def _intake_context_text(draft: dict) -> str:
+    """Everything the user has told us so far, as plain text for the prompt."""
+    lines = []
+    # Questions and the painted plan must not re-ask what the section already
+    # established, so the gate sees the section's standing knowledge first.
+    section = _section_for_draft(draft)
+    if section:
+        lines.append(
+            "THIS PIPELINE RUNS INSIDE AN EXISTING SECTION. Everything below is already "
+            "known \u2014 never ask the user about it, and do not plan to research it "
+            "again:\n" + section_store.knowledge_digest(section, max_chars=4000)
+        )
+        crew_text = section_store.crew_seed_text(section, max_chars=2500)
+        if crew_text:
+            lines.append(
+                "THE SECTION ALREADY HAS THESE AGENTS. Never ask the user who should do "
+                "the work \u2014 this is settled:\n" + crew_text
+            )
+    lines.append(f"ORIGINAL REQUEST:\n{draft.get('task', '')}")
+    details = (draft.get("details") or "").strip()
+    lines.append(f"\nDETAILS THE USER WROTE:\n{details if details else '(none given)'}")
+
+    files = draft.get("files", [])
+    if files:
+        listed = "\n".join(f"- {f['name']} ({f.get('mime', 'unknown type')})" for f in files)
+        lines.append(
+            "\nATTACHED FILES (readable ones are included with this message):\n" + listed
+        )
+    else:
+        lines.append("\nATTACHED FILES:\n(none)")
+
+    qa = draft.get("qa", [])
+    if qa:
+        answered = "\n".join(f"Q: {item['question']}\nA: {item['answer']}" for item in qa)
+        lines.append("\nCLARIFICATIONS ALREADY ANSWERED — never ask these again:\n" + answered)
+    return "\n".join(lines)
+
+
+def _intake_parse_json(text: str):
+    """Gemini likes to wrap JSON in code fences; unwrap before parsing."""
+    import re
+    cleaned = (text or "").strip()
+    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1).strip()
+    return json.loads(cleaned)
+
+
+def _ask_model_json(instruction: str, context_text: str, parts: list | None = None):
+    """One Gemini call: an instruction, the context, and any readable files.
+
+    Shared by both clarification gates — this one, and the section gate further
+    down — because they differ only in what they put in the context.
+    """
+    contents = [instruction, context_text] + (parts or [])
+    response = client.models.generate_content(model="gemini-2.5-flash", contents=contents)
+    return _intake_parse_json(response.text)
+
+
+def _normalise_questions(data) -> list[dict]:
+    """Accept a bare list or {"questions": [...]}, of strings or of objects."""
+    questions = data.get("questions", []) if isinstance(data, dict) else data
+    cleaned = []
+    for q in questions or []:
+        if isinstance(q, str) and q.strip():
+            cleaned.append({"question": q, "gist": q})
+        elif isinstance(q, dict) and q.get("question"):
+            cleaned.append({"question": q["question"], "gist": q.get("gist") or q["question"]})
+    return cleaned
+
+
+def _intake_ask_gemini(draft: dict, instruction: str):
+    """One Gemini call carrying the whole draft (text + readable files)."""
+    return _ask_model_json(instruction, _intake_context_text(draft), _intake_file_parts(draft))
+
+
+_INTAKE_BRIEF_RULE = (
+    "The brief is authoritative for WHAT the user wants. It is not a limit on HOW you work: "
+    "research and search the web freely for anything the brief does not cover. Follow the brief "
+    "exactly where it constrains you \u2014 if it names a specific source, tool, or approach, use that "
+    "one instead of choosing your own. Attached files live at the paths listed in the brief; open "
+    "them when they are relevant."
+)
+
+
+# What separates a question worth asking from a waste of the user's time. Shared
+# by both gates, because a bad question is bad for the same reasons either way.
+_QUESTION_RULES = (
+    "- Only ask about gaps that would actually change what gets done. Test every question "
+    "before you write it down: if each plausible answer leads to the same work, drop it.\n"
+    "- Never ask about how this system works or where anything is kept. The app, its pages, "
+    "its folders, its file formats and its tools are already decided and are not the user's "
+    "business here. No questions about platforms, hosting, storage, naming, formats, or how "
+    "you will organise or track the work.\n"
+    "- Never ask what you can reasonably infer, and never ask a preference that would not "
+    "alter the work.\n"
+    "- Never re-ask something already answered, and never ask for what the attached files "
+    "already contain — read them first.\n"
+    "- Short, plain, one topic each. No compound questions. There is no limit on how many you "
+    "ask, but every one has to earn its place.\n"
+    "- If nothing material is missing, return an empty list. An empty list is the correct "
+    "answer whenever you could proceed without guessing.\n"
+)
+
+
+def _intake_next_questions(draft: dict) -> list[dict]:
+    """Ask Gemini for the gaps that would genuinely change what gets built."""
+    instruction = (
+        "You are Jarvis, about to hand this job to a team of autonomous agents. Before they start, "
+        "find what you genuinely do not know.\n\n"
+        "RULES:\n" + _QUESTION_RULES + "\n"
+        "For each question also write \"gist\": a single short spoken line (under 15 words) that "
+        "conveys the question aloud.\n\n"
+        "Reply with JSON only: {\"questions\": [{\"question\": \"...\", \"gist\": \"...\"}]}"
+    )
+    try:
+        data = _intake_ask_gemini(draft, instruction)
+    except Exception as e:
+        # A dead question round must not trap the user — fall through to the plan.
+        print(f"[Intake] Question generation failed: {e}")
+        return []
+
+    return _normalise_questions(data)
+
+
+def _intake_paint_picture(draft: dict) -> dict:
+    """Either the plan, or another round of questions — Jarvis decides."""
+    instruction = (
+        "You are Jarvis. Using everything below, paint a picture of what the user asked for: a "
+        "written plan they can read and correct.\n\n"
+        "RULES:\n"
+        "- Fold in every clarification and everything you can see in the attached files.\n"
+        "- Plain language and concrete. Describe what will be built and for whom, not how you "
+        "will manage the work.\n"
+        "- Invent nothing. Do not add requirements the user never gave you.\n"
+        "- Now that you have read the answers, ask again if they opened something material you "
+        "still cannot settle: do NOT guess, return questions instead of a plan. The rules on what "
+        "makes a question worth asking apply here exactly as they did before:\n"
+        + _QUESTION_RULES + "\n"
+        "Reply with JSON only, one of:\n"
+        "{\"plan_text\": \"the plan in markdown\"}\n"
+        "{\"questions\": [{\"question\": \"...\", \"gist\": \"...\"}]}"
+    )
+    try:
+        data = _intake_ask_gemini(draft, instruction)
+    except Exception as e:
+        # Degrade to the raw brief so the user can still edit and approve something.
+        print(f"[Intake] Painting the picture failed: {e}")
+        return {
+            "plan_text": _intake_brief_markdown(draft, include_plan=False),
+            "degraded": "Jarvis could not reach the model to write the plan, so this is the raw "
+                        "brief. You can edit it and build from it.",
+        }
+
+    if isinstance(data, dict) and data.get("questions"):
+        questions = _normalise_questions(data)
+        if questions:
+            return {"questions": questions}
+
+    plan_text = (data or {}).get("plan_text") if isinstance(data, dict) else None
+    if not plan_text:
+        plan_text = _intake_brief_markdown(draft, include_plan=False)
+    return {"plan_text": plan_text}
+
+
+def _clean_edited_text(context_text: str, parts: list, edited_text: str,
+                       noun: str = "plan") -> str:
+    """Tidy the user's edit without changing a single one of their decisions."""
+    instruction = (
+        f"The user edited the {noun} below. Return it in a clean, consistent format.\n\n"
+        "RULES:\n"
+        "- Preserve every decision they made. Change no meaning.\n"
+        "- Add no requirements they did not write, and remove none that they did.\n"
+        "- Fix only structure, headings and wording.\n\n"
+        f"Reply with JSON only: {{\"plan_text\": \"the cleaned {noun} in markdown\"}}\n\n"
+        "THE USER\u2019S EDITED TEXT:\n" + (edited_text or "")
+    )
+    try:
+        data = _ask_model_json(instruction, context_text, parts)
+        cleaned = (data or {}).get("plan_text")
+        if cleaned:
+            return cleaned
+    except Exception as e:
+        print(f"[Intake] Cleaning the edit failed: {e}")
+    # Never lose the user's words — keep their version verbatim if cleaning fails.
+    return edited_text
+
+
+def _intake_clean_edit(draft: dict, edited_text: str) -> str:
+    return _clean_edited_text(_intake_context_text(draft), _intake_file_parts(draft), edited_text)
+
+
+def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
+    """The complete record handed to the agents."""
+    out = [f"# Clarified Brief \u2014 {draft.get('project_name') or 'Project'}", ""]
+    out += ["## Original request", draft.get("task", ""), ""]
+
+    details = (draft.get("details") or "").strip()
+    out += ["## Details from the user", details if details else "_(none given)_", ""]
+
+    qa = draft.get("qa", [])
+    if qa:
+        out.append("## Clarifications")
+        for item in qa:
+            out += [f"**Q:** {item['question']}", "", f"**A:** {item['answer']}", ""]
+
+    files = draft.get("files", [])
+    if files:
+        out.append("## Attached files")
+        for f in files:
+            out.append(f"- `Inputs/{f['name']}` \u2014 {f.get('mime', 'unknown type')}")
+        out.append("")
+
+    if include_plan and draft.get("plan_text"):
+        out += ["## Approved plan", draft["plan_text"], ""]
+
+    section = _section_for_draft(draft)
+    if section:
+        out += ["---", "", section_store.knowledge_digest(section), ""]
+        # The section's standing crew is the roster the Brain plans from, so a
+        # pipeline started here adapts the agents that already did this work
+        # rather than inventing a fresh cast that duplicates them.
+        crew_text = section_store.crew_seed_text(section)
+        if crew_text:
+            out += ["---", "", crew_text, ""]
+
+    out += ["---", "", "## How to use this brief", _INTAKE_BRIEF_RULE, ""]
+    return "\n".join(out)
+
+
+def _intake_write_brief(draft: dict) -> str:
+    brief_dir = _intake_project_dir(_draft_project_name(draft), "Brief")
+    # Two similar requests derive the same project name, so never overwrite a brief
+    # an earlier pipeline is still working from — its plan points at that file.
+    brief_path = os.path.join(brief_dir, "clarified_brief.md")
+    n = 2
+    while os.path.exists(brief_path):
+        brief_path = os.path.join(brief_dir, f"clarified_brief ({n}).md")
+        n += 1
+    with open(brief_path, "w", encoding="utf-8") as f:
+        f.write(_intake_brief_markdown(draft))
+    return brief_path
+
+
+def _intake_discard(draft: dict):
+    """Cancel means it never happened: forget the draft, delete its uploads."""
+    with INTAKE_DRAFTS_LOCK:
+        INTAKE_DRAFTS.pop(draft["draft_id"], None)
+    _delete_draft_uploads(draft)
+
+
+def create_intake_draft(task: str, section_id: str | None = None) -> dict:
+    """Start a draft. No pipeline, no DB row, nothing persistent yet."""
+    import time as _time
+    import uuid
+    _prune_intake_drafts()
+    draft = {
+        "draft_id": uuid.uuid4().hex[:8],
+        "task": task,
+        # A pipeline started inside a section belongs to it: its folder, its
+        # knowledge, its tasks. None means the pipeline stands on its own.
+        "section_id": section_id,
+        "project_name": None,          # derived lazily by _draft_project_name()
+        "details": "",
+        "files": [],
+        "qa": [],
+        "pending_questions": [],
+        "rounds": 0,
+        "plan_text": None,
+        "stage": "intake",
+        "created": _time.time(),
+        "touched": _time.time(),
+    }
+    with INTAKE_DRAFTS_LOCK:
+        INTAKE_DRAFTS[draft["draft_id"]] = draft
+    return draft
+
+
+def initiate_pipeline(task: str, project_name: str | None = None,
+                      brief_path: str | None = None,
+                      task_summary: str | None = None) -> str:
+    """Create the pipeline and start the agents.
+
+    `task` may now be a full clarified brief rather than a one-liner, so:
+      - `project_name` is passed in when the intake flow already derived one, so the
+        Inputs/ folder the user uploaded into is the same folder the pipeline uses;
+      - `task_summary` keeps the original short request for UI labels;
+      - `brief_path` points the agents at the complete brief on disk.
+    Called with none of them, this behaves exactly as it always did.
+    """
     import time
     
     conn = db.get_connection(DB_PATH)
@@ -685,12 +1158,15 @@ def initiate_pipeline(task: str) -> str:
     finally:
         conn.close()
     
-    project_name = get_project_name(task)
+    project_name = project_name or get_project_name(task)
+    task_summary = task_summary or task
 
     with PLAN_STORE_LOCK:
         plan_entry = {
             "id": plan_id,
             "task": task,
+            "task_summary": task_summary,
+            "brief_path": brief_path,
             "project_name": project_name,
             "status": "running",
             "current_gate": None,
@@ -698,6 +1174,7 @@ def initiate_pipeline(task: str) -> str:
             "phase": "research",
             "timestamp": time.time(),
             "cycles": [],
+            "completed_stages": [],
             "master_blueprint": {},
             "exec_results": [],
             "deploy_result": {}
@@ -714,8 +1191,8 @@ def initiate_pipeline(task: str) -> str:
             conn.close()
 
 
-    push_message("system", f"Pipeline started [Plan ID: {plan_id}]: {task[:80]}...")
-    create_initial_task_log(plan_id, task, project_name)
+    push_message("system", f"Pipeline started [Plan ID: {plan_id}]: {task_summary[:80]}...")
+    create_initial_task_log(plan_id, task_summary, project_name)
 
     async def gate_fn(gate_id: str, data: dict) -> dict:
         with PIPELINE_LOCK:
@@ -751,7 +1228,7 @@ def initiate_pipeline(task: str) -> str:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name))
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, brief_path=brief_path))
             status = result.get('status', 'done')
             if status == "escalated_to_human":
                 reason = result.get('message', 'Max retries exceeded.')
@@ -779,11 +1256,46 @@ def normalize_spoken_id(plan_id: str) -> str:
     return number_map.get(cleaned, cleaned)
 
 def start_pipeline_local(settings_dict):
+    """Opens the clarification gate instead of launching the pipeline outright.
+
+    Nothing is created here: no plan id, no DB row, no agent thread. We hand the
+    UI a draft and ask whether the user wants to give more details first. If they
+    say no, the frontend calls /pipeline/start and we build on the one-liner
+    exactly as before.
+    """
+    global UI_ACTION
     task = settings_dict.get("task", "").strip()
     if not task:
         return {"error": "task is required"}
-    plan_id = initiate_pipeline(task)
-    return {"status": "pipeline_started", "task": task, "plan_id": plan_id}
+
+    section_id = (settings_dict.get("section_id") or "").strip() or None
+
+    if settings_dict.get("skip_intake"):
+        # Even without the gate, work started inside a section belongs to it.
+        section = load_section(section_id)
+        plan_id = initiate_pipeline(
+            task, project_name=section["folder"] if section else None
+        )
+        if section:
+            attach_pipeline_to_section(section, plan_id)
+        return {"status": "pipeline_started", "task": task, "plan_id": plan_id}
+
+    draft = create_intake_draft(task, section_id=section_id)
+    with STATE_LOCK:
+        UI_ACTION = {
+            "type": "pipeline_intake_ask",
+            "draft_id": draft["draft_id"],
+            "task": task,
+            "section_id": section_id,
+        }
+    push_message("ai", "Do you want to give me more details before I start?")
+    return {
+        "status": "awaiting_details",
+        "task": task,
+        "draft_id": draft["draft_id"],
+        "note": "The pipeline has NOT started. Jarvis asked the user whether they want to add "
+                "details first; the answer decides what happens next.",
+    }
 
 def resume_pipeline_local(settings_dict):
     plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
@@ -811,6 +1323,9 @@ def resume_pipeline_local(settings_dict):
 
     task = plan_entry.get("task")
     project_name = plan_entry.get("project_name", "Default Project")
+    # Pipelines started through the clarification gate carry a brief on disk.
+    brief_path = plan_entry.get("brief_path")
+    task_summary = plan_entry.get("task_summary") or task
     
     with PLAN_STORE_LOCK:
         plan_entry["status"] = "running"
@@ -833,9 +1348,9 @@ def resume_pipeline_local(settings_dict):
             print(f"Failed to automatically open log file: {e}")
 
     if force_reexecute:
-        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}] with FORCE RE-EXECUTE: {task[:80]}...")
+        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}] with FORCE RE-EXECUTE: {task_summary[:80]}...")
     else:
-        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}]: {task[:80]}...")
+        push_message("system", f"Resuming pipeline [Plan ID: {plan_id}]: {task_summary[:80]}...")
 
     async def gate_fn(gate_id: str, data: dict) -> dict:
         with PIPELINE_LOCK:
@@ -875,7 +1390,7 @@ def resume_pipeline_local(settings_dict):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, force_reexecute=force_reexecute))
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, force_reexecute=force_reexecute, brief_path=brief_path))
             status = result.get('status', 'done')
             if status == "escalated_to_human":
                 reason = result.get('message', 'Max retries exceeded.')
@@ -918,8 +1433,19 @@ def read_metrics_local():
         return dict(TRACKED_METRICS)
 
 def get_pipelines_local():
+    """List plans for the assistant. `task` now holds the full clarified brief on
+    pipelines that came through the intake gate, which would flood the model's
+    context, so hand back the short summary and point at the brief instead."""
     with PLAN_STORE_LOCK:
-        return list(PLAN_STORE)
+        plans = list(PLAN_STORE)
+    trimmed = []
+    for plan in plans:
+        view = dict(plan)
+        summary = view.get("task_summary") or view.get("task") or ""
+        view["task"] = summary
+        view.pop("task_summary", None)
+        trimmed.append(view)
+    return trimmed
 
 def delete_pipeline_local(settings_dict):
     plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
@@ -1048,6 +1574,22 @@ def check_navigation_intent(transcript: str) -> str:
         return "apis"
     return ""
 
+def is_stop_command(transcript_lower: str, stop_words: list[str]) -> bool:
+    """True only when the user actually said goodbye, not merely used the word.
+
+    Two guards: whole-word matching (so "quite" is not "quit"), and a length limit
+    (so "exit the loop in that script, please" is a request, not a farewell).
+    """
+    import re
+    words = transcript_lower.split()
+    if len(words) > 6:
+        return False
+    for phrase in stop_words:
+        if re.search(r"\b" + re.escape(phrase) + r"\b", transcript_lower):
+            return True
+    return False
+
+
 def handle_request(transcript: str) -> str:
     nav_target = check_navigation_intent(transcript)
     if nav_target == "execution":
@@ -1098,6 +1640,28 @@ import logging
 logging.getLogger("werkzeug").setLevel(logging.WARNING)  # quiet the request logs
 
 
+@app.after_request
+def no_cache_html(response):
+    """Never let the webview serve a stale page.
+
+    The UI is plain HTML files on disk. When one of them changes, the running
+    app must show the new version \u2014 otherwise a fix that is genuinely in the
+    file looks like it did nothing, and the bug hunt goes looking in the wrong
+    place entirely. Only pages are covered; API responses are untouched.
+    """
+    if response.mimetype == "text/html":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        # Drop the validators too. Left in place, the browser stores them and
+        # asks "still unchanged?" on the next load — and Flask answers 304, which
+        # sends it right back to the cached copy. With nothing to revalidate
+        # against, every load fetches the file as it is on disk.
+        response.headers.pop("ETag", None)
+        response.headers.pop("Last-Modified", None)
+    return response
+
+
 @app.route("/")
 def root_page():
     return send_from_directory(BASE_DIR, "command_center.html")
@@ -1121,6 +1685,26 @@ def agent_map_final_page():
 @app.route("/agent_map_demo.html")
 def agent_map_demo_page():
     return send_from_directory(os.path.join(BASE_DIR, "Previews"), "agent_map_demo.html")
+
+
+@app.route("/section.html")
+def section_page():
+    return send_from_directory(BASE_DIR, "section.html")
+
+
+@app.route("/sections_ui.js")
+def sections_ui_script():
+    return send_from_directory(BASE_DIR, "sections_ui.js")
+
+
+@app.route("/nav_ui.js")
+def nav_ui_script():
+    return send_from_directory(BASE_DIR, "nav_ui.js")
+
+
+@app.route("/mic_ui.js")
+def mic_ui_script():
+    return send_from_directory(BASE_DIR, "mic_ui.js")
 
 
 @app.route("/plan.html")
@@ -1149,6 +1733,16 @@ def provider_comparison_page():
     return send_from_directory(BASE_DIR, "provider_comparison.html")
 
 
+@app.route("/commands.html")
+def commands_page():
+    return send_from_directory(BASE_DIR, "commands.html")
+
+
+@app.route("/library.html")
+def library_page():
+    return send_from_directory(BASE_DIR, "library.html")
+
+
 @app.route("/api/console_logs", methods=["GET"])
 def get_console_logs():
     with CONSOLE_LOGS_LOCK:
@@ -1163,9 +1757,15 @@ def get_agent_chat_logs():
 
 @app.route("/tasks", methods=["GET"])
 def tasks():
+    """The brain's tasks, or one section's when asked for by id.
+
+    Tasks made inside a section belong to it, so the brain's list no longer
+    mixes them in.
+    """
+    section_id = (request.args.get("section_id") or "").strip() or None
     conn = db.get_connection(DB_PATH)
     try:
-        return jsonify({"tasks": db.get_tasks(conn)})
+        return jsonify({"tasks": db.get_tasks(conn, section_id=section_id)})
     finally:
         conn.close()
 
@@ -1175,10 +1775,19 @@ def get_notes():
     conn = db.get_connection(DB_PATH)
     try:
         query = request.args.get("query", "").strip()
+        section_id = (request.args.get("section_id") or "").strip() or None
         if query:
-            notes = db.search_notes(conn, query)
+            notes = db.search_notes(conn, query, section_id=section_id)
+        elif section_id:
+            rows = conn.execute(
+                "SELECT * FROM notes WHERE section_id = ? ORDER BY created_at DESC",
+                (section_id,),
+            ).fetchall()
+            notes = [dict(r) for r in rows]
         else:
-            rows = conn.execute("SELECT * FROM notes ORDER BY created_at DESC").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM notes WHERE section_id IS NULL ORDER BY created_at DESC"
+            ).fetchall()
             notes = [dict(r) for r in rows]
         return jsonify({"notes": notes})
     finally:
@@ -1225,6 +1834,17 @@ def state():
         UI_ACTION = None
         return res
 
+@app.route("/jarvis/mic", methods=["GET"])
+def mic_state():
+    """Whether the microphone is muted, and nothing else.
+
+    The mute button lives on more than one screen now, and /state could not be
+    what they read: serving it clears the one-shot focus and UI-action fields,
+    so a second page polling it would swallow events meant for the Brain.
+    """
+    return jsonify({"mic_muted": MIC_MUTED})
+
+
 @app.route("/jarvis/mute-mic", methods=["POST"])
 def mute_mic():
     global MIC_MUTED
@@ -1249,6 +1869,11 @@ def ask():
         reply = handle_request(text)
     except Exception as e:
         reply = f"Something went wrong: {e}"
+    # Last line of defence: an empty reply would render as a blank "JARVIS:" bubble
+    # and be spoken as silence, which reads as the app being broken with no clue why.
+    if not (reply or "").strip():
+        print("[Jarvis] handle_request returned an empty reply.")
+        reply = "I could not produce a reply for that, Sir. Please try again."
     push_message("ai", reply)
 
     # Speak it out loud on a background thread so the UI updates immediately.
@@ -1394,6 +2019,332 @@ def gate_data():
         "status": state.get("gate_status"),
         "data": state.get("gate_data"),
         "plan_id": plan_id or state.get("plan_id"),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Commands — the review page for everything the Antigravity CLI wants to run.
+#
+# /commands/ask is not called by the browser. The Antigravity CLI calls it,
+# through the hook in scripts/agy_command_gate.py, and the request stays open
+# while the command sits on the page waiting for an answer. Everything else
+# here is the page itself: what is waiting, what was decided before, and the
+# standing "always allow" rules.
+# ---------------------------------------------------------------------------
+
+def _owning_run(project: str) -> tuple[str, str]:
+    """Which pipeline and section a command in this project belongs to.
+
+    The hook knows the project for certain and the pipeline only when Jarvis
+    put it in the environment, so this fills the gap: a command can only be
+    asked about while its build is running, and a running build in a project is
+    the pipeline that asked.
+    """
+    plan_id = ""
+    if project:
+        with ACTIVE_PIPELINE_LOCK:
+            active = set(ACTIVE_PIPELINE_THREADS)
+        with PLAN_STORE_LOCK:
+            matching = [p for p in PLAN_STORE if p.get("project_name") == project]
+        running = [p for p in matching if p["id"] in active]
+        pick = running or matching
+        if pick:
+            plan_id = max(pick, key=lambda p: p.get("timestamp") or 0)["id"]
+
+    section_id = ""
+    conn = db.get_connection(DB_PATH)
+    try:
+        section = db.get_section_by_folder(conn, project) if project else None
+        section_id = (section or {}).get("id") or ""
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return plan_id, section_id
+
+
+@app.route("/commands/ask", methods=["POST"])
+def commands_ask():
+    """The Antigravity CLI asking permission to run one terminal command."""
+    data = request.get_json(force=True) or {}
+    command = (data.get("command") or "").strip()
+    if not command:
+        return jsonify({"decision": "deny", "reason": "No command was sent for review."})
+
+    project = (data.get("project") or "").strip()
+    plan_id = (data.get("plan_id") or "").strip()
+    section_id = (data.get("section_id") or "").strip()
+    if not plan_id or not section_id:
+        found_plan, found_section = _owning_run(project)
+        plan_id = plan_id or found_plan
+        section_id = section_id or found_section
+
+    def announce():
+        push_message("system", (
+            f"Antigravity wants to run `{command}` in {project or 'a project'}. "
+            "Waiting for your answer on the Commands page."
+        ))
+
+    result = command_gate.ask(
+        command,
+        project=project,
+        plan_id=plan_id,
+        section_id=section_id,
+        conversation_id=(data.get("conversation_id") or "").strip(),
+        cwd=(data.get("cwd") or "").strip(),
+        on_change=announce,
+    )
+    return jsonify(result)
+
+
+@app.route("/commands/pending", methods=["GET"])
+def commands_pending():
+    """What is waiting for an answer right now."""
+    return jsonify({
+        "pending": command_gate.pending(),
+        "wait_seconds": command_gate.WAIT_SECONDS,
+    })
+
+
+@app.route("/commands/decide", methods=["POST"])
+def commands_decide():
+    """Allow, always-allow or reject one waiting command."""
+    data = request.get_json(force=True) or {}
+    request_id = (data.get("request_id") or "").strip()
+    decision = (data.get("decision") or "").strip().lower()
+    if not request_id:
+        return jsonify({"error": "request_id is required — without it the wrong command "
+                                 "could be answered when more than one is waiting."}), 400
+
+    result = command_gate.decide(
+        request_id,
+        decision,
+        reason=(data.get("reason") or "").strip(),
+        project_scope=bool(data.get("this_project_only")),
+    )
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/commands/log", methods=["GET"])
+def commands_log():
+    """Everything already decided, newest first."""
+    conn = db.get_connection(DB_PATH)
+    try:
+        entries = db.get_commands(
+            conn,
+            plan_id=(request.args.get("plan_id") or "").strip() or None,
+            project=(request.args.get("project") or "").strip() or None,
+            limit=int(request.args.get("limit") or 300),
+        )
+    finally:
+        conn.close()
+    return jsonify({"commands": entries})
+
+
+@app.route("/commands/rules", methods=["GET"])
+def commands_rules():
+    """The standing 'always allow' answers, and the list nothing can override."""
+    conn = db.get_connection(DB_PATH)
+    try:
+        rules = db.get_command_rules(conn)
+    finally:
+        conn.close()
+    return jsonify({"rules": rules, "denylist": command_gate.denylist_descriptions()})
+
+
+@app.route("/commands/rules/delete", methods=["POST"])
+def commands_rules_delete():
+    """Take back an 'always allow'."""
+    data = request.get_json(force=True) or {}
+    try:
+        rule_id = int(data.get("rule_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "rule_id is required."}), 400
+    conn = db.get_connection(DB_PATH)
+    try:
+        removed = db.delete_command_rule(conn, rule_id)
+    finally:
+        conn.close()
+    return jsonify({"status": "deleted" if removed else "not_found"})
+
+
+# ---------------------------------------------------------------------------
+# Library — one place to find a finished piece of work again.
+#
+# Everything Jarvis produces already exists somewhere: pipelines in the plan
+# store, sections in the database, files in "Let Jarvis Handle It". What was
+# missing was any way to go from "that car rental site we built" to the run
+# that built it and the files it left behind, without remembering a plan id.
+# This assembles that view — sections holding their pipelines, pipelines
+# holding their outputs — and the page does the searching over it.
+# ---------------------------------------------------------------------------
+
+# Not worth listing and not what anyone is looking for: dependency trees,
+# version control, and the hook this project was given.
+_LIBRARY_SKIP_DIRS = {
+    ".git", ".agents", "node_modules", "__pycache__", ".venv", "venv",
+    "dist", "build", ".next", ".cache",
+}
+_LIBRARY_FILE_CAP = 400
+
+
+def _project_files(folder: str) -> list[dict]:
+    """The files a project actually contains, newest first.
+
+    Agents write into Deliverables; the Antigravity CLI builds in the project
+    root. Both are the work, so both are listed, with the path kept relative so
+    it stays readable and can be handed straight to /api/open-artifact.
+    """
+    root = os.path.join(BASE_DIR, "Let Jarvis Handle It", folder)
+    if not os.path.isdir(root):
+        return []
+
+    files = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _LIBRARY_SKIP_DIRS]
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            try:
+                stat = os.stat(full)
+            except OSError:
+                continue
+            files.append({
+                "name": name,
+                "path": os.path.relpath(full, BASE_DIR).replace("\\", "/"),
+                "rel": os.path.relpath(full, root).replace("\\", "/"),
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+            })
+            if len(files) >= _LIBRARY_FILE_CAP:
+                break
+        if len(files) >= _LIBRARY_FILE_CAP:
+            break
+
+    files.sort(key=lambda f: f["modified"], reverse=True)
+    return files
+
+
+def _library_pipeline(plan: dict, active_ids: set) -> dict:
+    """A pipeline reduced to what the Library needs to show and search on.
+
+    Plans go back a long way and older ones do not all hold the shape the
+    current pipeline writes — `cycles` in particular is sometimes a list of
+    strings. The Library is a place to find old work, so it has to survive
+    reading old work; anything unrecognised just counts as nothing.
+    """
+    cycles = [c for c in (plan.get("cycles") or []) if isinstance(c, dict)]
+    results = plan.get("exec_results") or []
+    return {
+        "id": plan.get("id"),
+        "task": plan.get("task_summary") or plan.get("task") or "",
+        "full_task": plan.get("task") or "",
+        "project_name": plan.get("project_name") or "",
+        "status": plan.get("status") or "",
+        "phase": plan.get("phase") or "",
+        "gate_status": plan.get("gate_status") or "",
+        "timestamp": plan.get("timestamp") or 0,
+        "active": plan.get("id") in active_ids,
+        "agent_count": sum(len(c.get("agents") or []) for c in cycles),
+        "deliverable_count": len(results) if isinstance(results, list) else 0,
+    }
+
+
+@app.route("/api/library", methods=["GET"])
+def library_index():
+    """Sections, their pipelines, and the files each project holds."""
+    with ACTIVE_PIPELINE_LOCK:
+        active_ids = set(ACTIVE_PIPELINE_THREADS)
+    with PLAN_STORE_LOCK:
+        plans = [p.copy() for p in PLAN_STORE]
+
+    plans_by_id = {p.get("id"): p for p in plans}
+
+    conn = db.get_connection(DB_PATH)
+    try:
+        sections = db.get_sections(conn)
+        section_plan_ids = {
+            s["id"]: db.get_section_plan_ids(conn, s["id"]) for s in sections
+        }
+        command_counts = {}
+        for row in db.get_commands(conn, limit=2000):
+            key = row.get("plan_id") or ""
+            command_counts[key] = command_counts.get(key, 0) + 1
+    finally:
+        conn.close()
+
+    filed = set()
+    section_views = []
+    for section in sections:
+        ids = section_plan_ids.get(section["id"], [])
+        founding = section.get("founding_plan_id")
+        if founding and founding not in ids:
+            ids = [founding] + ids
+        filed.update(ids)
+
+        pipelines = [
+            _library_pipeline(plans_by_id[pid], active_ids)
+            for pid in ids if pid in plans_by_id
+        ]
+        pipelines.sort(key=lambda p: p["timestamp"], reverse=True)
+        for p in pipelines:
+            p["command_count"] = command_counts.get(p["id"], 0)
+
+        files = _project_files(section.get("folder") or "")
+        section_views.append({
+            "id": section["id"],
+            "name": section.get("name") or "",
+            "folder": section.get("folder") or "",
+            "brief": section.get("brief") or "",
+            "created_at": section.get("created_at") or "",
+            "pipelines": pipelines,
+            "files": files,
+            "file_count": len(files),
+            "last_activity": max(
+                [p["timestamp"] for p in pipelines] +
+                [f["modified"] for f in files] + [0]
+            ),
+            "running": any(p["active"] for p in pipelines),
+        })
+
+    section_views.sort(key=lambda s: s["last_activity"], reverse=True)
+
+    # A pipeline that never became a section is still work worth finding. It is
+    # grouped by its project folder so several runs at the same thing read as
+    # one body of work rather than as unrelated rows.
+    loose: dict[str, dict] = {}
+    for plan in plans:
+        if plan.get("id") in filed:
+            continue
+        folder = plan.get("project_name") or "Unfiled"
+        group = loose.setdefault(folder, {
+            "folder": folder, "pipelines": [], "files": _project_files(folder),
+        })
+        entry = _library_pipeline(plan, active_ids)
+        entry["command_count"] = command_counts.get(entry["id"], 0)
+        group["pipelines"].append(entry)
+
+    loose_views = []
+    for group in loose.values():
+        group["pipelines"].sort(key=lambda p: p["timestamp"], reverse=True)
+        group["file_count"] = len(group["files"])
+        group["last_activity"] = max(
+            [p["timestamp"] for p in group["pipelines"]] +
+            [f["modified"] for f in group["files"]] + [0]
+        )
+        group["running"] = any(p["active"] for p in group["pipelines"])
+        loose_views.append(group)
+    loose_views.sort(key=lambda g: g["last_activity"], reverse=True)
+
+    return jsonify({
+        "sections": section_views,
+        "unfiled": loose_views,
+        "totals": {
+            "sections": len(section_views),
+            "pipelines": len(plans),
+            "running": len(active_ids),
+        },
     })
 
 
@@ -1607,22 +2558,37 @@ def pipeline_event_logger(event: dict):
             for plan in PLAN_STORE:
                 if plan["id"] == plan_id:
                     event_type = event.get("event_type")
+                    # Stages are recorded only once they genuinely finish, so a
+                    # pipeline resumed after the app was closed re-enters the stage
+                    # it was actually sitting in instead of skipping past it.
+                    completed = plan.setdefault("completed_stages", [])
+                    def mark_done(stage: str):
+                        if stage and stage not in completed:
+                            completed.append(stage)
                     if event_type == "gate_waiting":
                         plan["current_gate"] = event.get("source")
                         plan["gate_status"] = "waiting"
                         plan["gate_data"] = event.get("data")
                     elif event_type == "gate_resolved":
                         plan["current_gate"] = None
-                        plan["gate_status"] = "approved" if event.get("data", {}).get("approved") else "rejected"
+                        approved = bool(event.get("data", {}).get("approved"))
+                        plan["gate_status"] = "approved" if approved else "rejected"
+                        if approved:
+                            mark_done(event.get("source"))
                     elif event_type == "blueprint_compiled":
                         plan["master_blueprint"] = event.get("data")
                         plan["phase"] = "execution"
                     elif event_type == "execution_completed":
                         plan["exec_results"] = event.get("data")
-                        plan["phase"] = "qa"
+                        # The same event is emitted when QA gave up, to show the user
+                        # what the agents produced. That is not a completed stage.
+                        if event.get("qa_passed") is not False:
+                            plan["phase"] = "qa"
+                            mark_done("execution")
                     elif event_type == "completed" and event.get("source") == "DeploymentAgent":
                         plan["status"] = "complete"
                         plan["deploy_result"] = event.get("data")
+                        mark_done("deploy")
                     elif event_type == "running" and event.get("source", "").startswith("Cycle"):
                         plan["phase"] = "research"
                         cycle_name = event.get("source")
@@ -1884,6 +2850,1334 @@ def start_pipeline():
     return jsonify({"status": "pipeline_started", "task": task, "plan_id": plan_id})
 
 
+# ---------------------------------------------------------------------------
+# Pipeline Intake routes — the clarification gate.
+# Only /pipeline/intake/approve ever creates a pipeline.
+# ---------------------------------------------------------------------------
+
+@app.route("/pipeline/intake/start", methods=["POST"])
+def intake_start_route():
+    """Open a draft for a task. Nothing is persisted and no pipeline exists yet."""
+    data = request.get_json(force=True) or {}
+    task = (data.get("task") or "").strip()
+    if not task:
+        return jsonify({"error": "task is required"}), 400
+    draft = create_intake_draft(task, section_id=(data.get("section_id") or "").strip() or None)
+    return jsonify({
+        "draft_id": draft["draft_id"],
+        "task": draft["task"],
+        "section_id": draft.get("section_id"),
+        # Deliberately not resolved here: naming the project costs a model call
+        # and the UI does not need it until files are attached.
+        "project_name": draft.get("project_name"),
+    })
+
+
+@app.route("/pipeline/intake/draft", methods=["GET"])
+def intake_draft_route():
+    """Fetch a draft by id — used when the ask has to move to another page."""
+    draft = _get_intake_draft(request.args.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    return jsonify({
+        "draft_id": draft["draft_id"],
+        "task": draft["task"],
+        "project_name": draft.get("project_name"),
+        "details": draft.get("details", ""),
+        "files": [{k: v for k, v in f.items() if k != "path"} for f in draft.get("files", [])],
+    })
+
+
+@app.route("/pipeline/intake/upload", methods=["POST"])
+def intake_upload_route():
+    """Store uploaded files of any type under the project's Inputs/ folder."""
+    draft_id = (request.form.get("draft_id") or "").strip()
+    draft = _get_intake_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    uploads = request.files.getlist("files")
+    if not uploads:
+        return jsonify({"error": "no files uploaded"}), 400
+
+    inputs_dir = _intake_project_dir(_draft_project_name(draft), "Inputs")
+    stored = []
+    for upload in uploads:
+        if not upload or not upload.filename:
+            continue
+        name = _intake_safe_filename(upload.filename)
+        # Never silently overwrite a file the user already added.
+        base, ext = os.path.splitext(name)
+        candidate, n = name, 2
+        existing = {f["name"] for f in draft["files"]}
+        while candidate in existing or os.path.exists(os.path.join(inputs_dir, candidate)):
+            candidate = f"{base} ({n}){ext}"
+            n += 1
+        path = os.path.join(inputs_dir, candidate)
+        upload.save(path)
+        entry = {
+            "name": candidate,
+            "path": path,
+            "mime": upload.mimetype or "application/octet-stream",
+            "size": os.path.getsize(path),
+        }
+        with INTAKE_DRAFTS_LOCK:
+            draft["files"].append(entry)
+        stored.append(entry)
+
+    return jsonify({"files": [
+        {k: v for k, v in f.items() if k != "path"} for f in draft["files"]
+    ], "added": len(stored)})
+
+
+@app.route("/pipeline/intake/remove_file", methods=["POST"])
+def intake_remove_file_route():
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    name = data.get("name")
+    removed = None
+    with INTAKE_DRAFTS_LOCK:
+        for f in list(draft["files"]):
+            if f["name"] == name:
+                draft["files"].remove(f)
+                removed = f
+                break
+    if removed:
+        try:
+            os.remove(removed["path"])
+        except Exception as e:
+            print(f"[Intake] Could not delete {removed['name']}: {e}")
+    return jsonify({"files": [
+        {k: v for k, v in f.items() if k != "path"} for f in draft["files"]
+    ]})
+
+
+@app.route("/pipeline/intake/questions", methods=["POST"])
+def intake_questions_route():
+    """Store the details, then ask Gemini for the next round of gap questions."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    if "details" in data:
+        with INTAKE_DRAFTS_LOCK:
+            draft["details"] = (data.get("details") or "").strip()
+
+    set_orb("thinking")
+    questions = _intake_next_questions(draft)
+    set_orb("idle")
+    with INTAKE_DRAFTS_LOCK:
+        draft["pending_questions"] = questions
+        draft["rounds"] += 1
+        draft["stage"] = "questions" if questions else "picture"
+
+    return jsonify({"questions": questions, "round": draft["rounds"]})
+
+
+@app.route("/pipeline/intake/answer", methods=["POST"])
+def intake_answer_route():
+    """Record one answer and hand back the next question, if any."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    question = (data.get("question") or "").strip()
+    answer = (data.get("answer") or "").strip()
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    with INTAKE_DRAFTS_LOCK:
+        draft["qa"].append({"question": question, "answer": answer})
+        draft["pending_questions"] = [
+            q for q in draft["pending_questions"] if q.get("question") != question
+        ]
+        remaining = list(draft["pending_questions"])
+
+    return jsonify({
+        "next": remaining[0] if remaining else None,
+        "remaining": len(remaining),
+        "done": not remaining,
+    })
+
+
+@app.route("/pipeline/intake/picture", methods=["POST"])
+def intake_picture_route():
+    """Jarvis decides: more questions, or the plan."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    set_orb("thinking")
+    result = _intake_paint_picture(draft)
+    set_orb("idle")
+
+    if result.get("questions"):
+        with INTAKE_DRAFTS_LOCK:
+            draft["pending_questions"] = result["questions"]
+            draft["rounds"] += 1
+            draft["stage"] = "questions"
+        return jsonify({"questions": result["questions"], "round": draft["rounds"]})
+
+    with INTAKE_DRAFTS_LOCK:
+        draft["plan_text"] = result.get("plan_text", "")
+        draft["stage"] = "picture"
+    return jsonify({"plan_text": draft["plan_text"], "degraded": result.get("degraded")})
+
+
+@app.route("/pipeline/intake/skip", methods=["POST"])
+def intake_skip_route():
+    """'Skip the rest — build with what you have': drop unanswered questions."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    with INTAKE_DRAFTS_LOCK:
+        draft["pending_questions"] = []
+    return jsonify({"status": "skipped"})
+
+
+@app.route("/pipeline/intake/edit", methods=["POST"])
+def intake_edit_route():
+    """Clean up the user's edit and hand it back for approval — never build."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    edited = data.get("edited_text") or ""
+    if not edited.strip():
+        return jsonify({"error": "edited_text is required"}), 400
+
+    set_orb("thinking")
+    cleaned = _intake_clean_edit(draft, edited)
+    set_orb("idle")
+    with INTAKE_DRAFTS_LOCK:
+        draft["plan_text"] = cleaned
+        draft["stage"] = "picture"
+    return jsonify({"plan_text": cleaned})
+
+
+@app.route("/pipeline/intake/approve", methods=["POST"])
+def intake_approve_route():
+    """The only path that creates a pipeline from a draft."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    # "Continue with this info" skips the questions entirely, so there may be no
+    # painted plan — the details the user typed are the brief.
+    if "details" in data:
+        with INTAKE_DRAFTS_LOCK:
+            draft["details"] = (data.get("details") or "").strip()
+
+    brief_path = _intake_write_brief(draft)
+    brief_text = _intake_brief_markdown(draft)
+
+    plan_id = initiate_pipeline(
+        brief_text,
+        project_name=_draft_project_name(draft),
+        brief_path=brief_path,
+        task_summary=draft["task"],
+    )
+
+    section = _section_for_draft(draft)
+    if section:
+        attach_pipeline_to_section(section, plan_id)
+
+    with INTAKE_DRAFTS_LOCK:
+        draft["approved"] = True
+        draft["stage"] = "done"
+        INTAKE_DRAFTS.pop(draft["draft_id"], None)
+
+    return jsonify({
+        "status": "pipeline_started",
+        "plan_id": plan_id,
+        "task": draft["task"],
+        "project_name": draft.get("project_name"),
+        "section_id": draft.get("section_id"),
+        "brief_path": brief_path,
+    })
+
+
+@app.route("/intake-file/<draft_id>/<path:filename>", methods=["GET"])
+def intake_file_route(draft_id, filename):
+    """Serve an uploaded file back to the modal (thumbnails in the file chips)."""
+    draft = _get_intake_draft(draft_id)
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    # Only files this draft actually recorded — never an arbitrary path.
+    for f in draft.get("files", []):
+        if f["name"] == filename:
+            return send_from_directory(os.path.dirname(f["path"]), os.path.basename(f["path"]))
+    return jsonify({"error": "file not found"}), 404
+
+
+@app.route("/pipeline/intake/cancel", methods=["POST"])
+def intake_cancel_route():
+    """Cancel means it never happened."""
+    data = request.get_json(force=True) or {}
+    draft = _get_intake_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"status": "already_gone"})
+    _intake_discard(draft)
+    return jsonify({"status": "cancelled"})
+
+
+# ---------------------------------------------------------------------------
+# Sections
+#
+# A section is a lasting workspace grown out of one finished pipeline. The
+# founding pipeline stops being a one-off run and becomes standing knowledge;
+# new pipelines started inside the section build on top of it instead of
+# researching the same ground again.
+#
+# Everything about a section lives in its folder under "Let Jarvis Handle It" —
+# the founding pipeline's own folder, so nothing is copied or moved.
+# ---------------------------------------------------------------------------
+
+def _section_summariser(brief: str, material: str, previous: str) -> str:
+    """Write the living summary. Returns "" if the model is unreachable.
+
+    sections.refresh_summary() falls back to assembling the summary from disk,
+    so a dead model call costs polish, never knowledge.
+    """
+    if not GEMINI_API_KEY:
+        return ""
+    prompt = (
+        "You maintain the standing knowledge of a long-running workspace called a "
+        "section. Write the document titled \"What this section knows\".\n\n"
+        "RULES:\n"
+        "- Plain markdown, no title heading (one is added for you).\n"
+        "- State what is established, concretely. This is read by agents starting "
+        "new work, so it must be usable, not a table of contents.\n"
+        "- Invent nothing. Only what the material below supports.\n"
+        "- Keep everything from the previous version that the new material does not "
+        "contradict, including anything the user edited in by hand.\n"
+        "- Link related topics as [[wikilinks]] using the note names given.\n\n"
+        f"WHAT THIS SECTION IS ABOUT:\n{brief or '(not written)'}\n\n"
+        f"PREVIOUS VERSION:\n{previous or '(none yet)'}\n\n"
+        f"MATERIAL FROM THE SECTION\u2019S PIPELINES:\n{material or '(none yet)'}"
+    )
+    try:
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        return (response.text or "").strip()
+    except Exception as e:
+        print(f"[Sections] Summary model call failed: {e}")
+        return ""
+
+
+def refresh_section_knowledge(section: dict):
+    """Harvest the section's pipeline memory and rewrite its summary and note."""
+    try:
+        section_store.refresh_summary(section, summarise=_section_summariser)
+        conn = db.get_connection(DB_PATH)
+        try:
+            plan_ids = set(db.get_section_plan_ids(conn, section["id"]))
+            pipelines = [p for p in db.get_pipelines(conn) if p["id"] in plan_ids]
+        finally:
+            conn.close()
+        section_store.write_section_note(section, pipelines)
+    except Exception as e:
+        print(f"[Sections] Could not refresh knowledge for {section.get('id')}: {e}")
+
+
+def attach_pipeline_to_section(section: dict, plan_id: str):
+    """File a newly started pipeline under the section it was started inside."""
+    conn = db.get_connection(DB_PATH)
+    try:
+        db.add_pipeline_to_section(conn, section["id"], plan_id)
+    except Exception as e:
+        print(f"[Sections] Could not attach {plan_id}: {e}")
+        return
+    finally:
+        conn.close()
+    # Refreshing here keeps Section.md listing every pipeline, but the knowledge
+    # itself cannot change until the new pipeline has actually produced anything.
+    try:
+        section_store.write_section_note(section, _section_pipelines(section["id"]))
+    except Exception as e:
+        print(f"[Sections] Could not update the section note: {e}")
+
+
+def _section_pipelines(section_id: str) -> list[dict]:
+    conn = db.get_connection(DB_PATH)
+    try:
+        plan_ids = db.get_section_plan_ids(conn, section_id)
+        by_id = {p["id"]: p for p in db.get_pipelines(conn)}
+    finally:
+        conn.close()
+    return [by_id[pid] for pid in plan_ids if pid in by_id]
+
+
+def _section_card(section: dict) -> dict:
+    """What the sidebar needs to draw one block."""
+    pipelines = _section_pipelines(section["id"])
+    return {
+        "id": section["id"],
+        "name": section["name"],
+        "folder": section["folder"],
+        "brief": section.get("brief", ""),
+        "created_at": section.get("created_at"),
+        "founding_plan_id": section.get("founding_plan_id"),
+        "plan_ids": [p["id"] for p in pipelines],
+        "pipeline_count": len(pipelines),
+        "running": any(p.get("status") == "running" for p in pipelines),
+        "latest_plan_id": pipelines[-1]["id"] if pipelines else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# The section clarification gate
+#
+# Turning a finished pipeline into a section is a commitment, so it goes through
+# the same gate a pipeline does: you write the brief and drop the files, Jarvis
+# asks only what it genuinely does not know, and then paints the section brief
+# back for you to correct. Nothing is created until "Create section" is pressed.
+#
+# It never asks about what the founding pipeline already established — that
+# material is read straight off disk and put in front of the model first.
+# ---------------------------------------------------------------------------
+
+def create_section_draft(plan: dict, name: str, brief: str) -> dict:
+    """Open a draft for a section. No section, no DB row, nothing persistent."""
+    import time as _time
+    import uuid
+    _prune_section_drafts()
+    folder = plan.get("project_name") or "Default Project"
+    draft = {
+        "draft_id": uuid.uuid4().hex[:8],
+        "plan_id": plan["id"],
+        "folder": folder,
+        "task": plan.get("task_summary") or plan.get("task") or "",
+        "name": (name or "").strip() or folder,
+        "brief": (brief or "").strip(),
+        "files": [],
+        "qa": [],
+        "pending_questions": [],
+        "rounds": 0,
+        "brief_text": None,          # the painted section brief, once written
+        "crew": None,                # the standing agents, proposed once the brief is settled
+        "stage": "brief",
+        "created": _time.time(),
+        "touched": _time.time(),
+    }
+    with SECTION_DRAFTS_LOCK:
+        SECTION_DRAFTS[draft["draft_id"]] = draft
+    return draft
+
+
+def _get_section_draft(draft_id: str):
+    import time as _time
+    with SECTION_DRAFTS_LOCK:
+        draft = SECTION_DRAFTS.get((draft_id or "").strip())
+        if draft:
+            draft["touched"] = _time.time()
+        return draft
+
+
+def _delete_section_draft_uploads(draft: dict):
+    """Delete only the files THIS draft uploaded.
+
+    The folder belongs to the founding pipeline and is full of its work, so
+    unlike the pipeline gate this never removes directories — abandoning a
+    section must not touch anything the pipeline put there.
+    """
+    for f in draft.get("files", []):
+        try:
+            if os.path.exists(f["path"]):
+                os.remove(f["path"])
+        except Exception as e:
+            print(f"[Sections] Could not delete {f.get('name')}: {e}")
+
+
+def _prune_section_drafts():
+    """Drop drafts nobody came back to, along with the files they uploaded."""
+    import time as _time
+    cutoff = _time.time() - INTAKE_DRAFT_TTL
+    with SECTION_DRAFTS_LOCK:
+        stale = [d for d in SECTION_DRAFTS.values() if d.get("touched", 0) < cutoff]
+        for draft in stale:
+            SECTION_DRAFTS.pop(draft["draft_id"], None)
+    for draft in stale:
+        if not draft.get("created_section"):
+            _delete_section_draft_uploads(draft)
+
+
+def _section_draft_discard(draft: dict):
+    """Cancel means it never happened: forget the draft, delete its uploads."""
+    with SECTION_DRAFTS_LOCK:
+        SECTION_DRAFTS.pop(draft["draft_id"], None)
+    _delete_section_draft_uploads(draft)
+
+
+def _section_draft_context_text(draft: dict) -> str:
+    """Everything Jarvis knows about this section-to-be, as prompt text."""
+    lines = [
+        "A finished pipeline is about to become a SECTION: a lasting workspace that "
+        "later pipelines start inside, already knowing what this one learned.",
+        "",
+        # Without this the gate asks where the section will live and what will host
+        # it — questions this app answered long ago, and which waste the user's time.
+        "WHAT A SECTION ALREADY IS. All of this is decided. Never ask about any of it:\n"
+        "- It lives inside this application: on the sections sidebar, with its own dashboard "
+        "page, reachable from every page.\n"
+        "- Its folder is the founding pipeline's own folder on this machine. Its brief, its "
+        "knowledge notes and any dropped files are written there as markdown.\n"
+        "- It holds the pipelines started inside it, plus its own tasks, notes, and its own "
+        "remembered conversation with Jarvis.\n"
+        "- Its knowledge is harvested automatically from the pipelines that run in it, and "
+        "handed to every new pipeline started inside it.\n"
+        "So there is nothing to ask about hosting, platforms, storage, tooling, file formats, "
+        "naming, or how the section will be organised. Ask only about the work itself.",
+        "",
+        f"THE FOUNDING PIPELINE:\n{draft.get('task', '')}",
+    ]
+
+    material = section_store.pipeline_material(draft["folder"])
+    if material:
+        lines.append(
+            "\nWHAT THAT PIPELINE ALREADY FOUND — this is established knowledge the "
+            "section inherits. Never ask the user about anything in here:\n" + material
+        )
+    else:
+        lines.append("\nWHAT THAT PIPELINE ALREADY FOUND:\n(it left nothing in its memory)")
+
+    lines.append(f"\nSECTION NAME THE USER GAVE:\n{draft.get('name', '')}")
+    written = (draft.get("brief") or "").strip()
+    lines.append(
+        "\nWHAT THE USER WROTE THIS SECTION IS FOR:\n" + (written if written else "(nothing written)")
+    )
+
+    files = draft.get("files", [])
+    if files:
+        listed = "\n".join(f"- {f['name']} ({f.get('mime', 'unknown type')})" for f in files)
+        lines.append(
+            "\nFILES THEY DROPPED (readable ones are included with this message):\n" + listed
+        )
+    else:
+        lines.append("\nFILES THEY DROPPED:\n(none)")
+
+    qa = draft.get("qa", [])
+    if qa:
+        answered = "\n".join(f"Q: {item['question']}\nA: {item['answer']}" for item in qa)
+        lines.append("\nCLARIFICATIONS ALREADY ANSWERED — never ask these again:\n" + answered)
+    return "\n".join(lines)
+
+
+def _section_draft_ask(draft: dict, instruction: str):
+    return _ask_model_json(instruction, _section_draft_context_text(draft),
+                           _intake_file_parts(draft))
+
+
+def _section_draft_questions(draft: dict) -> list[dict]:
+    """The gaps that would change what this section is, and what it inherits."""
+    instruction = (
+        "You are Jarvis. The user is turning a finished pipeline into a lasting section. "
+        "Before you write down what this section is, find what you genuinely do not know.\n\n"
+        "RULES:\n" + _QUESTION_RULES +
+        "- Ask only about the work: what this section is for, where the user is taking it, what "
+        "belongs inside it, and which of the pipeline's findings actually matter going forward.\n"
+        "- Never ask about anything the founding pipeline already established — that material "
+        "is above and is inherited whether or not you ask.\n\n"
+        "For each question also write \"gist\": a single short spoken line (under 15 words) that "
+        "conveys the question aloud.\n\n"
+        "Reply with JSON only: {\"questions\": [{\"question\": \"...\", \"gist\": \"...\"}]}"
+    )
+    try:
+        data = _section_draft_ask(draft, instruction)
+    except Exception as e:
+        # A dead question round must not trap the user — fall through to the brief.
+        print(f"[Sections] Question generation failed: {e}")
+        return []
+    return _normalise_questions(data)
+
+
+def _section_draft_fallback_brief(draft: dict) -> str:
+    """The section brief assembled by hand, for when the model is unreachable."""
+    out = []
+    written = (draft.get("brief") or "").strip()
+    if written:
+        out += [written, ""]
+    qa = [item for item in draft.get("qa", []) if (item.get("answer") or "").strip()]
+    if qa:
+        out.append("## Clarifications")
+        out.append("")
+        for item in qa:
+            out += [f"**{item['question']}**", "", item["answer"], ""]
+    return "\n".join(out).strip() or written
+
+
+def _section_draft_paint(draft: dict) -> dict:
+    """Either the section brief, or another round of questions — Jarvis decides."""
+    instruction = (
+        "You are Jarvis. Using everything below, write the SECTION BRIEF: what this workspace "
+        "is for and where it is going. Every pipeline started inside the section begins by "
+        "reading it, so it has to stand on its own.\n\n"
+        "RULES:\n"
+        "- Fold in what the user wrote, every clarification, and everything the dropped files "
+        "tell you.\n"
+        "- Say what the section is for and what work belongs in it. Do not summarise the "
+        "founding pipeline's findings — those are already the section's knowledge.\n"
+        "- Plain language and concrete. Invent nothing the user never gave you.\n"
+        "- Short: a few paragraphs at most, markdown, no heading above the top level.\n"
+        "- Now that you have read the answers, ask again if they opened something material you "
+        "still cannot settle: do NOT guess, return questions instead. The rules on what makes a "
+        "question worth asking apply here exactly as they did before:\n" + _QUESTION_RULES + "\n"
+        "Reply with JSON only, one of:\n"
+        "{\"brief_text\": \"the section brief in markdown\"}\n"
+        "{\"questions\": [{\"question\": \"...\", \"gist\": \"...\"}]}"
+    )
+    try:
+        data = _section_draft_ask(draft, instruction)
+    except Exception as e:
+        # Degrade to what the user wrote so they can still edit and create.
+        print(f"[Sections] Writing the section brief failed: {e}")
+        return {
+            "brief_text": _section_draft_fallback_brief(draft),
+            "degraded": "Jarvis could not reach the model to write this up, so this is what "
+                        "you wrote. You can edit it and create the section from it.",
+        }
+
+    if isinstance(data, dict) and data.get("questions"):
+        questions = _normalise_questions(data)
+        if questions:
+            return {"questions": questions}
+
+    brief_text = (data or {}).get("brief_text") if isinstance(data, dict) else None
+    return {"brief_text": brief_text or _section_draft_fallback_brief(draft)}
+
+
+_CREW_RULES = (
+    "- Every department is one distinct standing concern of this section, named the way the "
+    "work is named — not a stage of a process, and never 'Research' or 'General'.\n"
+    "- STRICT SINGLE-PURPOSE ROLES. One agent, one job. Never bundle two into a compound "
+    "role: no 'SEO & Virality Specialist', no 'Metadata and Description Writer'. Split them.\n"
+    "- Reuse the exact role names of agents that really ran wherever the job is the same, so "
+    "their findings on disk stay credited to them.\n"
+    "- Where two cycles ran near-duplicate roles, merge them into ONE agent and list both of "
+    "their agent_ids in from_agent_ids. That is the point of doing this.\n"
+    "- Every agent needs a brief that says what it OWNS in this section for good — a standing "
+    "responsibility, not a task from one run. An agent you cannot write a real brief for does "
+    "not belong here; leave it out.\n"
+    "- Do not pad. A section with three honest departments is better than six invented ones, "
+    "and an agent that duplicates another is worse than no agent at all.\n"
+    "- from_agent_ids must contain agent_ids copied exactly from the material above. Never "
+    "invent one; leave the list empty for an agent that is genuinely new.\n"
+    "- 'why' is one short sentence of provenance the user will read: what it ran as and what "
+    "it recorded, or which words of theirs it exists for.\n"
+)
+
+
+def _section_crew_material(draft: dict) -> str:
+    """The real agents behind this section, plus what it now says it is for."""
+    folder = draft["folder"]
+    parts = [
+        f"THE SECTION: {draft.get('name') or folder}",
+        "",
+        "WHAT THIS SECTION IS FOR (just settled with the user):",
+        (draft.get("brief_text") or draft.get("brief") or "(not written)").strip(),
+    ]
+    material = section_store.crew_material(folder)
+    parts += [
+        "",
+        "THE AGENTS THAT ACTUALLY RAN IN THIS SECTION'S PIPELINES — their real agent_ids, "
+        "their briefs, and what each one recorded to disk. This is the only source for a "
+        "standing agent:",
+        material or "(no agent plan survives on disk for this pipeline)",
+    ]
+    notes = section_store.knowledge_notes(folder)
+    if notes:
+        parts += ["", "KNOWLEDGE THE SECTION ALREADY HOLDS (topic notes on disk):",
+                  "\n".join(f"- {n['name']}" for n in notes[:30])]
+    return "\n".join(parts)
+
+
+def _section_draft_crew(draft: dict) -> dict:
+    """Propose the section's standing crew, once the brief is settled.
+
+    The mechanical crew is built first and is what gets used if anything goes
+    wrong, so the section always ends up with a constellation built from agents
+    that really ran. The model's job on top of that is judgement the code cannot
+    do: merging near-duplicate roles, and adding the one or two agents the
+    user's brief needs that no pipeline has covered yet.
+    """
+    folder = draft["folder"]
+    mechanical = section_store.crew_from_agent_plans(folder)
+
+    instruction = (
+        "You are the Brain of the Jarvis multi-agent system. A finished pipeline is becoming a "
+        "SECTION: a lasting workspace that later pipelines start inside. Give the section its "
+        "STANDING CREW — the departments and named agents it keeps between pipelines, drawn on "
+        "its dashboard and handed to you as the starting roster every time work begins here.\n\n"
+        "Build it from the agents that really ran, listed below with their real agent_ids. "
+        "Organise, merge and keep; invent only where the section's stated purpose needs someone "
+        "no pipeline has covered.\n\n"
+        "RULES:\n" + _CREW_RULES + "\n"
+        "Reply with JSON only:\n"
+        "{\"departments\": [{\"domain\": \"...\", \"goal\": \"...\", \"agents\": ["
+        "{\"role\": \"...\", \"brief\": \"...\", \"is_lead\": true, \"tools_needed\": [\"...\"], "
+        "\"memory_query\": \"...\", \"from_agent_ids\": [\"...\"], \"why\": \"...\"}]}]}"
+    )
+
+    try:
+        data = _ask_model_json(instruction, _section_crew_material(draft),
+                               _intake_file_parts(draft))
+    except Exception as e:
+        print(f"[Sections] Crew planning failed: {e}")
+        return {"crew": mechanical, "degraded": (
+            "Jarvis could not reach the model, so this crew is the founding pipeline's own "
+            "cycles and agents exactly as they ran. You can edit it, or create the section "
+            "and rebuild the crew later."
+        )}
+
+    crew = section_store.normalise_crew(data, keep_ids=False)
+    # Every claim of provenance is checked against the folder before the user is
+    # shown a badge saying an agent really ran.
+    crew = section_store.verify_crew_provenance(folder, crew)
+    if not crew.get("departments"):
+        return {"crew": mechanical, "degraded": (
+            "Jarvis could not make a crew out of that, so this is the founding pipeline's own "
+            "cycles and agents."
+        )}
+    return {"crew": crew}
+
+
+def _section_draft_record(draft: dict, final_brief: str) -> str | None:
+    """Write the full clarification record into the section's Brief/ folder.
+
+    The brief that ends up in the database is the painted one; this keeps the
+    original wording, the questions and the answers next to the pipeline's own
+    brief, where the agents can read them.
+    """
+    out = [f"# Section brief — {draft.get('name') or draft.get('folder')}", ""]
+    out += ["## Founding pipeline", draft.get("task", ""), ""]
+
+    written = (draft.get("brief") or "").strip()
+    out += ["## What the user wrote", written if written else "_(nothing written)_", ""]
+
+    qa = draft.get("qa", [])
+    if qa:
+        out.append("## Clarifications")
+        out.append("")
+        for item in qa:
+            out += [f"**Q:** {item['question']}", "", f"**A:** {item['answer'] or '(no answer)'}", ""]
+
+    files = draft.get("files", [])
+    if files:
+        out.append("## Files dropped at creation")
+        for f in files:
+            out.append(f"- `Inputs/{f['name']}` — {f.get('mime', 'unknown type')}")
+        out.append("")
+
+    out += ["## The section brief", final_brief, ""]
+
+    crew = draft.get("crew")
+    if crew and crew.get("departments"):
+        out.append("## The crew as created")
+        out.append("")
+        for dept in crew["departments"]:
+            out.append(f"### {dept['domain']}")
+            for agent in dept["agents"]:
+                lead = " — lead" if agent.get("is_lead") else ""
+                out.append(f"- **{agent['role']}**{lead} ({agent.get('origin', 'brief')}): "
+                           f"{agent['brief']}")
+            out.append("")
+
+    try:
+        brief_dir = section_store.section_dir(draft["folder"], "Brief")
+        path = os.path.join(brief_dir, "section_brief.md")
+        n = 2
+        while os.path.exists(path):
+            path = os.path.join(brief_dir, f"section_brief ({n}).md")
+            n += 1
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(out))
+        return path
+    except Exception as e:
+        # The record is a convenience; never let it stop a section being created.
+        print(f"[Sections] Could not write the section brief record: {e}")
+        return None
+
+
+@app.route("/sections", methods=["GET"])
+def sections_list_route():
+    """Every section, for the sidebar."""
+    conn = db.get_connection(DB_PATH)
+    try:
+        rows = db.get_sections(conn)
+    finally:
+        conn.close()
+    return jsonify({"sections": [_section_card(row) for row in rows]})
+
+
+@app.route("/sections/create", methods=["POST"])
+def sections_create_route():
+    """Turn a finished pipeline into a section.
+
+    The brief the user writes here is what tells Jarvis what the section is for —
+    the founding pipeline alone only says what was researched, not where it is
+    going. Creating is the commit point: nothing exists until this is called.
+
+    Two ways in, and this is still the only path that creates a section:
+    `draft_id` finishes a clarified draft (its questions answered, its brief
+    painted and corrected), while a bare `plan_id` is the skip — create it now
+    from what was typed, no questions asked.
+    """
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(str(data.get("draft_id") or "").strip())
+    plan_id = str(data.get("plan_id") or (draft or {}).get("plan_id") or "").strip()
+    brief = (data.get("brief") or "").strip()
+    if draft:
+        # The draft's own text wins: it is what the user read and corrected.
+        brief = (draft.get("brief_text") or "").strip() or _section_draft_fallback_brief(draft)
+    if not plan_id:
+        return jsonify({"error": "plan_id is required"}), 400
+
+    conn = db.get_connection(DB_PATH)
+    try:
+        plan = next((p for p in db.get_pipelines(conn) if p["id"] == plan_id), None)
+        if not plan:
+            return jsonify({"error": f"pipeline '{plan_id}' not found"}), 404
+
+        existing = db.get_section_for_pipeline(conn, plan_id)
+        if existing:
+            return jsonify({"error": "That pipeline is already part of a section.",
+                            "section_id": existing["id"]}), 409
+
+        folder = plan.get("project_name") or "Default Project"
+        name = ((data.get("name") or (draft or {}).get("name") or "").strip() or folder)
+        import uuid
+        section_id = uuid.uuid4().hex[:8]
+        db.create_section(conn, section_id, name, folder, brief, plan_id)
+        section = db.get_section(conn, section_id)
+    finally:
+        conn.close()
+
+    record_path = None
+    if draft:
+        with SECTION_DRAFTS_LOCK:
+            draft["name"] = name
+            # The draft's uploads now belong to the section, so retiring it must
+            # not delete them.
+            draft["created_section"] = section_id
+        record_path = _section_draft_record(draft, brief)
+        with SECTION_DRAFTS_LOCK:
+            SECTION_DRAFTS.pop(draft["draft_id"], None)
+
+    # The crew the user approved, or — on the skip path, where they were never
+    # shown one — the founding pipeline's own cycles and agents. Either way a
+    # section is never created without a constellation.
+    crew = (draft or {}).get("crew")
+    if not (crew and crew.get("departments")):
+        crew = section_store.crew_from_agent_plans(folder)
+    try:
+        # Roles Jarvis merged away or the user dropped are recorded as retired
+        # now, or the first re-read of the pipelines would hand them all back.
+        crew = section_store.mark_retired(crew, section_store.crew_from_agent_plans(folder))
+        section_store.write_crew(folder, crew, name)
+    except Exception as e:
+        print(f"[Sections] Could not write the crew: {e}")
+
+    # The founding pipeline's memory becomes the section's first knowledge.
+    refresh_section_knowledge(section)
+    return jsonify({"status": "created", "section": _section_card(section),
+                    "brief_path": record_path,
+                    "crew": section_store.crew_counts(crew)})
+
+
+@app.route("/sections/intake/start", methods=["POST"])
+def section_intake_start_route():
+    """Open a draft for a section. Nothing is persisted and no section exists yet."""
+    data = request.get_json(force=True) or {}
+    plan_id = str(data.get("plan_id") or "").strip()
+    if not plan_id:
+        return jsonify({"error": "plan_id is required"}), 400
+
+    conn = db.get_connection(DB_PATH)
+    try:
+        plan = next((p for p in db.get_pipelines(conn) if p["id"] == plan_id), None)
+        if not plan:
+            return jsonify({"error": f"pipeline '{plan_id}' not found"}), 404
+        # Checked here as well as at creation, so the questions are never asked
+        # about a pipeline that could not become a section anyway.
+        existing = db.get_section_for_pipeline(conn, plan_id)
+        if existing:
+            return jsonify({"error": "That pipeline is already part of a section.",
+                            "section_id": existing["id"]}), 409
+    finally:
+        conn.close()
+
+    draft = create_section_draft(plan, data.get("name") or "", data.get("brief") or "")
+    return jsonify({"draft_id": draft["draft_id"], "name": draft["name"],
+                    "folder": draft["folder"]})
+
+
+@app.route("/sections/intake/upload", methods=["POST"])
+def section_intake_upload_route():
+    """Store the dropped files in the section's Inputs/ folder.
+
+    They go to their final home rather than a staging area, so creating the
+    section moves nothing; cancelling deletes exactly these files and nothing
+    the founding pipeline put there.
+    """
+    draft = _get_section_draft((request.form.get("draft_id") or "").strip())
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    uploads = request.files.getlist("files")
+    if not uploads:
+        return jsonify({"error": "no files uploaded"}), 400
+
+    inputs_dir = section_store.section_dir(draft["folder"], "Inputs")
+    for upload in uploads:
+        if not upload or not upload.filename:
+            continue
+        name = _intake_safe_filename(upload.filename)
+        base, ext = os.path.splitext(name)
+        candidate, n = name, 2
+        existing = {f["name"] for f in draft["files"]}
+        while candidate in existing or os.path.exists(os.path.join(inputs_dir, candidate)):
+            candidate = f"{base} ({n}){ext}"
+            n += 1
+        path = os.path.join(inputs_dir, candidate)
+        upload.save(path)
+        with SECTION_DRAFTS_LOCK:
+            draft["files"].append({
+                "name": candidate,
+                "path": path,
+                "mime": upload.mimetype or "application/octet-stream",
+                "size": os.path.getsize(path),
+            })
+
+    return jsonify({"files": [
+        {k: v for k, v in f.items() if k != "path"} for f in draft["files"]
+    ]})
+
+
+@app.route("/sections/intake/questions", methods=["POST"])
+def section_intake_questions_route():
+    """Store the brief as written, then ask for the gaps that would change it."""
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    with SECTION_DRAFTS_LOCK:
+        if "brief" in data:
+            draft["brief"] = (data.get("brief") or "").strip()
+        if "name" in data:
+            draft["name"] = (data.get("name") or "").strip() or draft["name"]
+
+    set_orb("thinking")
+    questions = _section_draft_questions(draft)
+    set_orb("idle")
+    with SECTION_DRAFTS_LOCK:
+        draft["pending_questions"] = questions
+        draft["rounds"] += 1
+        draft["stage"] = "questions" if questions else "brief_text"
+
+    return jsonify({"questions": questions, "round": draft["rounds"]})
+
+
+@app.route("/sections/intake/answer", methods=["POST"])
+def section_intake_answer_route():
+    """Record one answer and hand back the next question, if any."""
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    question = (data.get("question") or "").strip()
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    with SECTION_DRAFTS_LOCK:
+        draft["qa"].append({"question": question, "answer": (data.get("answer") or "").strip()})
+        draft["pending_questions"] = [
+            q for q in draft["pending_questions"] if q.get("question") != question
+        ]
+        remaining = list(draft["pending_questions"])
+
+    return jsonify({"next": remaining[0] if remaining else None,
+                    "remaining": len(remaining), "done": not remaining})
+
+
+@app.route("/sections/intake/skip", methods=["POST"])
+def section_intake_skip_route():
+    """'Skip the rest': drop the unanswered questions and write it up anyway."""
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    with SECTION_DRAFTS_LOCK:
+        draft["pending_questions"] = []
+    return jsonify({"status": "skipped"})
+
+
+@app.route("/sections/intake/picture", methods=["POST"])
+def section_intake_picture_route():
+    """Jarvis decides: more questions, or the section brief."""
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    set_orb("thinking")
+    result = _section_draft_paint(draft)
+    set_orb("idle")
+
+    if result.get("questions"):
+        with SECTION_DRAFTS_LOCK:
+            draft["pending_questions"] = result["questions"]
+            draft["rounds"] += 1
+            draft["stage"] = "questions"
+        return jsonify({"questions": result["questions"], "round": draft["rounds"]})
+
+    with SECTION_DRAFTS_LOCK:
+        draft["brief_text"] = result.get("brief_text", "")
+        draft["stage"] = "brief_text"
+    return jsonify({"brief_text": draft["brief_text"], "degraded": result.get("degraded")})
+
+
+@app.route("/sections/intake/crew", methods=["POST"])
+def section_intake_crew_route():
+    """Propose the crew, after the brief is settled and before anything exists.
+
+    This is the last thing the gate does: by now Jarvis has the founding
+    pipeline's findings, the user's brief, their answers and their files, which
+    is everything needed to say who this section keeps. Nothing is written —
+    the crew lives on the draft until Create section.
+    """
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    # A corrected brief may have arrived with this call; the crew is planned
+    # against what the user actually settled on.
+    with SECTION_DRAFTS_LOCK:
+        if (data.get("brief_text") or "").strip():
+            draft["brief_text"] = data["brief_text"].strip()
+
+    set_orb("thinking")
+    result = _section_draft_crew(draft)
+    set_orb("idle")
+
+    with SECTION_DRAFTS_LOCK:
+        draft["crew"] = result["crew"]
+        draft["stage"] = "crew"
+    return jsonify({"crew": result["crew"], "degraded": result.get("degraded"),
+                    "counts": section_store.crew_counts(result["crew"])})
+
+
+@app.route("/sections/intake/crew/set", methods=["POST"])
+def section_intake_crew_set_route():
+    """The user's edits to the proposed crew. Still nothing on disk."""
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    crew = section_store.normalise_crew(data.get("crew"))
+    # Their edits are theirs, but a badge claiming an agent really ran still has
+    # to be true, so provenance is re-checked rather than taken from the client.
+    crew = section_store.verify_crew_provenance(draft["folder"], crew)
+    # Whatever they took out stays out when the pipelines are re-read later.
+    crew = section_store.mark_retired(
+        crew, section_store.crew_from_agent_plans(draft["folder"]))
+    with SECTION_DRAFTS_LOCK:
+        draft["crew"] = crew
+    return jsonify({"crew": crew, "counts": section_store.crew_counts(crew)})
+
+
+@app.route("/sections/intake/edit", methods=["POST"])
+def section_intake_edit_route():
+    """Clean up the user's edit and hand it back — never create."""
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+
+    edited = data.get("edited_text") or ""
+    if not edited.strip():
+        return jsonify({"error": "edited_text is required"}), 400
+
+    set_orb("thinking")
+    cleaned = _clean_edited_text(_section_draft_context_text(draft),
+                                _intake_file_parts(draft), edited, noun="section brief")
+    set_orb("idle")
+    with SECTION_DRAFTS_LOCK:
+        draft["brief_text"] = cleaned
+        draft["stage"] = "brief_text"
+    return jsonify({"brief_text": cleaned})
+
+
+@app.route("/sections/intake/cancel", methods=["POST"])
+def section_intake_cancel_route():
+    """Cancel means it never happened: no section, and the drops are deleted."""
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"status": "already_gone"})
+    _section_draft_discard(draft)
+    return jsonify({"status": "cancelled"})
+
+
+@app.route("/sections/<section_id>", methods=["GET"])
+def section_detail_route(section_id):
+    """Everything the section dashboard shows."""
+    conn = db.get_connection(DB_PATH)
+    try:
+        section = db.get_section(conn, section_id)
+        if not section:
+            return jsonify({"error": "section not found"}), 404
+        tasks = db.get_tasks(conn, section_id=section_id)
+        note_rows = conn.execute(
+            "SELECT * FROM notes WHERE section_id = ? ORDER BY created_at DESC", (section_id,)
+        ).fetchall()
+        notes = [dict(r) for r in note_rows]
+        messages = db.get_section_messages(conn, section_id)
+    finally:
+        conn.close()
+
+    return jsonify({
+        "section": _section_card(section),
+        "crew": section_store.read_crew(section["folder"]),
+        "summary": section_store.summary_body(section["folder"]),
+        "knowledge": [
+            {"name": n["name"], "preview": n["preview"]}
+            for n in section_store.knowledge_notes(section["folder"])
+        ],
+        "pipelines": [
+            {
+                "id": p["id"],
+                "task": p.get("task_summary") or p.get("task"),
+                "status": p.get("status"),
+                "phase": p.get("phase"),
+                "timestamp": p.get("timestamp"),
+                "founding": p["id"] == section.get("founding_plan_id"),
+            }
+            for p in _section_pipelines(section_id)
+        ],
+        "tasks": tasks,
+        "notes": notes,
+        "messages": messages,
+        "folder": os.path.join("Let Jarvis Handle It", section["folder"]),
+    })
+
+
+@app.route("/sections/<section_id>/enter", methods=["POST"])
+def section_enter_route(section_id):
+    """Work inside this section: scoped tools, its own remembered conversation."""
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+    coordinator.set_active_section(section)
+    return jsonify({"status": "entered", "section": _section_card(section)})
+
+
+@app.route("/sections/exit", methods=["POST"])
+def section_exit_route():
+    """Back out to the brain."""
+    coordinator.set_active_section(None)
+    return jsonify({"status": "exited"})
+
+
+@app.route("/sections/active", methods=["GET"])
+def section_active_route():
+    section = coordinator.get_active_section()
+    return jsonify({"section": _section_card(section) if section else None})
+
+
+@app.route("/sections/<section_id>/chat", methods=["POST"])
+def section_chat_route(section_id):
+    """Talk to Jarvis inside a section. The conversation persists to the section."""
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+
+    text = ((request.get_json(force=True) or {}).get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "no text provided"}), 400
+
+    # Entering on every message keeps the focus right even if the user opened the
+    # section in one window and left another on the brain.
+    coordinator.set_active_section(section)
+
+    conn = db.get_connection(DB_PATH)
+    try:
+        db.add_section_message(conn, section_id, "user", text)
+    finally:
+        conn.close()
+
+    try:
+        reply = handle_request(text)
+    except Exception as e:
+        reply = f"Something went wrong: {e}"
+    if not (reply or "").strip():
+        reply = "I could not produce a reply for that, Sir. Please try again."
+
+    conn = db.get_connection(DB_PATH)
+    try:
+        db.add_section_message(conn, section_id, "jarvis", reply)
+    finally:
+        conn.close()
+
+    threading.Thread(target=speak, args=(reply,), daemon=True).start()
+    return jsonify({"reply": reply})
+
+
+@app.route("/sections/<section_id>/update", methods=["POST"])
+def section_update_route(section_id):
+    """Edit the section's name, its brief, or the living summary by hand."""
+    data = request.get_json(force=True) or {}
+    conn = db.get_connection(DB_PATH)
+    try:
+        section = db.get_section(conn, section_id)
+        if not section:
+            return jsonify({"error": "section not found"}), 404
+        if "name" in data or "brief" in data:
+            db.update_section(conn, section_id,
+                              name=(data.get("name") or "").strip() or None,
+                              brief=data.get("brief"))
+            section = db.get_section(conn, section_id)
+    finally:
+        conn.close()
+
+    if "summary" in data:
+        # Written back verbatim: this file is yours to edit.
+        section_store.write_summary(section["folder"], data.get("summary") or "",
+                                    section.get("name", ""))
+    section_store.write_section_note(section, _section_pipelines(section_id))
+
+    # The section's identity changed, so the chat session built on it is stale.
+    coordinator.clear_section_chat(section_id)
+    if (coordinator.get_active_section() or {}).get("id") == section_id:
+        coordinator.set_active_section(section)
+    return jsonify({"status": "updated", "section": _section_card(section)})
+
+
+@app.route("/sections/<section_id>/refresh", methods=["POST"])
+def section_refresh_route(section_id):
+    """Re-read the section's pipelines and rewrite what it knows."""
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+    refresh_section_knowledge(section)
+    crew = grow_section_crew(section)
+    coordinator.clear_section_chat(section_id)
+    return jsonify({"status": "refreshed",
+                    "summary": section_store.summary_body(section["folder"]),
+                    "crew": crew})
+
+
+@app.route("/sections/<section_id>/crew", methods=["POST"])
+def section_crew_route(section_id):
+    """Save the crew as the user edited it on the dashboard."""
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+
+    data = request.get_json(force=True) or {}
+    crew = section_store.normalise_crew(data.get("crew"))
+    crew = section_store.verify_crew_provenance(section["folder"], crew)
+    crew = section_store.mark_retired(
+        crew, section_store.crew_from_agent_plans(section["folder"]))
+    section_store.write_crew(section["folder"], crew, section.get("name", ""))
+    # The crew is part of what Jarvis is told about the section it is working in.
+    coordinator.clear_section_chat(section_id)
+    return jsonify({"status": "saved", "crew": crew,
+                    "counts": section_store.crew_counts(crew)})
+
+
+def grow_section_crew(section: dict) -> dict:
+    """Fold whatever the section's pipelines have run since into the crew.
+
+    Additive, like the knowledge notes: a later pipeline can add a department or
+    an agent, and extends the provenance of one already standing, but never
+    rewrites or removes what is there — including anything edited by hand.
+    """
+    folder = section["folder"]
+    try:
+        standing = section_store.read_crew(folder)
+        grown = section_store.merge_crew(standing, section_store.crew_from_agent_plans(folder))
+        section_store.write_crew(folder, grown, section.get("name", ""))
+        return grown
+    except Exception as e:
+        print(f"[Sections] Could not grow the crew: {e}")
+        return section_store.read_crew(folder)
+
+
+@app.route("/sections/<section_id>/upload", methods=["POST"])
+def section_upload_route(section_id):
+    """Drop files into the section's folder."""
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+
+    uploaded = request.files.getlist("files") or []
+    if not uploaded:
+        return jsonify({"error": "no files"}), 400
+
+    inputs = section_store.section_dir(section["folder"], "Inputs")
+    saved = []
+    for f in uploaded:
+        name = _intake_safe_filename(f.filename)
+        path = os.path.join(inputs, name)
+        # Never silently overwrite a file an earlier pipeline may be working from.
+        stem, ext = os.path.splitext(name)
+        n = 2
+        while os.path.exists(path):
+            path = os.path.join(inputs, f"{stem} ({n}){ext}")
+            n += 1
+        try:
+            f.save(path)
+            saved.append({"name": os.path.basename(path), "mime": f.mimetype})
+        except Exception as e:
+            print(f"[Sections] Could not save {name}: {e}")
+    return jsonify({"status": "uploaded", "files": saved})
+
+
+@app.route("/sections/<section_id>/delete", methods=["POST"])
+def section_delete_route(section_id):
+    """Forget the section. Its folder and its pipelines are left untouched —
+    closing a workspace must never destroy the work done inside it."""
+    conn = db.get_connection(DB_PATH)
+    try:
+        if not db.get_section(conn, section_id):
+            return jsonify({"error": "section not found"}), 404
+        db.delete_section(conn, section_id)
+    finally:
+        conn.close()
+    coordinator.clear_section_chat(section_id)
+    if (coordinator.get_active_section() or {}).get("id") == section_id:
+        coordinator.set_active_section(None)
+    return jsonify({"status": "deleted"})
+
+
+@app.route("/jarvis/say", methods=["POST"])
+def jarvis_say_route():
+    """Speak a line through the normal voice path (so mute and the orb apply)."""
+    data = request.get_json(force=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    # The only mute this app has is the mic button; treat it as "Jarvis, be quiet"
+    # so pressing mute silences the spoken questions too. The question text stays
+    # on screen either way, so nothing is lost by staying silent.
+    if MIC_MUTED:
+        return jsonify({"status": "muted"})
+    threading.Thread(target=speak, args=(text,), daemon=True).start()
+    return jsonify({"status": "speaking"})
+
+
 @app.route("/pipeline/resume", methods=["POST"])
 def resume_pipeline_route():
     """Resumes a paused or incomplete pipeline."""
@@ -1909,6 +4203,62 @@ def delete_pipeline_route():
     if "error" in res:
         return jsonify(res), 404
     return jsonify(res)
+
+
+@app.route("/api/mcp/servers", methods=["GET"])
+def mcp_servers_route():
+    """Every configured MCP server with its live status.
+
+    An enabled server is actually started to answer this — status here means a
+    real handshake succeeded, never that a config file said so.
+    """
+    from connectors.mcp_connector import list_available_mcps
+    try:
+        return jsonify({"servers": list_available_mcps()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mcp/toggle", methods=["POST"])
+def mcp_toggle_route():
+    """Enable or disable one MCP server, then report what actually happened.
+
+    Enabling starts the server immediately so the answer carries its real tool
+    list — or the reason it refused to start, instead of a hopeful "up".
+    """
+    from connectors.mcp_client import load_mcp_registry, save_mcp_registry, ensure_server_running
+
+    data = request.get_json(force=True) or {}
+    name = (data.get("name") or "").strip()
+    enabled = bool(data.get("enabled"))
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    registry = load_mcp_registry()
+    if name not in registry:
+        return jsonify({"error": f"No MCP server called '{name}' is configured."}), 404
+    if not registry[name].get("command"):
+        return jsonify({"error": f"'{name}' has no command to run — add one to mcp_registry.json first."}), 400
+
+    registry[name]["enabled"] = enabled
+    save_mcp_registry(registry)
+
+    if not enabled:
+        push_message("system", f"MCP server '{name}' disabled.")
+        return jsonify({"name": name, "enabled": False, "status": "disabled", "tools": []})
+
+    info = ensure_server_running(name)
+    if info["status"] == "up":
+        push_message("system", f"MCP server '{name}' connected — {len(info['tools'])} tool(s) available.")
+    else:
+        push_message("system", f"MCP server '{name}' could not start: {info.get('error')}")
+    return jsonify({
+        "name": name,
+        "enabled": True,
+        "status": info["status"],
+        "tools": [t["name"] for t in info.get("tools", [])],
+        "error": info.get("error"),
+    })
 
 
 @app.route("/api/connect-tool", methods=["POST"])
@@ -2009,6 +4359,93 @@ def get_configured_tools_route():
     from connectors.api_connector import get_all_configured_services
     configured = get_all_configured_services()
     return jsonify({"status": "success", "tools": configured})
+
+
+@app.route("/api/tools/overview", methods=["GET"])
+def tools_overview_route():
+    """Everything the Connected panel shows: APIs and MCP servers, side by side.
+
+    Two things worth being blunt about here, because both were previously
+    invisible:
+      * `has_handler` — an API can sit in api_registry.json marked "up" while
+        no agent can call it, because no real handler exists for it. Connected
+        and usable are not the same thing.
+      * MCP status is measured, not read. An enabled server is started to find
+        out whether it works.
+    """
+    from connectors.api_connector import load_registry
+    from connectors.oauth_flow import OAUTH_PROVIDERS
+    from agents.tool_executor import REGISTRY_TOOLS, ALWAYS_ON_TOOLS, _resolve_tool_key
+
+    registry = load_registry() or {}
+    apis = []
+    # Everything Jarvis has a real connector for, plus anything already in the
+    # registry — so services with a handler show up even before they're set up.
+    names = sorted(set(registry) | set(REGISTRY_TOOLS))
+    for name in names:
+        cfg = registry.get(name) or {}
+        status = cfg.get("status", "unknown")
+        # Resolve rather than test membership: google_drive_api has no entry of
+        # its own but aliases onto google_docs_api's handler, and calling that
+        # "no connector" would be plainly wrong. No model call here — the
+        # deterministic tiers are enough for a name already in the registry.
+        resolved = _resolve_tool_key(name, allow_llm=False)
+        spec = REGISTRY_TOOLS.get(resolved)
+        apis.append({
+            "service": name,
+            "configured": bool(cfg) and status != "unknown",
+            "status": status if cfg else "unknown",
+            "method_id": cfg.get("method_id"),
+            "last_updated": cfg.get("last_updated"),
+            "has_handler": spec is not None,
+            "handled_by": resolved if (spec and resolved != name) else None,
+            "auth": "oauth" if name in OAUTH_PROVIDERS else "api_key",
+            "tool_name": spec["declaration"]["name"] if spec else None,
+        })
+
+    try:
+        from connectors.mcp_connector import list_available_mcps
+        mcps = list_available_mcps()
+    except Exception as e:
+        mcps = []
+        print(f"[Tools] Could not list MCP servers: {e}")
+
+    always_on = [
+        {"name": spec["declaration"]["name"], "description": spec["declaration"]["description"]}
+        for spec in ALWAYS_ON_TOOLS.values()
+    ]
+
+    return jsonify({"apis": apis, "mcps": mcps, "always_on": always_on})
+
+
+@app.route("/api/tools/disconnect", methods=["POST"])
+def disconnect_tool_route():
+    """Mark an API as not connected.
+
+    Deliberately does NOT delete anything from .env — flipping a switch in the
+    UI should not silently destroy credentials that were awkward to obtain.
+    The service stops being offered to agents; reconnecting re-uses whatever
+    is still stored unless you overwrite it.
+    """
+    # Mutate the dict load_registry() returns, never a name imported earlier:
+    # load_registry() rebinds the module global to a freshly-parsed dict, so an
+    # imported API_REGISTRY reference goes stale and writes land on a detached
+    # copy that save_registry() never sees.
+    from connectors.api_connector import load_registry, save_registry
+
+    data = request.get_json(force=True) or {}
+    service = (data.get("service_name") or "").strip()
+    if not service:
+        return jsonify({"error": "service_name is required"}), 400
+
+    registry = load_registry()
+    if service not in registry:
+        return jsonify({"error": f"'{service}' is not in the registry."}), 404
+
+    registry[service]["status"] = "unknown"
+    save_registry()
+    push_message("system", f"{service} disconnected. Stored credentials were left in place.")
+    return jsonify({"service": service, "status": "unknown", "configured": False})
 
 
 def run_server():
@@ -2186,7 +4623,11 @@ def mic_loop(window):
                         "end the conversation", "end conversation", "goodbye",
                         "go to sleep", "exit", "quit", "stop listening"
                     ]
-                    should_stop = any(w in transcript_lower for w in stop_words)
+                    # Match whole words on a SHORT utterance only. Plain substring
+                    # matching hid the window mid-request: "quit" is inside "quite",
+                    # "exit" inside "exits", and any long instruction that happened to
+                    # contain one was swallowed as a goodbye instead of being answered.
+                    should_stop = is_stop_command(transcript_lower, stop_words)
                     if should_stop:
                         push_message("user", transcript)
                         speak("Okay, going back to sleep.")

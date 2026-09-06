@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Section</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- The same library execution mode draws its constellation with, so a
+         section at rest and a pipeline running look like one system. -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <style>
+        :root {
+            --bg: #05070A;
+            --panel: rgba(255,255,255,0.025);
+            --line: rgba(255,255,255,0.08);
+            --text: #E2E8F0;
+            --muted: #9CA3AF;
+            --dim: #4B5563;
+            --accent: #60A5FA;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        /* The page scrolls in its own column so the header stays put. */
+        .shell { display: flex; flex-direction: column; height: 100vh; }
+
+        header {
+            flex: 0 0 auto; padding: 22px 34px;
+            border-bottom: 1px solid var(--line);
+            display: flex; align-items: flex-start; gap: 24px;
+            background: rgba(8,10,14,0.9);
+        }
+        .id-block { flex: 1 1 auto; min-width: 0; }
+        .eyebrow {
+            font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin-bottom: 8px;
+        }
+        h1 {
+            margin: 0; font-size: 22px; font-weight: 700; color: #FFFFFF;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .brief {
+            margin-top: 10px; font-size: 13px; color: var(--muted);
+            line-height: 1.7; max-width: 900px; white-space: pre-wrap;
+        }
+        .top-right-nav { display: flex; gap: 10px; flex: 0 0 auto; }
+        .nav-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit;
+            font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+            text-transform: uppercase; padding: 12px 20px; border-radius: 8px;
+            cursor: pointer; transition: all .25s ease; text-align: center;
+        }
+        .nav-btn:hover {
+            background: rgba(255,255,255,0.07); color: #FFF;
+            border-color: rgba(255,255,255,0.25);
+        }
+
+        /* The constellation is the floor of the page and the panels float over
+           it, so a section at rest reads as the same thing execution mode shows
+           running rather than as a document with a picture in it. */
+        .body { flex: 1 1 auto; min-height: 0; position: relative; }
+
+        #stage { position: absolute; inset: 0; z-index: 1; }
+        #cy { position: absolute; inset: 0; }
+        #labels { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+        .department-label {
+            position: absolute; transform: translate(-50%, -50%);
+            font-size: 15px; font-weight: 600; letter-spacing: 5px; text-transform: uppercase;
+            text-shadow: 0 0 15px rgba(0,0,0,0.85); white-space: nowrap;
+            transition: opacity .5s ease;
+        }
+        /* The section itself, at the centre. Still while nothing is running. */
+        #core {
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            width: 230px; height: 230px; border-radius: 50%; z-index: 2;
+            pointer-events: none; display: flex; align-items: center; justify-content: center;
+            text-align: center; transition: background .6s ease;
+            background: radial-gradient(circle, rgba(96,165,250,0.20) 0%,
+                        rgba(96,165,250,0.06) 42%, transparent 68%);
+        }
+        #core.live {
+            background: radial-gradient(circle, rgba(52,211,153,0.24) 0%,
+                        rgba(52,211,153,0.07) 42%, transparent 68%);
+        }
+        #core .core-in {
+            font-size: 10px; letter-spacing: 3px; text-transform: uppercase;
+            color: rgba(255,255,255,0.45);
+        }
+        #core .core-name {
+            font-size: 13px; letter-spacing: 1px; font-weight: 600; margin-top: 7px;
+            color: rgba(255,255,255,0.80);
+        }
+        #crew-empty {
+            position: absolute; left: 50%; top: 62%; transform: translateX(-50%);
+            z-index: 3; text-align: center; max-width: 430px; display: none;
+            font-size: 12.5px; line-height: 1.8; color: var(--dim);
+        }
+
+        .rail {
+            position: absolute; top: 0; bottom: 0; z-index: 10; overflow-y: auto;
+            transition: transform .35s ease, opacity .35s ease;
+        }
+        .rail.left {
+            left: 0; width: 356px; padding: 22px 18px 50px;
+            background: linear-gradient(90deg, rgba(5,7,10,0.94) 0%,
+                        rgba(5,7,10,0.80) 70%, rgba(5,7,10,0) 100%);
+        }
+        .rail.right {
+            right: 0; width: 392px; padding: 0; overflow: hidden;
+            border-left: 1px solid var(--line); background: rgba(6,8,12,0.93);
+            display: flex; flex-direction: column;
+        }
+        .rail.hidden { opacity: 0; pointer-events: none; }
+        .rail.left.hidden { transform: translateX(-24px); }
+        .rail.right.hidden { transform: translateX(24px); }
+
+        .card {
+            background: rgba(12,15,21,0.72); border: 1px solid var(--line);
+            border-radius: 12px; padding: 17px 19px; margin-bottom: 15px;
+            backdrop-filter: blur(6px);
+        }
+        .card-head {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 14px; gap: 12px;
+        }
+        .card-title {
+            font-size: 11px; font-weight: 700; letter-spacing: 1.8px;
+            text-transform: uppercase; color: #FFFFFF;
+        }
+        .mini {
+            background: rgba(255,255,255,0.04); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit; font-size: 10px;
+            font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+            padding: 7px 14px; border-radius: 6px; cursor: pointer; transition: all .2s ease;
+        }
+        .mini:hover { color: #FFF; border-color: rgba(96,165,250,0.5); }
+        .mini:disabled { opacity: .45; cursor: not-allowed; }
+
+        .prose { font-size: 13px; line-height: 1.8; color: #CBD5E1; }
+        .prose:empty::before { content: "Nothing recorded yet."; color: var(--dim); }
+        .prose p { margin: 0 0 12px; }
+        .prose h3, .prose h4, .prose h5, .prose h6 {
+            margin: 20px 0 10px; font-size: 11px; font-weight: 700;
+            letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted);
+        }
+        .prose h3:first-child, .prose h4:first-child { margin-top: 0; }
+        .prose ul { margin: 0 0 12px; padding-left: 20px; }
+        .prose li { margin-bottom: 6px; }
+        .prose code {
+            background: rgba(255,255,255,0.06); border-radius: 4px;
+            padding: 2px 6px; font-size: 12px;
+        }
+        .prose .wikilink {
+            color: var(--accent); border-bottom: 1px dotted rgba(96,165,250,0.5);
+        }
+        textarea.edit {
+            width: 100%; min-height: 260px; resize: vertical;
+            background: rgba(0,0,0,0.35); border: 1px solid rgba(96,165,250,0.4);
+            border-radius: 8px; color: var(--text); font-family: inherit;
+            font-size: 13px; line-height: 1.8; padding: 14px; outline: none;
+        }
+
+        .row {
+            display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+            border: 1px solid var(--line); border-radius: 9px; margin-bottom: 9px;
+            transition: all .2s ease; background: rgba(255,255,255,0.015);
+        }
+        .row.click { cursor: pointer; }
+        .row.click:hover { border-color: rgba(96,165,250,0.5); background: rgba(96,165,250,0.06); }
+        .row-main { flex: 1 1 auto; min-width: 0; }
+        .row-title {
+            font-size: 13px; color: #E2E8F0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .row-sub { font-size: 10px; color: var(--dim); margin-top: 5px; letter-spacing: .6px; }
+        .badge {
+            font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+            padding: 4px 9px; border-radius: 5px; flex: 0 0 auto;
+            background: rgba(255,255,255,0.06); color: var(--muted);
+        }
+        .badge.running { background: rgba(52,211,153,0.15); color: #34D399; }
+        .badge.founding { background: rgba(167,139,250,0.15); color: #A78BFA; }
+        .empty { font-size: 12px; color: var(--dim); padding: 10px 2px; }
+
+        .chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .chip {
+            background: rgba(255,255,255,0.04); border: 1px solid var(--line);
+            border-radius: 20px; padding: 7px 14px; font-size: 11px; color: #CBD5E1;
+        }
+
+        /* ---- the section's own conversation ---- */
+        .chat-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--line); }
+        .chat-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 22px; }
+        .msg { margin-bottom: 16px; font-size: 13px; line-height: 1.7; }
+        .msg .who {
+            font-size: 9px; font-weight: 700; letter-spacing: 1.5px;
+            text-transform: uppercase; color: var(--dim); margin-bottom: 5px;
+        }
+        .msg.user .who { color: var(--accent); }
+        .msg .what { color: #CBD5E1; white-space: pre-wrap; }
+        .chat-input-row {
+            flex: 0 0 auto; padding: 16px 22px 20px; border-top: 1px solid var(--line);
+            display: flex; gap: 10px;
+        }
+        .chat-input-row input {
+            flex: 1 1 auto; background: rgba(255,255,255,0.03);
+            border: 1px solid var(--line); border-radius: 8px; color: var(--text);
+            font-family: inherit; font-size: 13px; padding: 12px 14px; outline: none;
+        }
+        .chat-input-row input:focus { border-color: rgba(96,165,250,0.6); }
+
+        /* ---- the inspector: what you get when you click a node ---- */
+        #insp {
+            position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+            z-index: 14; width: min(640px, calc(100% - 800px)); min-width: 420px;
+            background: rgba(10,13,19,0.95); border: 1px solid var(--line);
+            border-radius: 14px; padding: 18px 20px; backdrop-filter: blur(10px);
+            display: none;
+        }
+        #insp.on { display: block; }
+        #insp .k { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim); }
+        #insp h3 { margin: 7px 0 0; font-size: 16px; font-weight: 700; color: #FFFFFF; }
+        #insp .b { margin-top: 11px; font-size: 12.5px; line-height: 1.75; color: #CBD5E1; }
+        #insp .prov {
+            margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line);
+            font-size: 10.5px; color: var(--dim); line-height: 1.7;
+        }
+        #insp .prov code {
+            background: rgba(255,255,255,0.05); border-radius: 3px;
+            padding: 1px 4px; color: #93C5FD; font-size: 10px;
+        }
+        #insp .tools { margin-top: 11px; display: flex; flex-wrap: wrap; gap: 6px; }
+        #insp .tool {
+            font-size: 10px; color: var(--muted); background: rgba(255,255,255,0.05);
+            border: 1px solid var(--line); border-radius: 14px; padding: 4px 10px;
+        }
+        #insp .live-line { margin-top: 11px; font-size: 11px; color: #34D399; }
+        #insp .acts { margin-top: 14px; display: flex; gap: 8px; }
+        #insp .close {
+            position: absolute; top: 13px; right: 15px; cursor: pointer;
+            color: var(--dim); font-size: 15px; line-height: 1;
+        }
+        #insp .close:hover { color: #FFFFFF; }
+        #insp input, #insp textarea {
+            width: 100%; background: rgba(0,0,0,0.35);
+            border: 1px solid rgba(96,165,250,0.4); border-radius: 7px;
+            color: var(--text); font-family: inherit; font-size: 12.5px;
+            padding: 9px 11px; outline: none; margin-bottom: 8px;
+        }
+        #insp textarea { min-height: 84px; resize: vertical; line-height: 1.65; }
+        .mini.warn:hover { color: #F87171; border-color: rgba(248,113,113,0.5); }
+
+        .crew-line {
+            display: flex; align-items: center; gap: 9px; padding: 7px 0;
+            font-size: 12px; color: #CBD5E1; cursor: pointer;
+        }
+        .crew-line:hover { color: #FFFFFF; }
+        .crew-line .swatch { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+        .crew-line .n { margin-left: auto; font-size: 10px; color: var(--dim); }
+
+        /* Embedded in the information overlay: drop the page chrome. */
+        .embedded .top-right-nav .nav-btn:not(.keep) { display: none; }
+        .embedded header { padding-top: 18px; padding-bottom: 18px; }
+
+        ::-webkit-scrollbar { width: 9px; height: 9px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 5px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20); }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div class="id-block">
+            <div class="eyebrow">Section</div>
+            <h1 id="sec-name">Loading…</h1>
+            <div class="brief" id="sec-brief"></div>
+        </div>
+        <div class="top-right-nav" id="page-nav">
+            <button class="nav-btn keep" id="btn-rails" onclick="toggleRails()">Hide panels</button>
+            <button class="nav-btn keep" onclick="startPipelineHere()">New pipeline here</button>
+            <button class="nav-btn" onclick="go('command_center.html')">Brain</button>
+            <button class="nav-btn" onclick="go('execution.html')">Execution</button>
+        </div>
+    </header>
+
+    <div class="body">
+        <div id="stage">
+            <div id="cy"></div>
+            <div id="core">
+                <div><div class="core-in">Section</div><div class="core-name" id="core-name"></div></div>
+            </div>
+            <div id="labels"></div>
+            <div id="crew-empty">
+                This section has no crew yet. Press <b>Re-read pipelines</b> to build one from
+                what its pipelines actually ran.
+            </div>
+        </div>
+
+        <div class="rail left" id="rail-left">
+            <div class="card">
+                <div class="card-head">
+                    <span class="card-title">The crew</span>
+                    <button class="mini" id="btn-crew-refresh" onclick="refreshKnowledge()">Re-read pipelines</button>
+                </div>
+                <div id="crew-list"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <span class="card-title">What this section knows</span>
+                    <div style="display:flex; gap:8px;">
+                        <button class="mini" id="btn-refresh" onclick="refreshKnowledge()">Re-read pipelines</button>
+                        <button class="mini" id="btn-edit" onclick="toggleEditSummary()">Edit</button>
+                    </div>
+                </div>
+                <div class="prose" id="summary"></div>
+                <textarea class="edit" id="summary-edit" style="display:none"></textarea>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><span class="card-title">Pipelines</span></div>
+                <div id="pipelines"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><span class="card-title">Knowledge notes</span></div>
+                <div class="chip-list" id="knowledge"></div>
+                <div class="row-sub" id="folder-hint" style="margin-top:14px"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><span class="card-title">Tasks in this section</span></div>
+                <div id="tasks"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head"><span class="card-title">Notes in this section</span></div>
+                <div id="notes"></div>
+            </div>
+        </div>
+
+        <div id="insp">
+            <div class="close" id="insp-x" onclick="closeInspector()">✕</div>
+            <div class="k" id="insp-k"></div>
+            <h3 id="insp-t"></h3>
+            <div class="b" id="insp-b"></div>
+            <div class="tools" id="insp-tools"></div>
+            <div class="live-line" id="insp-live" style="display:none"></div>
+            <div class="prov" id="insp-p"></div>
+            <div class="acts" id="insp-acts"></div>
+        </div>
+
+        <div class="rail right" id="rail-right">
+            <div class="chat-head">
+                <span class="card-title">Talk about this section</span>
+                <div class="row-sub" style="margin-top:6px">
+                    Jarvis works on this section and remembers this conversation.
+                </div>
+            </div>
+            <div class="chat-log" id="chat-log"></div>
+            <div class="chat-input-row">
+                <input id="chat-input" placeholder="Ask about this section…" autocomplete="off">
+                <button class="mini" id="chat-send" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="nav_ui.js"></script>
+    <script src="mic_ui.js"></script>
+    <script src="sections_ui.js"></script>
+<script>
+    const PARAMS = new URLSearchParams(window.location.search);
+    const SECTION_ID = PARAMS.get("id") || "";
+
+    // Embedded inside the Section Information overlay, this page supplies only
+    // the content: the overlay already provides the frame, the title and a way
+    // out, and its own page navigation would strand you inside the iframe.
+    const EMBEDDED = PARAMS.get("embed") === "1";
+    if (EMBEDDED) {
+        document.documentElement.classList.add("embedded");
+    }
+    let sectionData = null;
+    let editingSummary = false;
+
+    // Embedded, every navigation must escape the iframe or the destination
+    // renders inside the information panel.
+    function go(url) {
+        if (EMBEDDED && window.top && window.top !== window) {
+            window.top.location.href = url;
+        } else {
+            window.location.href = url;
+        }
+    }
+
+    function esc(t) {
+        return String(t == null ? "" : t).replace(/[&<>"']/g, c =>
+            ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // The summary is a markdown document you also edit by hand, so it is shown
+    // formatted rather than as source. Escaped first: none of this trusts input.
+    function renderMarkdown(text) {
+        const lines = esc(text || "").split("\n");
+        const out = [];
+        let inList = false;
+        const inline = s => s
+            .replace(/\[\[([^\]]+)\]\]/g, '<span class="wikilink">$1</span>')
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+        lines.forEach(raw => {
+            const line = raw.trim();
+            const bullet = line.match(/^[-*]\s+(.*)$/);
+            if (bullet) {
+                if (!inList) { out.push("<ul>"); inList = true; }
+                out.push("<li>" + inline(bullet[1]) + "</li>");
+                return;
+            }
+            if (inList) { out.push("</ul>"); inList = false; }
+            if (!line) return;
+            const head = line.match(/^(#{1,6})\s+(.*)$/);
+            if (head) {
+                const level = Math.min(head[1].length + 2, 6);
+                out.push("<h" + level + ">" + inline(head[2]) + "</h" + level + ">");
+                return;
+            }
+            out.push("<p>" + inline(line) + "</p>");
+        });
+        if (inList) out.push("</ul>");
+        return out.join("");
+    }
+
+    async function load() {
+        if (!SECTION_ID) {
+            document.getElementById("sec-name").textContent = "No section chosen";
+            return;
+        }
+        const res = await fetch("/sections/" + encodeURIComponent(SECTION_ID));
+        if (!res.ok) {
+            document.getElementById("sec-name").textContent = "Section not found";
+            return;
+        }
+        sectionData = await res.json();
+        render();
+
+        // Working in this section from now on: scoped tools, its own memory.
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/enter", { method: "POST" })
+            .catch(() => {});
+
+        // A pipeline running inside the section lights up the part of the crew
+        // it is actually using, so the dashboard shows the live run without
+        // being a second copy of execution mode.
+        pollLive();
+        setInterval(pollLive, 4000);
+    }
+
+    // The constellation is laid out in pixels, so it is rebuilt on resize.
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => { if (sectionData) buildConstellation(); }, 180);
+    });
+
+    function render() {
+        const s = sectionData.section;
+        document.title = s.name + " — Jarvis Section";
+        document.getElementById("sec-name").textContent = s.name;
+        document.getElementById("sec-brief").textContent = s.brief || "";
+        document.getElementById("core-name").textContent = s.name;
+        if (!editingSummary) {
+            document.getElementById("summary").innerHTML = renderMarkdown(sectionData.summary);
+        }
+        document.getElementById("folder-hint").textContent =
+            "On disk: " + sectionData.folder + "  —  open this folder as an Obsidian vault to browse it.";
+
+        // Pipelines — clicking one shows it exactly the way execution mode does.
+        const pipes = document.getElementById("pipelines");
+        pipes.innerHTML = "";
+        if (!sectionData.pipelines.length) {
+            pipes.innerHTML = '<div class="empty">No pipelines yet.</div>';
+        }
+        sectionData.pipelines.forEach(p => {
+            const row = document.createElement("div");
+            row.className = "row click";
+            row.innerHTML =
+                '<div class="row-main">' +
+                    '<div class="row-title">' + esc(p.task || p.id) + '</div>' +
+                    '<div class="row-sub">ID ' + esc(p.id) + ' · ' +
+                        esc(String(p.phase || "").toUpperCase()) + '</div>' +
+                '</div>' +
+                (p.founding ? '<span class="badge founding">Founding</span>' : '') +
+                '<span class="badge ' + (p.status === "running" ? "running" : "") + '">' +
+                    esc(p.status || "") + '</span>';
+            row.onclick = () => {
+                // execution.html reads the pipeline it shows from here, and the
+                // section id keeps that view pinned to this section's work.
+                localStorage.setItem("jarvis_active_pipeline_id", p.id);
+                go("execution.html?section=" + encodeURIComponent(SECTION_ID));
+            };
+            pipes.appendChild(row);
+        });
+
+        const know = document.getElementById("knowledge");
+        know.innerHTML = "";
+        if (!sectionData.knowledge.length) {
+            know.innerHTML = '<div class="empty">No knowledge notes yet.</div>';
+        }
+        sectionData.knowledge.forEach(n => {
+            const chip = document.createElement("div");
+            chip.className = "chip";
+            chip.title = n.preview || "";
+            chip.textContent = n.name;
+            know.appendChild(chip);
+        });
+
+        renderList("tasks", sectionData.tasks, t => ({
+            title: t.content,
+            sub: (t.priority || "") + " · " + (t.status || "")
+        }));
+        renderList("notes", sectionData.notes, n => ({
+            title: n.content,
+            sub: n.tags || ""
+        }));
+
+        renderChat(sectionData.messages || []);
+
+        renderCrewList();
+        buildConstellation();
+    }
+
+    /* ====================================================================
+       The constellation — the section's standing crew, drawn at rest.
+
+       Same geometry, same colours and the same library execution mode uses,
+       because this is the same thing: a section is a pipeline's constellation
+       that outlived the run. Dormant is expressed as opacity rather than as a
+       different drawing, so a section lighting up is one continuous idea.
+       ==================================================================== */
+
+    const CYCLE_COLORS = ['#22D3EE', '#60A5FA', '#34D399', '#F87171',
+                          '#FB7185', '#FCD34D', '#A78BFA', '#818CF8'];
+
+    let cy = null;
+    let nodePositions = {};
+    let liveGraph = null;       // the running pipeline's agents, when there is one
+    let livePlanId = null;
+    let selected = null;        // {kind:'dept'|'agent', d, a}
+    let railsOn = true;
+
+    function crew() {
+        return (sectionData && sectionData.crew) || { departments: [] };
+    }
+
+    function norm(text) {
+        return String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    }
+
+    function railWidth(id, full) {
+        const el = document.getElementById(id);
+        if (!el || el.classList.contains("hidden")) return 0;
+        // The left rail fades out rather than ending, so for centring only the
+        // part that is actually opaque counts as taken.
+        return el.offsetWidth * (full || id !== "rail-left" ? 1 : 0.82);
+    }
+
+    // A department's name is as long as its name: the radius cannot know that in
+    // advance, so the labels are measured once they exist and nudged back inside
+    // the corridor. A name half-hidden under a panel is worse than an off-centre
+    // one, and this is the only thing that knows how wide the words came out.
+    function fitLabels(leftBound, rightBound) {
+        const stage = document.getElementById("stage").getBoundingClientRect();
+        document.querySelectorAll(".department-label").forEach(el => {
+            const box = el.getBoundingClientRect();
+            const left = box.left - stage.left, right = box.right - stage.left;
+            let shift = 0;
+            if (left < leftBound + 10) shift = leftBound + 10 - left;
+            else if (right > rightBound - 10) shift = rightBound - 10 - right;
+            if (shift) el.style.left = (parseFloat(el.style.left) + shift) + "px";
+        });
+    }
+
+    function buildConstellation() {
+        const stage = document.getElementById("stage");
+        const depts = crew().departments || [];
+        document.getElementById("crew-empty").style.display = depts.length ? "none" : "block";
+        if (cy) { cy.destroy(); cy = null; }
+        document.getElementById("labels").innerHTML = "";
+        if (!depts.length) return;
+
+        // Centred on the space between the panels rather than on the page, so
+        // the outermost labels never end up underneath a rail — and so hiding
+        // the panels re-centres the constellation instead of leaving it offset.
+        const W = stage.clientWidth, H = stage.clientHeight;
+        const leftW = railWidth("rail-left"), rightW = railWidth("rail-right");
+        const open = Math.max(320, W - leftW - rightW);
+        const CX = leftW + open / 2, CY = H / 2;
+        const GLOBE = 95;
+        const DEPT = Math.max(150, Math.min(215, H * 0.24));
+        const LABEL = Math.min(open / 2 - 20, H * 0.46);
+
+        const els = [];
+        nodePositions = {};
+        let labels = "";
+
+        depts.forEach((dept, i) => {
+            const color = CYCLE_COLORS[i % CYCLE_COLORS.length];
+            const angle = -Math.PI / 2 + i * (2 * Math.PI / depts.length);
+
+            const anchorId = "anchor_" + i;
+            els.push({ data: { id: anchorId, type: "anchor" } });
+            nodePositions[anchorId] = { x: CX + GLOBE * Math.cos(angle),
+                                        y: CY + GLOBE * Math.sin(angle) };
+
+            const deptId = "d" + i;
+            els.push({ data: { id: deptId, type: "dept", color: color, d: i } });
+            nodePositions[deptId] = { x: CX + DEPT * Math.cos(angle),
+                                      y: CY + DEPT * Math.sin(angle) };
+            els.push({ data: { source: anchorId, target: deptId, dept: deptId, color: color } });
+
+            const lx = CX + LABEL * Math.cos(angle), ly = CY + LABEL * Math.sin(angle);
+            labels += '<div class="department-label" id="lb_' + i + '" style="left:' + lx +
+                      "px;top:" + ly + "px;color:" + color + '">' +
+                      esc(dept.domain).toUpperCase() + "</div>";
+
+            // Agents chain outward inside their own wedge, so two departments
+            // never grow into each other however many agents they hold.
+            const half = Math.PI / depts.length, PAD = 0.14;
+            const aMin = angle - half + PAD, aMax = angle + half - PAD;
+            let parent = deptId, radius = DEPT + 72;
+
+            (dept.agents || []).forEach((agent, ai) => {
+                const big = ai < 2;
+                const branch = Math.max(aMin, Math.min(aMax, angle + Math.sin(ai) * 0.22));
+                const nodeId = "d" + i + "a" + ai;
+                els.push({ data: {
+                    id: nodeId, type: big ? "agent_large" : "agent_dot",
+                    label: big ? agent.role : "", color: color, dept: deptId, d: i, a: ai
+                }});
+                nodePositions[nodeId] = { x: CX + radius * Math.cos(branch),
+                                          y: CY + radius * Math.sin(branch) };
+                els.push({ data: { source: parent, target: nodeId, dept: deptId, color: color } });
+                parent = nodeId;
+                radius += 54;
+
+                // A constellation, not a chain: every other agent throws a
+                // short branch so the wedge reads as a web.
+                if (ai % 2 === 0) {
+                    const sideId = nodeId + "s";
+                    const sa = Math.max(aMin, Math.min(aMax, branch + (ai % 4 === 0 ? 0.26 : -0.26)));
+                    els.push({ data: { id: sideId, type: "agent_dot", dept: deptId, color: color } });
+                    nodePositions[sideId] = { x: CX + (radius - 30) * Math.cos(sa),
+                                              y: CY + (radius - 30) * Math.sin(sa) };
+                    els.push({ data: { source: nodeId, target: sideId, dept: deptId,
+                                       color: color, type: "web_cross" } });
+                }
+            });
+        });
+
+        document.getElementById("labels").innerHTML = labels;
+        // Centring may lean into the left rail's fade, but a name must clear the
+        // panel outright, so the labels are fitted against its full width.
+        fitLabels(railWidth("rail-left", true), W - railWidth("rail-right", true));
+
+        cy = cytoscape({
+            container: document.getElementById("cy"),
+            elements: els,
+            style: [
+                { selector: 'node[type="anchor"]', style: { width: 1, height: 1, opacity: 0 } },
+                { selector: 'node[type="agent_large"]', style: {
+                    label: "data(label)", color: "rgba(255,255,255,0.55)", "font-size": "10px",
+                    "font-family": "Inter", "text-valign": "bottom", "text-halign": "center",
+                    "text-margin-y": 7, "background-color": "#EAE6EE", width: 20, height: 20,
+                    "border-width": 1, "border-color": "rgba(255,255,255,0.5)", opacity: 0.55,
+                    "shadow-blur": 8, "shadow-color": "#EAE6EE", "shadow-opacity": 0.18
+                }},
+                { selector: 'node[type="agent_dot"]', style: {
+                    "background-color": "#fff", width: 5, height: 5, opacity: 0.4,
+                    "shadow-blur": 4, "shadow-color": "#fff", "shadow-opacity": 0.4
+                }},
+                { selector: 'node[type="dept"]', style: {
+                    "background-color": "#1C1E32", width: 40, height: 40, "border-width": 2,
+                    "border-color": "data(color)", opacity: 0.55, "shadow-blur": 14,
+                    "shadow-color": "data(color)", "shadow-opacity": 0.22
+                }},
+                { selector: "edge", style: {
+                    width: 1, "line-color": "rgba(255,255,255,0.14)", "curve-style": "straight"
+                }},
+                { selector: 'edge[type="web_cross"]', style: {
+                    width: 0.7, "line-color": "rgba(255,255,255,0.08)", "line-style": "dashed"
+                }},
+                // Awake: a pipeline in this section is working through this part
+                // of the crew right now.
+                { selector: "node.awake", style: {
+                    opacity: 1, "shadow-opacity": 0.75, "shadow-blur": 26, color: "#fff"
+                }},
+                { selector: "edge.awake", style: {
+                    "line-color": "data(color)", width: 1.8, opacity: 0.9
+                }},
+                { selector: "node.busy", style: {
+                    "border-color": "#34D399", "shadow-color": "#34D399",
+                    "shadow-opacity": 1, "shadow-blur": 30
+                }},
+                { selector: "node.picked", style: {
+                    "border-color": "data(color)", "border-width": 3, opacity: 1,
+                    "shadow-opacity": 0.9, "shadow-blur": 28, color: "#fff"
+                }}
+            ],
+            layout: { name: "preset", positions: nodePositions, fit: false },
+            userZoomingEnabled: false, userPanningEnabled: false
+        });
+
+        cy.nodes('[type="dept"]').forEach(n => {
+            const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" ' +
+                'viewBox="0 0 24 24" fill="none" stroke="' + n.data("color") + '" stroke-width="2">' +
+                '<circle cx="12" cy="12" r="3"></circle><line x1="12" y1="5" x2="12" y2="19"></line>' +
+                '<line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+            n.style("background-image", "data:image/svg+xml;utf8," + encodeURIComponent(svg));
+            n.style("background-width", "58%"); n.style("background-height", "58%");
+            n.style("background-position-x", "50%"); n.style("background-position-y", "50%");
+        });
+
+        cy.on("tap", 'node[type="dept"]', e => showDept(e.target.data("d")));
+        cy.on("tap", 'node[type="agent_large"]', e =>
+            showAgent(e.target.data("d"), e.target.data("a")));
+
+        applyLive();
+    }
+
+    // ---- lighting the crew a running pipeline is actually using ----
+
+    function runningPipeline() {
+        return (sectionData.pipelines || []).find(p => p.status === "running") || null;
+    }
+
+    async function pollLive() {
+        const running = runningPipeline();
+        if (!running) {
+            if (liveGraph) { liveGraph = null; livePlanId = null; applyLive(); }
+            return;
+        }
+        try {
+            const res = await fetch("/api/agent_graph/" + encodeURIComponent(running.id));
+            if (!res.ok) return;
+            liveGraph = await res.json();
+            livePlanId = running.id;
+            applyLive();
+        } catch (e) { /* the crew at rest is still the truth */ }
+    }
+
+    // The live run names its agents by role, and so does the crew, which is
+    // exactly why the Brain is told to reuse standing role names: that is what
+    // lets a run light up the agents that own the work rather than new ones.
+    function liveStatuses() {
+        const byRole = {};
+        if (!liveGraph) return byRole;
+        (liveGraph.cycles || []).forEach(c =>
+            (c.agents || []).forEach(a => { if (a.role) byRole[norm(a.role)] = a.status || "pending"; }));
+        (liveGraph.execution_agents || []).forEach(a => {
+            if (a.role) byRole[norm(a.role)] = a.status || "pending";
+        });
+        return byRole;
+    }
+
+    function applyLive() {
+        if (!cy) return;
+        const statuses = liveStatuses();
+        const anyLive = Object.keys(statuses).length > 0;
+        document.getElementById("core").classList.toggle("live", anyLive);
+        cy.elements().removeClass("awake busy");
+
+        (crew().departments || []).forEach((dept, i) => {
+            const lit = (dept.agents || []).filter(a => statuses[norm(a.role)]);
+            const label = document.getElementById("lb_" + i);
+            if (label) label.style.opacity = anyLive ? (lit.length ? 1 : 0.35) : 0.85;
+            if (!lit.length) return;
+            cy.elements('[dept = "d' + i + '"]').addClass("awake");
+            cy.$("#d" + i).addClass("awake");
+            (dept.agents || []).forEach((agent, ai) => {
+                if (statuses[norm(agent.role)] === "running") cy.$("#d" + i + "a" + ai).addClass("busy");
+            });
+        });
+        markSelected();
+    }
+
+    function markSelected() {
+        if (!cy) return;
+        cy.nodes().removeClass("picked");
+        if (!selected) return;
+        cy.$("#" + (selected.kind === "dept" ? "d" + selected.d
+                                             : "d" + selected.d + "a" + selected.a)).addClass("picked");
+    }
+
+    // ---- the inspector ----
+
+    function insp(id) { return document.getElementById(id); }
+
+    function closeInspector() {
+        selected = null;
+        insp("insp").classList.remove("on");
+        markSelected();
+    }
+
+    function showDept(d) {
+        const dept = crew().departments[d];
+        if (!dept) return;
+        selected = { kind: "dept", d: d };
+        insp("insp-k").textContent = "Baby section · " + originWord(dept.origin);
+        insp("insp-t").textContent = dept.domain;
+        insp("insp-b").textContent = dept.goal || "";
+        insp("insp-tools").innerHTML = (dept.agents || [])
+            .map(a => '<span class="tool">' + esc(a.role) + "</span>").join("");
+        const statuses = liveStatuses();
+        const lit = (dept.agents || []).filter(a => statuses[norm(a.role)]);
+        setLiveLine(lit.length
+            ? "A pipeline in this section is working here right now — " + lit.length +
+              (lit.length === 1 ? " agent" : " agents") + " of this baby section are in the run."
+            : "");
+        insp("insp-p").innerHTML =
+            "Its agents are standing: every pipeline started in this section begins from them, " +
+            "and the Brain adapts rather than inventing a new cast.";
+        setActs([
+            ["Rename", "mini", () => editDept(d)],
+            ["Add an agent", "mini", () => addAgent(d)],
+            ["Drop this baby section", "mini warn", () => dropDept(d)]
+        ]);
+        insp("insp").classList.add("on");
+        markSelected();
+    }
+
+    function showAgent(d, a) {
+        const dept = crew().departments[d];
+        const agent = dept && dept.agents[a];
+        if (!agent) return;
+        selected = { kind: "agent", d: d, a: a };
+        insp("insp-k").textContent =
+            (agent.is_lead ? "Lead of " : "Advisory in ") + dept.domain;
+        insp("insp-t").textContent = agent.role;
+        insp("insp-b").textContent = agent.brief || "";
+        insp("insp-tools").innerHTML = (agent.tools_needed || [])
+            .map(t => '<span class="tool">' + esc(t) + "</span>").join("");
+
+        const status = liveStatuses()[norm(agent.role)];
+        setLiveLine(status === "running" ? "Running right now in " + (livePlanId || "this section") + "."
+                  : status ? "In the current run — " + status + "."
+                  : "");
+        insp("insp-p").innerHTML = "Where it comes from — " +
+            renderWhy(agent.why || "Kept from this section's own pipelines.") +
+            (agent.evidence && agent.evidence.length
+                ? "<br>Recorded: " + esc(agent.evidence.slice(0, 4).join(", ")) + "."
+                : "");
+        setActs([
+            ["Edit", "mini", () => editAgent(d, a)],
+            ["Drop", "mini warn", () => dropAgent(d, a)]
+        ]);
+        insp("insp").classList.add("on");
+        markSelected();
+    }
+
+    function originWord(origin) {
+        if (origin === "founding") return "from the founding pipeline";
+        if (origin === "merged") return "merged from more than one cycle";
+        return "new, from the section brief";
+    }
+
+    // Provenance names real agent_ids, so `backticks` become code.
+    function renderWhy(text) {
+        return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>");
+    }
+
+    function setLiveLine(text) {
+        const el = insp("insp-live");
+        el.style.display = text ? "" : "none";
+        el.textContent = text;
+    }
+
+    function setActs(buttons) {
+        const box = insp("insp-acts");
+        box.innerHTML = "";
+        buttons.forEach(([label, cls, fn]) => {
+            const b = document.createElement("button");
+            b.className = cls;
+            b.textContent = label;
+            b.onclick = fn;
+            box.appendChild(b);
+        });
+    }
+
+    // ---- editing the crew from the dashboard ----
+
+    function editDept(d) {
+        const dept = crew().departments[d];
+        insp("insp-k").textContent = "Renaming a baby section";
+        insp("insp-t").textContent = "";
+        insp("insp-b").innerHTML =
+            '<input id="ed-domain" value="' + esc(dept.domain) + '" placeholder="What this is about">' +
+            '<textarea id="ed-goal" placeholder="What it is for, in one line">' +
+                esc(dept.goal || "") + "</textarea>";
+        insp("insp-tools").innerHTML = "";
+        setLiveLine("");
+        insp("insp-p").textContent = "";
+        setActs([
+            ["Save", "mini", () => {
+                const name = document.getElementById("ed-domain").value.trim();
+                if (!name) return;
+                dept.domain = name;
+                dept.goal = document.getElementById("ed-goal").value.trim();
+                saveCrew(() => showDept(d));
+            }],
+            ["Cancel", "mini", () => showDept(d)]
+        ]);
+    }
+
+    function editAgent(d, a) {
+        const agent = crew().departments[d].agents[a];
+        insp("insp-k").textContent = "Editing an agent";
+        insp("insp-t").textContent = "";
+        insp("insp-b").innerHTML =
+            '<input id="ed-role" value="' + esc(agent.role) +
+                '" placeholder="One role, one job">' +
+            '<textarea id="ed-brief" placeholder="What this agent owns in this section, for good">' +
+                esc(agent.brief || "") + "</textarea>";
+        insp("insp-tools").innerHTML = "";
+        setLiveLine("");
+        insp("insp-p").textContent =
+            "Keeping the role name is what keeps this agent's earlier findings credited to it.";
+        setActs([
+            ["Save", "mini", () => {
+                const role = document.getElementById("ed-role").value.trim();
+                const brief = document.getElementById("ed-brief").value.trim();
+                // An agent with no role or no brief has no job, and the server
+                // drops it — so don't leave one on screen pretending otherwise.
+                if (!role || !brief) { dropAgent(d, a); return; }
+                agent.role = role;
+                agent.brief = brief;
+                saveCrew(() => showAgent(d, a));
+            }],
+            ["Cancel", "mini", () => showAgent(d, a)]
+        ]);
+    }
+
+    function addAgent(d) {
+        const dept = crew().departments[d];
+        dept.agents.push({ role: "", brief: "", is_lead: false, origin: "brief",
+                           from_agent_ids: [], evidence: [],
+                           why: "Added by you on the dashboard." });
+        editAgent(d, dept.agents.length - 1);
+    }
+
+    function dropAgent(d, a) {
+        const dept = crew().departments[d];
+        dept.agents.splice(a, 1);
+        if (!dept.agents.length) crew().departments.splice(d, 1);
+        else if (!dept.agents.some(x => x.is_lead)) dept.agents[0].is_lead = true;
+        saveCrew(closeInspector);
+    }
+
+    function dropDept(d) {
+        crew().departments.splice(d, 1);
+        saveCrew(closeInspector);
+    }
+
+    function saveCrew(after) {
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/crew", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ crew: crew() })
+        })
+        .then(r => r.json())
+        .then(d => { if (d.crew) sectionData.crew = d.crew; })
+        .catch(() => { /* the local edit still stands until the next load */ })
+        .then(() => {
+            renderCrewList();
+            buildConstellation();
+            // Indexes move when something is dropped, so a stale panel would be
+            // pointing at the wrong agent.
+            if (after) after();
+        });
+    }
+
+    function renderCrewList() {
+        const box = document.getElementById("crew-list");
+        const depts = crew().departments || [];
+        box.innerHTML = "";
+        if (!depts.length) {
+            box.innerHTML = '<div class="empty">No crew yet — re-read the pipelines to build one.</div>';
+            return;
+        }
+        depts.forEach((dept, i) => {
+            const color = CYCLE_COLORS[i % CYCLE_COLORS.length];
+            const line = document.createElement("div");
+            line.className = "crew-line";
+            line.innerHTML =
+                '<span class="swatch" style="background:' + color +
+                    ";box-shadow:0 0 8px " + color + '"></span>' +
+                "<span>" + esc(dept.domain) + "</span>" +
+                '<span class="n">' + (dept.agents || []).length + "</span>";
+            line.onclick = () => showDept(i);
+            box.appendChild(line);
+        });
+    }
+
+    function toggleRails() {
+        railsOn = !railsOn;
+        document.getElementById("rail-left").classList.toggle("hidden", !railsOn);
+        document.getElementById("rail-right").classList.toggle("hidden", !railsOn);
+        document.getElementById("btn-rails").textContent = railsOn ? "Hide panels" : "Show panels";
+        // Re-centred once the rails have finished sliding out of the way.
+        setTimeout(() => { if (sectionData) buildConstellation(); }, 380);
+    }
+
+    function renderList(id, items, shape) {
+        const box = document.getElementById(id);
+        box.innerHTML = "";
+        if (!items || !items.length) {
+            box.innerHTML = '<div class="empty">Nothing yet.</div>';
+            return;
+        }
+        items.forEach(item => {
+            const s = shape(item);
+            const row = document.createElement("div");
+            row.className = "row";
+            row.innerHTML =
+                '<div class="row-main">' +
+                    '<div class="row-title">' + esc(s.title) + '</div>' +
+                    (s.sub ? '<div class="row-sub">' + esc(s.sub) + '</div>' : '') +
+                '</div>';
+            box.appendChild(row);
+        });
+    }
+
+    function renderChat(messages) {
+        const log = document.getElementById("chat-log");
+        log.innerHTML = "";
+        if (!messages.length) {
+            log.innerHTML = '<div class="empty">Nothing said in this section yet.</div>';
+        }
+        messages.forEach(m => appendMessage(m.role, m.content, false));
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function appendMessage(role, text, scroll = true) {
+        const log = document.getElementById("chat-log");
+        const empty = log.querySelector(".empty");
+        if (empty) empty.remove();
+        const el = document.createElement("div");
+        el.className = "msg " + (role === "user" ? "user" : "jarvis");
+        el.innerHTML =
+            '<div class="who">' + (role === "user" ? "You" : "Jarvis") + '</div>' +
+            '<div class="what">' + esc(text) + '</div>';
+        log.appendChild(el);
+        if (scroll) log.scrollTop = log.scrollHeight;
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById("chat-input");
+        const btn = document.getElementById("chat-send");
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = "";
+        appendMessage("user", text);
+        btn.disabled = true;
+        try {
+            const res = await fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text })
+            });
+            const data = await res.json();
+            appendMessage("jarvis", data.reply || data.error || "No reply.");
+        } catch (e) {
+            appendMessage("jarvis", "Could not reach Jarvis.");
+        } finally {
+            btn.disabled = false;
+            input.focus();
+        }
+    }
+
+    document.getElementById("chat-input").addEventListener("keydown", e => {
+        if (e.key === "Enter") sendMessage();
+    });
+
+    document.addEventListener("keydown", e => {
+        if (e.key === "Escape" && selected) closeInspector();
+    });
+
+    function toggleEditSummary() {
+        const view = document.getElementById("summary");
+        const edit = document.getElementById("summary-edit");
+        const btn = document.getElementById("btn-edit");
+
+        if (!editingSummary) {
+            edit.value = sectionData.summary || "";
+            view.style.display = "none";
+            edit.style.display = "block";
+            btn.textContent = "Save";
+            editingSummary = true;
+            edit.focus();
+            return;
+        }
+
+        const text = edit.value;
+        btn.disabled = true;
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ summary: text })
+        }).then(() => {
+            sectionData.summary = text;
+            view.innerHTML = renderMarkdown(text);
+            edit.style.display = "none";
+            view.style.display = "block";
+            btn.textContent = "Edit";
+            editingSummary = false;
+        }).finally(() => { btn.disabled = false; });
+    }
+
+    function refreshKnowledge() {
+        // Both copies of this button do the same thing, so both have to show it.
+        const buttons = ["btn-refresh", "btn-crew-refresh"]
+            .map(id => document.getElementById(id)).filter(Boolean);
+        buttons.forEach(b => { b.disabled = true; b.textContent = "Reading…"; });
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/refresh", { method: "POST" })
+            .then(r => r.json())
+            .then(d => {
+                if (d.summary != null) {
+                    sectionData.summary = d.summary;
+                    if (!editingSummary) {
+                        document.getElementById("summary").innerHTML = renderMarkdown(d.summary);
+                    }
+                }
+                // The crew grows with the pipelines: anything a later run added
+                // appears, and nothing standing is overwritten.
+                if (d.crew) {
+                    sectionData.crew = d.crew;
+                    closeInspector();
+                    renderCrewList();
+                    buildConstellation();
+                }
+            })
+            .finally(() => {
+                buttons.forEach(b => { b.disabled = false; b.textContent = "Re-read pipelines"; });
+            });
+    }
+
+    function startPipelineHere() {
+        const task = prompt("What should this pipeline do? It will start knowing what this section knows.");
+        if (!task || !task.trim()) return;
+        fetch("/pipeline/intake/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task: task.trim(), section_id: SECTION_ID })
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (d.draft_id) {
+                    // The clarification gate lives on the command centre.
+                    sessionStorage.setItem("jarvis_intake_draft", d.draft_id);
+                    go("command_center.html?intake=" + encodeURIComponent(d.draft_id));
+                }
+            });
+    }
+
+    load();
+</script>
+</body>
+</html>

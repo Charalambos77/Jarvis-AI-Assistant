@@ -158,10 +158,24 @@ TOOLS = [
     },
     {
         "name": "get_tasks",
-        "description": "Get all tasks, optionally filtered by status (open, in_progress, done).",
+        "description": (
+            "Get tasks, optionally filtered by status (open, in_progress, done). "
+            "While working inside a section this returns that section's tasks; pass "
+            "scope to look outside it."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"status": {"type": "string", "enum": ["open", "in_progress", "done"]}},
+            "properties": {
+                "status": {"type": "string", "enum": ["open", "in_progress", "done"]},
+                "scope": {
+                    "type": "string",
+                    "enum": ["section", "brain", "everything"],
+                    "description": (
+                        "section (default inside a section), brain for the main task "
+                        "list outside any section, everything for both."
+                    ),
+                },
+            },
         },
     },
     {
@@ -197,10 +211,23 @@ TOOLS = [
     },
     {
         "name": "search_notes",
-        "description": "Search saved notes by content or tag.",
+        "description": (
+            "Search saved notes by content or tag. While working inside a section "
+            "this searches that section's notes; pass scope to look outside it."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"query": {"type": "string"}},
+            "properties": {
+                "query": {"type": "string"},
+                "scope": {
+                    "type": "string",
+                    "enum": ["section", "brain", "everything"],
+                    "description": (
+                        "section (default inside a section), brain for notes outside "
+                        "any section, everything for both."
+                    ),
+                },
+            },
             "required": ["query"],
         },
     },
@@ -533,7 +560,13 @@ TOOLS = [
     },
     {
         "name": "start_pipeline",
-        "description": "Launch the multi-agent pipeline for a complex task. The pipeline runs through research, synthesis, human gate review, execution, and deploy phases.",
+        "description": (
+            "Begin a multi-agent pipeline for a complex task. This does NOT start the pipeline "
+            "immediately: it asks the user whether they want to give more details first, and "
+            "opens the details window if they say yes. When the result says "
+            "'awaiting_details', tell the user you are waiting on their answer \u2014 never claim "
+            "the pipeline has started, and do not invent a plan ID."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -591,8 +624,80 @@ TOOLS = [
         "name": "read_metrics",
         "description": "Read all currently tracked metrics and their values/thresholds.",
         "parameters": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "delegate_build",
+        "description": (
+            "Hand a real software build job to the Antigravity CLI, a coding agent that works "
+            "inside one project's folder. Use it when the user asks you to actually build, "
+            "scaffold, fix or run something — a site, an app, a script that has to work — "
+            "because it can edit files, run the build and fix what breaks, which you cannot. "
+            "Do not use it to answer questions, write prose, or manage tasks and notes.\n\n"
+            "It works in a project folder under 'Let Jarvis Handle It' and never in Jarvis's "
+            "own source. Inside a section the section's folder is used automatically; "
+            "otherwise name the project. It takes minutes, so tell the user you are starting "
+            "before you call it, and report honestly afterwards — especially if it says "
+            "commands were refused, which means that part did not happen."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "instruction": {
+                    "type": "string",
+                    "description": (
+                        "The job, stated concretely: what to build, with what, and how you "
+                        "would know it worked. It cannot ask questions."
+                    ),
+                },
+                "project": {
+                    "type": "string",
+                    "description": (
+                        "Project folder name under 'Let Jarvis Handle It'. Optional inside a "
+                        "section, which supplies its own."
+                    ),
+                },
+                "timeout_minutes": {
+                    "type": "integer",
+                    "description": "How long to allow, 1-30. Defaults to 10.",
+                },
+            },
+            "required": ["instruction"],
+        },
     }
 ]
+
+
+def delegate_build_impl(instruction: str, project: str | None = None,
+                        timeout_minutes: int = 10) -> dict:
+    """Jarvis hands a build job to the Antigravity CLI.
+
+    The project is never guessed: inside a section it is that section's folder,
+    otherwise the caller has to name one. Defaulting to anything would mean
+    a coding agent editing a folder the user did not choose.
+    """
+    from connectors import antigravity
+
+    if not antigravity.is_available():
+        return {"status": "error", "error": (
+            "The Antigravity CLI is not available on this machine, so I cannot delegate "
+            "building. Install it, or ask me to write the files myself."
+        )}
+
+    section = get_active_section()
+    folder = (project or "").strip() or (section or {}).get("folder") or ""
+    if not folder:
+        return {"status": "error", "error": (
+            "No project chosen. Ask the user which project folder to build in, or enter a "
+            "section first — I will not pick one for them."
+        )}
+
+    minutes = max(1, min(int(timeout_minutes or 10), 30))
+    return antigravity.run(
+        instruction, folder, timeout=minutes * 60,
+        # So a command this build asks to run shows up on the Commands page
+        # filed under the section it came from, not on its own.
+        section_id=(section or {}).get("id"),
+    )
 
 
 def focus_tasks_impl(task_ids):
@@ -643,6 +748,7 @@ TOOL_IMPL = {
     "update_note": lambda conn, **kw: db.update_note(conn, **kw),
     "complete_note": lambda conn, **kw: db.complete_note(conn, **kw),
     "focus_tasks": lambda conn, **kw: focus_tasks_impl(**kw),
+    "delegate_build": lambda conn, **kw: delegate_build_impl(**kw),
     "call_external_api": lambda conn, **kw: call_external_api(conn, **kw),
     "call_mcp": lambda conn, **kw: call_mcp(conn, **kw),
     "google_search": lambda conn, query: outsource_google_search(query),
@@ -764,7 +870,8 @@ UI_MAP = (
     "  'delete tasks 4, 5, and 6' → batch_delete_tasks\n"
     "  'save these 3 notes...' → batch_create_notes\n"
     "  'delete notes 1, 2, and 3' → batch_delete_notes\n"
-    "  'start a pipeline for X' → start_pipeline\n"
+    "  'start a pipeline for X' / 'let Jarvis handle it' \u2192 start_pipeline "
+    "(asks about details first, then opens the details window)\n"
     "  'resume project Y' / 'resume pipeline Y' → resume_pipeline\n"
     "  'delete project Y' / 'delete pipeline Y' → delete_pipeline\n"
     "  'check pipeline status' → get_gate_status\n"
@@ -822,17 +929,113 @@ if has_gemini():
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
-CHAT_SESSION = None
+# ---------------------------------------------------------------------------
+# Section focus
+#
+# Inside a section Jarvis works on that section: tasks and notes it creates
+# belong to it, and the ones it reads back are its own. Focused, not sealed —
+# it can still reach the wider brain, but only when it deliberately asks to.
+# ---------------------------------------------------------------------------
+
+ACTIVE_SECTION: dict | None = None
+
+# One chat session per section, so a section keeps its own thread of
+# conversation and the brain's chat is not polluted by it. Keyed by section id,
+# with "" for the brain itself.
+CHAT_SESSIONS: dict[str, object] = {}
+
+
+def set_active_section(section: dict | None):
+    """Enter a section, or leave it by passing None."""
+    global ACTIVE_SECTION
+    ACTIVE_SECTION = section or None
+
+
+def get_active_section() -> dict | None:
+    return ACTIVE_SECTION
+
+
+def clear_section_chat(section_id: str | None):
+    """Drop a cached session so the next message rebuilds it from stored history."""
+    CHAT_SESSIONS.pop(section_id or "", None)
+
+
+def _section_system_prompt(section: dict) -> str:
+    """The base prompt plus everything this section stands for."""
+    name = section.get("name") or section.get("folder")
+    lines = [
+        SYSTEM_PROMPT,
+        "",
+        f"YOU ARE CURRENTLY WORKING INSIDE THE SECTION '{name}'.",
+        "- Everything the user says refers to this section unless they say otherwise.",
+        "- Tasks and notes you create belong to this section automatically.",
+        "- get_tasks and search_notes return this section's items by default. To look "
+        "at the wider brain, pass scope='brain' (or 'everything'); do that only when "
+        "the user actually asks about things outside this section.",
+        "- The section's knowledge below is already established. Treat it as known.",
+        "",
+    ]
+    try:
+        import sections as section_store
+        lines.append(section_store.knowledge_digest(section, max_chars=4000))
+    except Exception as e:
+        print(f"[Coordinator] Could not load section knowledge: {e}")
+    return "\n".join(lines)
+
+
+def _session_config(section: dict | None):
+    """`config`, or a copy of it carrying the section's system prompt."""
+    if not section or config is None:
+        return config
+    return types.GenerateContentConfig(
+        system_instruction=_section_system_prompt(section),
+        tools=[{"function_declarations": TOOLS}],
+        tool_config=types.ToolConfig(include_server_side_tool_invocations=False),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+
+def _stored_history(section: dict | None) -> list:
+    """A section's saved conversation, replayed into a fresh chat session.
+
+    This is what makes a section remember: come back weeks later and the model
+    starts with what was already said there, not a blank slate.
+    """
+    if not section:
+        return []
+    try:
+        conn = db.get_connection(DB_PATH)
+        try:
+            messages = db.get_section_messages(conn, section["id"], limit=60)
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[Coordinator] Could not load section chat: {e}")
+        return []
+
+    history = []
+    for m in messages:
+        role = "user" if m["role"] == "user" else "model"
+        text = (m.get("content") or "").strip()
+        if not text:
+            continue
+        history.append(types.Content(role=role, parts=[types.Part(text=text)]))
+    return history
 
 
 def get_chat_session():
     if not has_gemini() or client is None:
         raise RuntimeError("Gemini is not configured. Set GEMINI_API_KEY in .env to use the assistant.")
 
-    global CHAT_SESSION
-    if CHAT_SESSION is None:
-        CHAT_SESSION = client.chats.create(model="gemini-2.5-flash", config=config)
-    return CHAT_SESSION
+    section = ACTIVE_SECTION
+    key = (section or {}).get("id", "") or ""
+    if key not in CHAT_SESSIONS:
+        CHAT_SESSIONS[key] = client.chats.create(
+            model="gemini-2.5-flash",
+            config=_session_config(section),
+            history=_stored_history(section),
+        )
+    return CHAT_SESSIONS[key]
 
 
 def format_tool_response(result: Any) -> str:
@@ -844,12 +1047,36 @@ def format_tool_response(result: Any) -> str:
         return str(result)
 
 
+def _scope_to_section(tool_name: str, kwargs: dict) -> dict:
+    """Point the task and note tools at the section Jarvis is working inside.
+
+    `scope` is the model's way out: it is not a database argument, so it is
+    translated here and never reaches db.py.
+    """
+    scope = kwargs.pop("scope", None)
+    section = ACTIVE_SECTION
+
+    if tool_name in ("get_tasks", "search_notes"):
+        if scope == "everything":
+            kwargs["include_sections"] = True
+        elif scope == "brain":
+            pass                      # the default already means "outside any section"
+        elif section:
+            kwargs.setdefault("section_id", section["id"])
+        return kwargs
+
+    if tool_name in ("add_task", "add_note") and section and scope != "brain":
+        kwargs.setdefault("section_id", section["id"])
+    return kwargs
+
+
 def perform_tool_action(conn: Any, tool_name: str, **kwargs: Any) -> Any:
     if tool_name not in TOOL_IMPL:
         return {
             "status": "error",
             "error": f"Unknown tool '{tool_name}'. Available tools: {', '.join(sorted(TOOL_IMPL.keys()))}",
         }
+    kwargs = _scope_to_section(tool_name, kwargs)
     return TOOL_IMPL[tool_name](conn, **kwargs)
 
 
@@ -892,6 +1119,46 @@ def proofread_text(text: str) -> str:
 
 
 OLLAMA_CHAT_HISTORY = []
+
+def describe_empty_model_reply(response) -> str:
+    """Explain an empty Gemini reply instead of returning a blank line.
+
+    A blank string here reaches the user as an empty "JARVIS:" bubble with no
+    hint of what went wrong, and gets spoken as silence. Gemini legitimately
+    returns no text when the answer is cut off (MAX_TOKENS \u2014 2.5 models can spend
+    the whole budget on thinking), when safety filters block it, or when the
+    candidate carries no text part at all. Say which.
+    """
+    finish_reason = None
+    safety = None
+    try:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            finish_reason = getattr(candidates[0], "finish_reason", None)
+            safety = getattr(candidates[0], "safety_ratings", None)
+    except Exception:
+        pass
+
+    block_reason = None
+    try:
+        feedback = getattr(response, "prompt_feedback", None)
+        block_reason = getattr(feedback, "block_reason", None) if feedback else None
+    except Exception:
+        pass
+
+    # Always leave a trail in the terminal, whatever we tell the user.
+    print(f"[Coordinator] Gemini returned an empty reply. "
+          f"finish_reason={finish_reason} block_reason={block_reason} safety={safety}")
+
+    reason = str(finish_reason or "")
+    if block_reason:
+        return "That request was blocked by the model's safety filter, Sir."
+    if "MAX_TOKENS" in reason.upper():
+        return "I ran out of room before answering, Sir. Please try a shorter request."
+    if "RECITATION" in reason.upper():
+        return "The model stopped itself on a recitation check, Sir. Please rephrase."
+    return "The model came back empty, Sir. Please try that again."
+
 
 def handle_request(transcript: str) -> str:
     conn = db.get_connection(DB_PATH)
@@ -936,7 +1203,11 @@ def handle_request(transcript: str) -> str:
                 # Check for function calls
                 function_calls = response.function_calls
                 if not function_calls:
-                    return response.text or ""
+                    reply = (response.text or "").strip()
+                    # Never hand back an empty string: /ask pushes whatever it gets
+                    # straight into the chat, so "" shows as a blank JARVIS line and
+                    # is spoken as silence, telling the user nothing at all.
+                    return reply or describe_empty_model_reply(response)
                 
                 # Execute all function calls
                 tool_responses = []
@@ -1040,6 +1311,10 @@ def handle_request(transcript: str) -> str:
                 reply = (message.content or "").strip()
                 if not reply and tool_called_in_session:
                     reply = "Done, Sir."
+                if not reply:
+                    # Same rule as the Gemini path: never return a blank line.
+                    print("[Coordinator] Local model returned an empty reply.")
+                    reply = "The local model came back empty, Sir. Please try that again."
                 return proofread_text(reply)
 
             # We have tool calls, process them

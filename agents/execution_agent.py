@@ -69,7 +69,9 @@ async def run_execution_agent(
 
     blueprint_str = json.dumps(blueprint, indent=2)
 
-    declarations, handlers, unavailable = get_tools_for_execution_agent(tools_needed, project_name)
+    declarations, handlers, unavailable = get_tools_for_execution_agent(
+        tools_needed, project_name, context=f"{role}: {brief}"[:400]
+    )
 
     unavailable_note = ""
     if unavailable:

@@ -755,6 +755,18 @@
             }, 3500);
         }
 
+        // A page that sent us somewhere else (the clarification gate on the command
+        // centre) leaves its confirmation here, because its own toast dies with the
+        // navigation.
+        (function showHandedOverToast() {
+            let pending = null;
+            try {
+                pending = sessionStorage.getItem('jarvis_pending_toast');
+                if (pending) sessionStorage.removeItem('jarvis_pending_toast');
+            } catch (e) { return; }
+            if (pending) setTimeout(() => showToast(pending), 400);
+        })();
+
         // =========================================================
         // GLOBAL CONTROLLER & FLASH TRANSITION LOGIC
         // =========================================================
@@ -764,6 +776,11 @@
 
         // Pipeline persistence: read stored pipeline ID across page navigations
         const STORED_PIPELINE_ID = localStorage.getItem('jarvis_active_pipeline_id');
+
+        // When this page is showing a section, it is pinned to that section's
+        // pipeline. Without this, a pipeline running elsewhere would overwrite
+        // the stored id below and quietly swap the view to someone else's work.
+        const PINNED_SECTION_ID = new URLSearchParams(window.location.search).get('section') || '';
 
         function triggerFlashTransition(onPeakCallback) {
             if (isTransitioningState) return;
@@ -809,8 +826,9 @@
                     const data = await res.json();
                     const shouldBeRunning = !!data.active;
 
-                    // Persist pipeline ID across all page navigations
-                    if (data.active_ids && data.active_ids.length > 0) {
+                    // Persist pipeline ID across all page navigations, unless we
+                    // are pinned to a section — then the section's pipeline wins.
+                    if (!PINNED_SECTION_ID && data.active_ids && data.active_ids.length > 0) {
                         localStorage.setItem('jarvis_active_pipeline_id', data.active_ids[0]);
                     }
 
@@ -2293,7 +2311,15 @@
                         const act = data.ui_action;
                         let ackedAction = null;
 
-                        if (act.type === 'navigate' && act.url) {
+                        if (act.type === 'pipeline_intake_ask') {
+                            // The intake modal lives on the command centre, and /state
+                            // hands a ui_action to whichever page polls first — so carry
+                            // the draft over instead of swallowing the ask here. `from`
+                            // brings the user back here once the gate is done.
+                            window.location.href =
+                                'command_center.html?intake=' + encodeURIComponent(act.draft_id) +
+                                '&from=execution';
+                        } else if (act.type === 'navigate' && act.url) {
                             window.location.href = act.url;
                         } else if (act.type === 'control_interface') {
                             ackedAction = act.action;
@@ -2346,6 +2372,9 @@
             } catch (e) { }
         }, 800);
     </script>
+    <script src="nav_ui.js"></script>
+    <script src="mic_ui.js"></script>
+    <script src="sections_ui.js"></script>
 </body>
 
 </html>

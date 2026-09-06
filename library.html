@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Library</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #05070A;
+            --panel: rgba(255,255,255,0.025);
+            --line: rgba(255,255,255,0.08);
+            --text: #E2E8F0;
+            --muted: #9CA3AF;
+            --dim: #4B5563;
+            --accent: #60A5FA;
+            --go: #34D399;
+            --warn: #FBBF24;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        .shell { display: flex; flex-direction: column; height: 100vh; }
+
+        header {
+            flex: 0 0 auto; padding: 22px 34px 0;
+            border-bottom: 1px solid var(--line); background: rgba(8,10,14,0.9);
+        }
+        .head-row { display: flex; align-items: flex-start; gap: 24px; }
+        .id-block { flex: 1 1 auto; min-width: 0; }
+        .eyebrow {
+            font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin-bottom: 8px;
+        }
+        h1 { margin: 0; font-size: 22px; font-weight: 700; color: #FFF; }
+        .sub { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.7; max-width: 720px; }
+        .top-right-nav { display: flex; gap: 10px; flex: 0 0 auto; }
+        .nav-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit;
+            font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+            text-transform: uppercase; padding: 12px 20px; border-radius: 8px;
+            cursor: pointer; transition: all .25s ease;
+        }
+        .nav-btn:hover { background: rgba(255,255,255,0.07); color: #FFF; border-color: rgba(255,255,255,0.25); }
+        .nav-btn.active { background: #FFF; color: #000; border-color: #FFF; }
+
+        .search-row { display: flex; gap: 12px; align-items: center; padding: 20px 0 18px; flex-wrap: wrap; }
+        #search {
+            flex: 1 1 320px; background: rgba(0,0,0,0.35); border: 1px solid var(--line);
+            border-radius: 9px; color: var(--text); font-family: inherit; font-size: 13.5px;
+            padding: 12px 15px;
+        }
+        #search:focus { outline: none; border-color: rgba(96,165,250,0.45); }
+        .chips { display: flex; gap: 8px; }
+        .chip {
+            border: 1px solid var(--line); background: rgba(255,255,255,0.02); color: var(--muted);
+            font-family: inherit; font-size: 11px; font-weight: 600; letter-spacing: 1px;
+            text-transform: uppercase; padding: 10px 15px; border-radius: 8px; cursor: pointer;
+            transition: all .2s ease;
+        }
+        .chip:hover { color: #FFF; }
+        .chip.on { background: rgba(96,165,250,0.13); color: var(--accent); border-color: rgba(96,165,250,0.35); }
+
+        .body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 24px 34px 70px; }
+        .body::-webkit-scrollbar { width: 10px; }
+        .body::-webkit-scrollbar-track { background: transparent; }
+        .body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 6px; }
+        .body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+        .group-title {
+            font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin: 26px 0 14px; display: flex; align-items: center; gap: 10px;
+        }
+        .group-title:first-child { margin-top: 0; }
+        .count-pill {
+            background: rgba(255,255,255,0.06); border-radius: 20px; padding: 2px 9px;
+            font-size: 10px; letter-spacing: 1px; color: var(--muted);
+        }
+
+        .card {
+            background: var(--panel); border: 1px solid var(--line);
+            border-radius: 12px; margin-bottom: 12px; overflow: hidden;
+        }
+        .card.live { border-color: rgba(52,211,153,0.35); }
+        .card-head {
+            padding: 18px 22px; cursor: pointer; display: flex; align-items: flex-start; gap: 16px;
+            transition: background .2s ease;
+        }
+        .card-head:hover { background: rgba(255,255,255,0.022); }
+        .card-main { flex: 1 1 auto; min-width: 0; }
+        .card-name {
+            font-size: 15px; font-weight: 600; color: #FFF; display: flex; align-items: center; gap: 10px;
+        }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--go); flex: 0 0 auto; }
+        .card-brief {
+            margin-top: 7px; font-size: 12.5px; color: var(--muted); line-height: 1.65;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        }
+        .card-meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+        .badge {
+            font-size: 10.5px; letter-spacing: .6px; padding: 4px 10px; border-radius: 6px;
+            background: rgba(255,255,255,0.05); color: var(--muted); border: 1px solid var(--line);
+        }
+        .badge.go { background: rgba(52,211,153,0.13); color: var(--go); border-color: rgba(52,211,153,0.25); }
+        .badge.warn { background: rgba(251,191,36,0.14); color: var(--warn); border-color: rgba(251,191,36,0.28); }
+        .caret { color: var(--dim); font-size: 13px; flex: 0 0 auto; padding-top: 3px; transition: transform .2s ease; }
+        .card.open .caret { transform: rotate(90deg); }
+
+        .card-body { display: none; padding: 0 22px 20px; }
+        .card.open .card-body { display: block; }
+        .col-title {
+            font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim);
+            margin: 16px 0 10px; padding-top: 14px; border-top: 1px solid var(--line);
+        }
+        .row {
+            display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px;
+            cursor: pointer; transition: background .18s ease;
+        }
+        .row:hover { background: rgba(255,255,255,0.04); }
+        .row-main { flex: 1 1 auto; min-width: 0; }
+        .row-title { font-size: 13px; color: var(--text); }
+        .row-sub { font-size: 11.5px; color: var(--dim); margin-top: 4px; }
+        .row-title.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+        .when { color: var(--dim); font-size: 11.5px; white-space: nowrap; }
+
+        .actions { display: flex; gap: 8px; margin-top: 14px; }
+        .btn {
+            border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--muted);
+            font-family: inherit; font-size: 11px; font-weight: 600; letter-spacing: .8px;
+            padding: 9px 15px; border-radius: 8px; cursor: pointer; transition: all .2s ease;
+        }
+        .btn:hover { background: rgba(255,255,255,0.08); color: #FFF; }
+
+        .empty {
+            border: 1px dashed var(--line); border-radius: 12px; padding: 26px;
+            font-size: 12.5px; color: var(--dim); line-height: 1.8;
+        }
+        .more { font-size: 11.5px; color: var(--dim); padding: 8px 12px; }
+        mark { background: rgba(96,165,250,0.28); color: #FFF; border-radius: 3px; padding: 0 2px; }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div class="head-row">
+            <div class="id-block">
+                <div class="eyebrow">Jarvis</div>
+                <h1>Library</h1>
+                <div class="sub">
+                    Everything Jarvis has built, filed where it belongs: a section holds its pipelines,
+                    a pipeline holds what it produced. Search by what the thing was, not by when you ran it.
+                </div>
+            </div>
+            <!-- Filled in by nav_ui.js, which gives every page the same set. -->
+            <div class="top-right-nav"></div>
+        </div>
+        <div class="search-row">
+            <input type="text" id="search" placeholder="Search sections, pipelines and files…" oninput="render()">
+            <div class="chips">
+                <button class="chip on" data-filter="all" onclick="setFilter('all')">All</button>
+                <button class="chip" data-filter="running" onclick="setFilter('running')">Running</button>
+                <button class="chip" data-filter="sections" onclick="setFilter('sections')">Sections</button>
+                <button class="chip" data-filter="unfiled" onclick="setFilter('unfiled')">Unfiled</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="body" id="body"></div>
+</div>
+
+<script>
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let data = { sections: [], unfiled: [] };
+let filter = "all";
+// Which cards the user has opened. Kept by key so a background refresh never
+// collapses something being read.
+const opened = new Set();
+
+function ago(seconds) {
+    if (!seconds) return "";
+    const s = Math.floor(Date.now() / 1000 - seconds);
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    if (s < 2592000) return Math.floor(s / 86400) + "d ago";
+    return new Date(seconds * 1000).toLocaleDateString();
+}
+
+function size(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1048576) return (bytes / 1024).toFixed(0) + " KB";
+    return (bytes / 1048576).toFixed(1) + " MB";
+}
+
+function highlight(text, q) {
+    const safe = esc(text);
+    if (!q) return safe;
+    const needle = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return safe.replace(new RegExp("(" + needle + ")", "ig"), "<mark>$1</mark>");
+}
+
+function setFilter(next) {
+    filter = next;
+    document.querySelectorAll('.chip').forEach(c =>
+        c.classList.toggle('on', c.dataset.filter === next));
+    render();
+}
+
+function toggle(key) {
+    if (opened.has(key)) opened.delete(key); else opened.add(key);
+    render();
+}
+
+function openPipeline(planId, event) {
+    if (event) event.stopPropagation();
+    localStorage.setItem('jarvis_active_pipeline_id', planId);
+    location.href = 'plan.html';
+}
+
+function openSection(id, event) {
+    if (event) event.stopPropagation();
+    location.href = 'section.html?id=' + encodeURIComponent(id);
+}
+
+function openFile(path, event) {
+    if (event) event.stopPropagation();
+    fetch('/api/open-artifact', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: path })
+    }).then(r => r.json()).then(out => { if (out.error) alert(out.error); });
+}
+
+/* A group matches a search if anything inside it does — the point is to find
+   the section by remembering one file in it. */
+function matches(group, q) {
+    if (!q) return true;
+    const hay = [
+        group.name, group.folder, group.brief,
+        ...(group.pipelines || []).map(p => p.task + " " + p.full_task + " " + p.id),
+        ...(group.files || []).map(f => f.rel)
+    ].join(" ").toLowerCase();
+    return hay.includes(q);
+}
+
+function pipelineRow(p, q) {
+    // Finished runs have been stored under several names over time; anything
+    // else is genuinely unfinished and worth the amber.
+    const done = ["complete", "completed", "done", "finished"].includes(
+        String(p.status || "").toLowerCase());
+    const state = p.active ? `<span class="badge go">running</span>`
+        : done ? `<span class="badge">done</span>`
+        : `<span class="badge warn">${esc(p.status || p.phase || "stopped")}</span>`;
+    return `
+    <div class="row" onclick="openPipeline('${esc(p.id)}', event)">
+        <div class="row-main">
+            <div class="row-title">${highlight(p.task || "Untitled run", q)}</div>
+            <div class="row-sub">
+                Pipeline ${esc(p.id)} · ${p.agent_count} agents · ${p.deliverable_count} outputs
+                ${p.command_count ? ` · ${p.command_count} commands` : ""}
+            </div>
+        </div>
+        ${state}
+        <span class="when">${esc(ago(p.timestamp))}</span>
+    </div>`;
+}
+
+function fileRow(f, q) {
+    return `
+    <div class="row" onclick="openFile('${esc(f.path)}', event)">
+        <div class="row-main">
+            <div class="row-title mono">${highlight(f.rel, q)}</div>
+            <div class="row-sub">${esc(size(f.size))}</div>
+        </div>
+        <span class="when">${esc(ago(f.modified))}</span>
+    </div>`;
+}
+
+function card(group, key, q, isSection) {
+    const isOpen = opened.has(key);
+    const files = group.files || [];
+    const pipelines = group.pipelines || [];
+    const shownFiles = isOpen ? files.slice(0, 40) : [];
+    return `
+    <div class="card ${group.running ? "live" : ""} ${isOpen ? "open" : ""}">
+        <div class="card-head" onclick="toggle('${esc(key)}')">
+            <div class="card-main">
+                <div class="card-name">
+                    ${group.running ? `<span class="dot"></span>` : ""}
+                    ${highlight(isSection ? group.name : group.folder, q)}
+                </div>
+                ${isSection && group.brief ? `<div class="card-brief">${highlight(group.brief, q)}</div>` : ""}
+                <div class="card-meta">
+                    <span class="badge">${pipelines.length} pipeline${pipelines.length === 1 ? "" : "s"}</span>
+                    <span class="badge">${group.file_count} file${group.file_count === 1 ? "" : "s"}</span>
+                    ${isSection ? `<span class="badge">section</span>` : `<span class="badge">not filed in a section</span>`}
+                    <span class="badge">${esc(ago(group.last_activity))}</span>
+                </div>
+            </div>
+            <span class="caret">›</span>
+        </div>
+        <div class="card-body">
+            ${pipelines.length ? `<div class="col-title">Pipelines</div>` +
+                pipelines.map(p => pipelineRow(p, q)).join("") : ""}
+            ${shownFiles.length ? `<div class="col-title">Files</div>` +
+                shownFiles.map(f => fileRow(f, q)).join("") +
+                (files.length > shownFiles.length
+                    ? `<div class="more">and ${files.length - shownFiles.length} more in the folder</div>` : "")
+                : (isOpen ? `<div class="col-title">Files</div><div class="more">Nothing written yet.</div>` : "")}
+            <div class="actions">
+                ${isSection ? `<button class="btn" onclick="openSection('${esc(group.id)}', event)">Open section</button>` : ""}
+                <button class="btn" onclick="openFile('Let Jarvis Handle It/${esc(group.folder)}', event)">Open folder</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function render() {
+    const q = document.getElementById('search').value.trim().toLowerCase();
+    const host = document.getElementById('body');
+
+    let sections = data.sections.filter(s => matches(s, q));
+    let unfiled = data.unfiled.filter(g => matches(g, q));
+
+    if (filter === "sections") unfiled = [];
+    if (filter === "unfiled") sections = [];
+    if (filter === "running") {
+        sections = sections.filter(s => s.running);
+        unfiled = unfiled.filter(g => g.running);
+    }
+
+    let html = "";
+    if (sections.length) {
+        html += `<div class="group-title">Sections <span class="count-pill">${sections.length}</span></div>`;
+        html += sections.map(s => card(s, "s:" + s.id, q, true)).join("");
+    }
+    if (unfiled.length) {
+        html += `<div class="group-title">Not in a section <span class="count-pill">${unfiled.length}</span></div>`;
+        html += unfiled.map(g => card(g, "u:" + g.folder, q, false)).join("");
+    }
+    if (!html) {
+        html = q
+            ? `<div class="empty">Nothing matches "${esc(q)}". The search covers section names and
+               briefs, what each pipeline was asked to do, and the names of the files they wrote.</div>`
+            : `<div class="empty">Nothing here yet. Finished pipelines and the sections they grow
+               into will appear as they are made.</div>`;
+    }
+    host.innerHTML = html;
+}
+
+async function load() {
+    try {
+        data = await fetch('/api/library').then(r => r.json());
+        render();
+    } catch (e) { /* Jarvis restarting; the next tick picks it up. */ }
+}
+
+load();
+setInterval(load, 8000);
+</script>
+  <script src="nav_ui.js"></script>
+  <script src="sections_ui.js"></script>
+</body>
+</html>

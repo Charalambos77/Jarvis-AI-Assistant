@@ -1,4 +1,28 @@
 {
-    "fetch": {"status": "up", "description": "Fetches web page content"},
-    "sqlite": {"status": "up", "description": "SQLite DB operations"}
+  "filesystem": {
+    "enabled": false,
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "./Let Jarvis Handle It"
+    ],
+    "description": "Read and write files under the Let Jarvis Handle It folder. VERIFIED WORKING: 14 tools. Set enabled to true to let agents use it."
+  },
+  "fetch": {
+    "enabled": false,
+    "command": "uvx",
+    "args": [
+      "mcp-server-fetch"
+    ],
+    "description": "Fetch a URL and return readable text. Needs uvx (pip install uv) \u2014 not installed yet."
+  },
+  "jarvis_test": {
+    "enabled": false,
+    "command": "./venv/Scripts/python.exe",
+    "args": [
+      "scripts/mcp_test_server.py"
+    ],
+    "description": "Local reference server for verifying the MCP client (scripts/mcp_test_server.py)."
+  }
 }

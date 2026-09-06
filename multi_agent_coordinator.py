@@ -13,6 +13,16 @@ from agents.brain import build_agent_plan, finalize_execution_plan
 from agents.research_agent import run_research_agent
 from agents.execution_agent import run_execution_agent
 from agents.synthesis import run_synthesis_agent, run_master_synthesis
+
+# What a clarified brief means for the agents: it fixes WHAT the user wants, not
+# HOW they are allowed to work. Kept here so every planning call says the same thing.
+BRIEF_USAGE_RULE = (
+    "The brief is authoritative for WHAT the user wants. It is not a limit on HOW you work: "
+    "research and search the web freely for anything the brief does not cover. Follow the brief "
+    "exactly where it constrains you \u2014 if it names a specific source, tool, or approach, use that "
+    "one instead of choosing your own. Attached files live at the paths listed in the brief; open "
+    "them when they are relevant."
+)
 from agents.quality_checker import run_quality_checker
 from agents.deployment_agent import run_deployment_agent
 
@@ -458,6 +468,107 @@ def save_cycle_blueprint_file(plan_id: str, cycle_id: int, blueprint: dict, proj
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
+def _approved_cycles_path(plan_id: str, project_name: str) -> str:
+    dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Agents")
+    return os.path.join(dir_path, f"approved_cycles_{plan_id}.json")
+
+
+def load_approved_cycles(plan_id: str, project_name: str = "Default Project") -> list[int]:
+    """Cycle ids the user actually approved at the gate.
+
+    A cycle blueprint is written to disk *before* its gate opens, so the file
+    existing proves only that the research was synthesized — not that anyone
+    signed it off. This record is what says a cycle is done.
+    """
+    if not plan_id:
+        return []
+    try:
+        with open(_approved_cycles_path(plan_id, project_name), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return sorted({int(c) for c in data.get("approved_cycle_ids", [])})
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        print(f"[Pipeline] Error reading approved cycles record: {e}")
+        return []
+
+
+def mark_cycle_approved(plan_id: str, cycle_id: int, project_name: str = "Default Project"):
+    if not plan_id:
+        return
+    try:
+        approved = set(load_approved_cycles(plan_id, project_name))
+        approved.add(int(cycle_id))
+        path = _approved_cycles_path(plan_id, project_name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"approved_cycle_ids": sorted(approved)}, f, indent=2)
+    except Exception as e:
+        print(f"[Pipeline] Error recording cycle {cycle_id} approval: {e}")
+
+
+def plan_tool_requirements(agent_plan: dict) -> dict:
+    """Every tool the agents in this plan actually declared they need.
+
+    Walks `tools_needed` across research and execution agents — the only place
+    an agent states a requirement — and resolves each name onto a real
+    connector. Returns the same buckets as classify_requested_tools, plus
+    `requested_by` so the gate can say which agent wants each service.
+    """
+    from agents.tool_executor import classify_requested_tools, _resolve_tool_key
+
+    requests_by_agent: list[tuple[str, str, str]] = []   # (agent_id, role, tool)
+    for cycle in (agent_plan.get("cycles") or []):
+        agents = [cycle.get("lead_specialist")] + (cycle.get("advisory_agents") or [])
+        for a in agents:
+            if not a:
+                continue
+            for t in (a.get("tools_needed") or []):
+                requests_by_agent.append((a.get("agent_id", "?"), a.get("role", ""), t))
+    for a in (agent_plan.get("execution_agents") or []):
+        for t in (a.get("tools_needed") or []):
+            requests_by_agent.append((a.get("agent_id", "?"), a.get("role", ""), t))
+
+    buckets = classify_requested_tools([t for _, _, t in requests_by_agent])
+
+    requested_by: dict[str, list[str]] = {}
+    for agent_id, role, tool in requests_by_agent:
+        canonical = _resolve_tool_key(tool)
+        if canonical in buckets["connectable"]:
+            who = f"{role} ({agent_id})" if role else agent_id
+            requested_by.setdefault(canonical, [])
+            if who not in requested_by[canonical]:
+                requested_by[canonical].append(who)
+
+    buckets["requested_by"] = requested_by
+    return buckets
+
+
+def derive_completed_stages(plan: dict) -> set[str]:
+    """Completed stages for a plan, falling back to the old phase-based rules.
+
+    Pipelines started before stages were recorded have no `completed_stages`, so
+    resume them exactly the way the previous code did rather than replaying work
+    they had already finished.
+    """
+    recorded = plan.get("completed_stages")
+    if recorded:
+        return set(recorded)
+
+    stages: set[str] = set()
+    phase = plan.get("phase")
+    status = plan.get("status")
+    if phase in ("execution", "qa", "deploy", "complete"):
+        stages.update({"execution_blueprint", "api_mcp_plugging"})
+    if phase in ("qa", "deploy", "complete"):
+        stages.add("execution")
+    if status == "complete" or phase in ("deploy", "complete"):
+        stages.add("final_qa")
+    if status == "complete":
+        stages.add("deploy")
+    return stages
+
+
 def save_master_blueprint_file(plan_id: str, master_blueprint: dict, project_name: str = "Default Project"):
     if not plan_id:
         return
@@ -538,10 +649,27 @@ async def run_full_pipeline(
     force_reexecute: bool = False,   # NEW: when resuming a plan already past execution
                                       # (phase in qa/deploy/complete), re-run execution
                                       # agents fresh instead of replaying stale exec_results.
+    brief_path: str | None = None,   # NEW: path to clarified_brief.md when this pipeline
+                                      # came through the clarification gate. `task` already
+                                      # carries the brief text; this is where the agents can
+                                      # re-read it, and where the attached files are listed.
 ) -> dict:
     """
     Runs the complete multi-agent pipeline with ordered cycles.
     """
+    # When the user clarified this job up front, the Brain plans against the brief
+    # plus a standing rule about how much freedom the agents still have.
+    planning_task = task
+    if brief_path:
+        planning_task = (
+            f"{task}\n\n"
+            f"[The full clarified brief for this job, including every attached file, is saved at:\n"
+            f"{brief_path}\n\n"
+            f"{BRIEF_USAGE_RULE}\n\n"
+            f"When you write each agent's brief, carry over the details, decisions and file paths "
+            f"that agent actually needs, and repeat this rule to them.]"
+        )
+
     conn = db.get_connection(DB_PATH)
     retry_history = []
 
@@ -569,6 +697,9 @@ async def run_full_pipeline(
 
         agent_plan = None
         approved_blueprints = []
+        approved_cycle_ids: list[int] = []
+        # Which stages this plan has genuinely finished. Everything else re-runs.
+        completed_stages = derive_completed_stages(existing_plan) if existing_plan else set()
 
         if existing_plan:
             # Check if agent plan exists on disk and load it to support user edits
@@ -590,29 +721,59 @@ async def run_full_pipeline(
                 agent_plan = existing_plan.get("agent_plan")
             
             approved_blueprints = existing_plan.get("approved_blueprints", [])
-            
-            # Fallback: if approved_blueprints is empty in DB, reconstruct it from cycle blueprint files on disk
+            approved_cycle_ids = load_approved_cycles(plan_id, project_name)
+
+            # Fallback: if approved_blueprints is empty in DB, reconstruct it from cycle
+            # blueprint files on disk — but only for cycles the user actually approved.
+            # The blueprint file is written before the gate opens, so rebuilding from
+            # every file on disk used to mark a cycle the user never signed off as done
+            # and skip it on resume.
             if not approved_blueprints:
-                for i in range(1, 10):
+                if approved_cycle_ids:
+                    reconstructable = approved_cycle_ids
+                elif existing_plan.get("phase") in ("execution", "qa", "deploy", "complete"):
+                    # Pre-dates the approval record, but the plan is past research, so
+                    # every cycle blueprint on disk did clear its gate.
+                    reconstructable = list(range(1, 10))
+                else:
+                    reconstructable = []
+
+                for i in reconstructable:
                     cb_file = os.path.join(plan_dir, f"cycle_blueprint_{i}_{plan_id}.md")
-                    if os.path.exists(cb_file):
-                        try:
-                            with open(cb_file, "r", encoding="utf-8") as f:
-                                cb_content = f.read()
-                            if "```json" in cb_content:
-                                cb_json_part = cb_content.split("```json")[-1].split("```")[0].strip()
-                                cb_data = json.loads(cb_json_part)
-                                approved_blueprints.append(cb_data)
-                                print(f"[Pipeline] Reconstructed approved blueprint for Cycle {i} from disk.")
-                        except Exception as e:
-                            print(f"[Pipeline] Error reading cycle blueprint {i} from disk: {e}")
+                    if not os.path.exists(cb_file):
+                        # Stop at the first gap so blueprints keep lining up with their
+                        # cycle numbers (cycle N's blueprint must sit at index N-1).
+                        break
+                    try:
+                        with open(cb_file, "r", encoding="utf-8") as f:
+                            cb_content = f.read()
+                        if "```json" in cb_content:
+                            cb_json_part = cb_content.split("```json")[-1].split("```")[0].strip()
+                            cb_data = json.loads(cb_json_part)
+                            approved_blueprints.append(cb_data)
+                            print(f"[Pipeline] Reconstructed approved blueprint for Cycle {i} from disk.")
+                        else:
+                            break
+                    except Exception as e:
+                        print(f"[Pipeline] Error reading cycle blueprint {i} from disk: {e}")
+                        break
+
+            # Plans that pre-date the approval record: adopt whatever the old rules
+            # counted as approved, so this resume doesn't re-run cleared cycles and
+            # later ones don't lose their sign-off.
+            if approved_blueprints and not approved_cycle_ids:
+                for i in range(1, len(approved_blueprints) + 1):
+                    mark_cycle_approved(plan_id, i, project_name)
+                approved_cycle_ids = load_approved_cycles(plan_id, project_name)
 
             print(f"[Pipeline] Resuming existing plan '{plan_id}'. Approved blueprints so far: {len(approved_blueprints)}")
+            print(f"[Pipeline] Cycles signed off: {approved_cycle_ids or 'none'}. "
+                  f"Stages already finished: {sorted(completed_stages) or 'none'}. Everything else re-runs.")
 
         if not agent_plan:
             # Phase 1: Brain builds cycle plan
             print("[Pipeline] Phase 1: Central Brain generating multi-cycle agent plan...")
-            agent_plan = build_agent_plan(task, event_logger=event_logger)
+            agent_plan = build_agent_plan(planning_task, event_logger=event_logger)
             if "error" in agent_plan:
                 return agent_plan
             save_agent_plan_file(plan_id, agent_plan, project_name)
@@ -644,9 +805,15 @@ async def run_full_pipeline(
             domain = cycle.get("domain", f"Cycle {cycle_id}")
 
             cycle_index = cycle_id - 1
-            if cycle_index < len(approved_blueprints):
+            # A blueprint sitting at this cycle's index isn't enough on its own: when
+            # an approval record exists, the cycle also has to appear in it.
+            cycle_signed_off = (cycle_id in approved_cycle_ids) if approved_cycle_ids else bool(existing_plan)
+            if cycle_index < len(approved_blueprints) and cycle_signed_off:
                 print(f"[Pipeline] Cycle {cycle_id} ({domain}) is already approved. Skipping research.")
                 continue
+            if cycle_index < len(approved_blueprints):
+                # Approved-looking blueprint with no sign-off — drop it and re-run.
+                approved_blueprints = approved_blueprints[:cycle_index]
 
             print(f"[Pipeline] Starting Cycle {cycle_id}: {domain}")
             
@@ -741,7 +908,7 @@ async def run_full_pipeline(
                     if event_logger:
                         event_logger({"event_type": "conflict", "source": "synthesis", "data": synthesis_result})
                     agent_plan_update = build_agent_plan(
-                        task, redirect_note=f"Conflicts in cycle {cycle_id}: {conflict_note}",
+                        planning_task, redirect_note=f"Conflicts in cycle {cycle_id}: {conflict_note}",
                         cycle_id=cycle_id, approved_blueprints=approved_blueprints, event_logger=event_logger
                     )
                     updated_cycles = agent_plan_update.get("cycles", [])
@@ -780,6 +947,12 @@ async def run_full_pipeline(
                             }
                         })
                     approved_blueprints.append(synthesis_result.get("blueprint", {}))
+                    # Record the sign-off on disk before moving on, so closing the app
+                    # here resumes at the next cycle — and closing it a moment earlier,
+                    # at the gate, resumes at this one.
+                    mark_cycle_approved(plan_id, cycle_id, project_name)
+                    if cycle_id not in approved_cycle_ids:
+                        approved_cycle_ids.append(cycle_id)
                     break  # advance to next cycle
                 else:
                     # Gate rejected — re-brief specific agents
@@ -792,7 +965,7 @@ async def run_full_pipeline(
                     # Re-plan only this cycle
                     try:
                         agent_plan_update = build_agent_plan(
-                            task, redirect_note=redirect_note,
+                            planning_task, redirect_note=redirect_note,
                             cycle_id=cycle_id, approved_blueprints=approved_blueprints,
                             rejected_steps=rejected_steps, event_logger=event_logger
                         )
@@ -872,9 +1045,7 @@ async def run_full_pipeline(
                 master_blueprint["tool_recommendations"] = tools_data.get("brain", []) + tools_data.get("agents", [])
 
         # Check if the execution blueprint gate was already approved
-        skip_exec_gate = False
-        if existing_plan and existing_plan.get("phase") in ('execution', 'qa', 'deploy', 'complete'):
-            skip_exec_gate = True
+        skip_exec_gate = "execution_blueprint" in completed_stages
 
         if not skip_exec_gate:
             # Phase 4: Finalize execution agents' tools_needed against the NOW-COMPLETE
@@ -883,7 +1054,7 @@ async def run_full_pipeline(
             # already approved should never silently rewrite an already-reviewed plan.
             print("[Pipeline] Phase 4: Finalizing execution plan against completed research...")
             agent_plan["execution_agents"] = finalize_execution_plan(
-                task, agent_plan.get("execution_agents", []), master_blueprint, event_logger=event_logger
+                planning_task, agent_plan.get("execution_agents", []), master_blueprint, event_logger=event_logger
             )
             save_agent_plan_file(plan_id, agent_plan, project_name)
             if event_logger:
@@ -911,7 +1082,7 @@ async def run_full_pipeline(
                 if event_logger:
                     event_logger({"event_type": "gate_resolved", "source": "execution_blueprint", "data": gate2})
                 agent_plan = build_agent_plan(
-                    task, redirect_note=redirect_note, approved_blueprints=approved_blueprints,
+                    planning_task, redirect_note=redirect_note, approved_blueprints=approved_blueprints,
                     rejected_steps=rejected_steps
                 )
                 save_agent_plan_file(plan_id, agent_plan, project_name)
@@ -926,35 +1097,37 @@ async def run_full_pipeline(
                     "retry_history": retry_history,
                 }
 
+        # What the gate should actually ask about: the services the agents in
+        # THIS plan declared they need, resolved onto real connectors.
+        #
+        # It used to be fed master_blueprint["tool_recommendations"], which is
+        # the research agents' `recommended_tools` — the subject matter of the
+        # research, not the pipeline's requirements. On a briefing about local
+        # LLM runners that meant being asked for API keys for Ollama, llama.cpp
+        # and nvidia-smi, none of which any agent asked to use and none of which
+        # have keys to give. Research findings stay in the payload as reading
+        # material; only genuine requirements can block.
+        required_tools = plan_tool_requirements(agent_plan)
+        research_suggestions = master_blueprint.get("tool_recommendations", []) or []
+        rec_by_service = {
+            str(r.get("service", "")).lower(): r
+            for r in research_suggestions if isinstance(r, dict)
+        }
+
         # Check if plugging gate was already approved
+        from agents.tool_executor import describe_connectable
+
         skip_plugging_gate = False
-        if existing_plan and existing_plan.get("phase") in ('execution', 'qa', 'deploy', 'complete'):
-            # Only skip if all recommended APIs/MCPs are configured
-            from connectors.api_connector import load_registry, get_service_status
+        if "api_mcp_plugging" in completed_stages:
+            from connectors.api_connector import load_registry
             load_registry()
-            tool_recs = master_blueprint.get("tool_recommendations", [])
-            
-            def is_api_or_mcp(service_name):
-                if not service_name:
-                    return False
-                s = str(service_name).lower()
-                libraries = [
-                    "react", "react.js", "next.js", "nextjs", "tailwind", "tailwind css", "tailwindcss", "typescript", "styled-components", 
-                    "styled_components", "css", "html", "javascript", "webpack", "babel", 
-                    "vite", "eslint", "prettier", "jest", "cypress", "playwright",
-                    "npm", "yarn", "pip", "python", "node.js", "nodejs", "express", "django",
-                    "laravel", "spring", "flask", "fastapi", "redux", "redux toolkit", "redux-toolkit", "git"
-                ]
-                for lib in libraries:
-                    if s == lib or s.startswith(lib + " ") or s.endswith(" " + lib):
-                        return False
-                return True
-                
-            unconfigured_apis = [
-                rec for rec in tool_recs 
-                if is_api_or_mcp(rec["service"]) and get_service_status(rec["service"]) == "unknown"
+            # Only skip if everything genuinely needed is connected — and for an
+            # MCP server that means it actually starts, not that a file says so.
+            unconfigured = [
+                svc for svc in required_tools["connectable"]
+                if not describe_connectable(svc)["configured"]
             ]
-            if not unconfigured_apis:
+            if not unconfigured:
                 skip_plugging_gate = True
 
         if not skip_plugging_gate:
@@ -962,25 +1135,46 @@ async def run_full_pipeline(
             from connectors.api_connector import load_registry, get_service_status
             load_registry()
 
-            tool_recs = master_blueprint.get("tool_recommendations", [])
-            for rec in tool_recs:
-                rec["configured"] = get_service_status(rec["service"]) != "unknown"
-                rec["current_status"] = get_service_status(rec["service"])
+            tool_recs = []
+            for canonical, raw_names in required_tools["connectable"].items():
+                # Carry across whatever the research wrote about this service
+                # (purpose, docs, pros/cons) so the gate still reads richly.
+                meta = {}
+                for name in [canonical] + raw_names:
+                    if name.lower() in rec_by_service:
+                        meta = dict(rec_by_service[name.lower()])
+                        break
+                meta.update(describe_connectable(canonical))
+                meta.update({
+                    "requested_as": raw_names,
+                    "required_by_agents": required_tools["requested_by"].get(canonical, []),
+                })
+                tool_recs.append(meta)
+
+            if required_tools["not_a_service"]:
+                print(f"[Pipeline] Not asking about non-connectable requests: {required_tools['not_a_service']}")
 
             print("[Pipeline] Phase 5.5: Waiting for human confirmation of API/MCP tools...")
+            gate_payload = {
+                "tool_recommendations": tool_recs,
+                # Informational only — never blocks, never asks for a key.
+                "research_suggestions": research_suggestions,
+                "not_connectable": required_tools["not_a_service"],
+                "message": (
+                    "These are the services your agents actually need for this pipeline. "
+                    "Unconfigured ones need credentials before the agents can use them."
+                    if tool_recs else
+                    "Your agents don't need any external service for this pipeline. "
+                    "Approve to continue."
+                ),
+                "registry": load_registry(),
+            }
             if event_logger:
-                event_logger({"event_type": "gate_waiting", "source": "api_mcp_plugging", "data": {"tool_recommendations": tool_recs}})
-            
+                event_logger({"event_type": "gate_waiting", "source": "api_mcp_plugging", "data": gate_payload})
+
             plugging_gate = await gate_approve_fn(
                 gate_id="api_mcp_plugging",
-                data={
-                    "tool_recommendations": tool_recs,
-                    "message": (
-                        "Your agents researched and recommend the following APIs/MCPs. "
-                        "Select the ones you want to use. Unconfigured services will need API keys."
-                    ),
-                    "registry": load_registry(),
-                }
+                data=gate_payload,
             )
             if not plugging_gate.get("approved"):
                 if event_logger:
@@ -993,7 +1187,7 @@ async def run_full_pipeline(
         # Check if execution phase completed
         skip_execution = False
         exec_results = []
-        if existing_plan and existing_plan.get("phase") in ('qa', 'deploy', 'complete') and not force_reexecute:
+        if "execution" in completed_stages and not force_reexecute:
             skip_execution = True
             exec_results = existing_plan.get("exec_results", [])
             print("[Pipeline] Resuming: Execution deliverables already completed. Skipping execution agents.")
@@ -1041,7 +1235,9 @@ async def run_full_pipeline(
 
             if not qa_result["all_passed"]:
                 if event_logger:
-                    event_logger({"event_type": "execution_completed", "source": "execution", "data": exec_results})
+                    # Surface what the agents produced, but flagged as not passing —
+                    # a resume must re-run execution rather than treat this as done.
+                    event_logger({"event_type": "execution_completed", "source": "execution", "data": exec_results, "qa_passed": False})
                 issues_summary = []
                 for res in qa_result.get("results", []):
                     if not res.get("passed"):
@@ -1056,12 +1252,10 @@ async def run_full_pipeline(
                 }
 
             if event_logger:
-                event_logger({"event_type": "execution_completed", "source": "execution", "data": exec_results})
+                event_logger({"event_type": "execution_completed", "source": "execution", "data": exec_results, "qa_passed": True})
 
         # Check if Final QA was approved
-        skip_final_qa = False
-        if existing_plan and (existing_plan.get("status") == "complete" or existing_plan.get("phase") in ('deploy', 'complete')):
-            skip_final_qa = True
+        skip_final_qa = "final_qa" in completed_stages and not force_reexecute
 
         if not skip_final_qa:
             # Phase 7: Gate — Final QA
@@ -1109,9 +1303,7 @@ async def run_full_pipeline(
                 }
 
         # Check if deployment completed
-        skip_deploy = False
-        if existing_plan and existing_plan.get("status") == "complete":
-            skip_deploy = True
+        skip_deploy = "deploy" in completed_stages and not force_reexecute
 
         if not skip_deploy:
             # Phase 8: Deployment
@@ -1143,7 +1335,7 @@ async def run_full_pipeline(
             "task": task,
             "master_blueprint": master_blueprint,
             "exec_results": exec_results,
-            "deploy_result": existing_plan.get("deploy_result", {}),
+            "deploy_result": (existing_plan or {}).get("deploy_result", {}),
         }
 
     finally:

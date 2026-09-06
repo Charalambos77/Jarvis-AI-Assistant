@@ -5,6 +5,7 @@ it's going to be used by an AI; it just stores and retrieves tasks and notes.
 Keeping this separate from server.py means you can test it on its own.
 """
 import sqlite3
+import threading
 from datetime import datetime, timezone
 
 
@@ -46,6 +47,32 @@ CREATE TABLE IF NOT EXISTS memory_patterns (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sections (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    folder TEXT NOT NULL,            -- project folder under "Let Jarvis Handle It"
+    brief TEXT NOT NULL DEFAULT '',  -- what this section is about, written at creation
+    founding_plan_id TEXT,           -- the pipeline the section grew out of
+    created_at TEXT NOT NULL
+);
+
+-- A section is a live workspace: the founding pipeline is only the first one.
+CREATE TABLE IF NOT EXISTS section_pipelines (
+    section_id TEXT NOT NULL REFERENCES sections(id),
+    plan_id TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (section_id, plan_id)
+);
+
+-- Chat inside a section persists to it, so Jarvis still remembers weeks later.
+CREATE TABLE IF NOT EXISTS section_chat (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    section_id TEXT NOT NULL REFERENCES sections(id),
+    role TEXT NOT NULL,              -- 'user' | 'jarvis'
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pipelines (
     id TEXT PRIMARY KEY,
     task TEXT NOT NULL,
@@ -57,15 +84,81 @@ CREATE TABLE IF NOT EXISTS pipelines (
     timestamp REAL NOT NULL,
     data TEXT NOT NULL
 );
+
+-- Every terminal command the Antigravity CLI has asked to run, and what was
+-- decided about it. This is a log, not a queue: a command still waiting for an
+-- answer lives in memory in command_gate.py, and only lands here once it has
+-- been allowed, rejected or timed out. Kept so the Commands page can show what
+-- a pipeline actually ran rather than only what it asked for.
+CREATE TABLE IF NOT EXISTS agy_commands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT NOT NULL UNIQUE,
+    command TEXT NOT NULL,           -- the command line, verbatim
+    signature TEXT NOT NULL,         -- normalised form the rules match on
+    project TEXT,                    -- project folder it was asked in
+    plan_id TEXT,                    -- pipeline that delegated the build
+    section_id TEXT,
+    conversation_id TEXT,            -- agy's own id, for tying a run together
+    decision TEXT NOT NULL,          -- allowed | rejected
+    decided_by TEXT NOT NULL,        -- user | rule | denylist | timeout | unreachable
+    reason TEXT NOT NULL DEFAULT '',
+    asked_at TEXT NOT NULL,
+    decided_at TEXT
+);
+
+-- "Always allow" answers. A rule is matched against every segment of a command
+-- line, so allowing `npm install` never allows `npm install && something else`.
+CREATE TABLE IF NOT EXISTS agy_command_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signature TEXT NOT NULL,         -- e.g. "npm install", "git status"
+    scope TEXT NOT NULL DEFAULT '',  -- '' = every project, else one folder name
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE (signature, scope)
+);
 """
 
 
+# The schema and migrations only need running once per process, not on every
+# connection. Doing them per connection meant every HTTP request and every agent
+# event opened a connection that immediately took a WRITE lock to re-run
+# CREATE TABLE IF NOT EXISTS. With a pipeline running (which writes a pipelines
+# row per event) the UI's reads piled up behind those writes and the window
+# stopped repainting.
+_SCHEMA_READY: set[str] = set()
+_SCHEMA_LOCK = threading.Lock()
+
+
 def get_connection(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    # Wait for a busy database rather than failing, and keep readers off the
+    # writer's lock entirely via WAL (set once, below — it persists on the file).
+    conn = sqlite3.connect(db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+
+    if db_path in _SCHEMA_READY:
+        return conn
+
+    with _SCHEMA_LOCK:
+        if db_path in _SCHEMA_READY:
+            return conn
+        _initialise_schema(conn)
+        _SCHEMA_READY.add(db_path)
+    return conn
+
+
+def _initialise_schema(conn: sqlite3.Connection) -> None:
+    """Create tables and apply migrations. Runs once per process, per database."""
+    try:
+        # WAL lets the UI keep reading while a pipeline writes. Persistent once set.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    except Exception as e:
+        print(f"Could not enable WAL mode: {e}")
+
     conn.executescript(SCHEMA)
-    
+
     # Dynamic migration for existing databases:
     try:
         cursor = conn.cursor()
@@ -82,6 +175,15 @@ def get_connection(db_path: str) -> sqlite3.Connection:
             conn.commit()
         if 'task_id' not in note_columns:
             conn.execute("ALTER TABLE notes ADD COLUMN task_id INTEGER REFERENCES tasks(id)")
+            conn.commit()
+
+        # Sections: tasks and notes made inside a section belong to it, and the
+        # brain's own lists filter them out rather than mixing them in.
+        if 'section_id' not in columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN section_id TEXT REFERENCES sections(id)")
+            conn.commit()
+        if 'section_id' not in note_columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN section_id TEXT REFERENCES sections(id)")
             conn.commit()
 
         # Memory patterns table migration
@@ -115,8 +217,6 @@ def get_connection(db_path: str) -> sqlite3.Connection:
             conn.commit()
     except Exception as e:
         print(f"Migration error: {e}")
-        
-    return conn
 
 
 def _now() -> str:
@@ -134,14 +234,15 @@ def add_task(
     due_date: str | None = None,
     depends_on_ids: list[int] | None = None,
     parent_id: int | None = None,
+    section_id: str | None = None,
 ) -> int:
     actual_priority = priority or 'medium'
     if parent_id == 0:
         parent_id = None
     cur = conn.execute(
-        """INSERT INTO tasks (content, effort_estimate, priority, scheduled_at, due_date, parent_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (content, effort_estimate, actual_priority, scheduled_at, due_date, parent_id, _now()),
+        """INSERT INTO tasks (content, effort_estimate, priority, scheduled_at, due_date, parent_id, section_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (content, effort_estimate, actual_priority, scheduled_at, due_date, parent_id, section_id, _now()),
     )
     task_id = cur.lastrowid
     for dep_id in depends_on_ids or []:
@@ -153,12 +254,28 @@ def add_task(
     return task_id
 
 
-def get_tasks(conn: sqlite3.Connection, status: str | None = None) -> list[dict]:
+def get_tasks(conn: sqlite3.Connection, status: str | None = None,
+              section_id: str | None = None, include_sections: bool = False) -> list[dict]:
+    """Tasks, scoped to one section or to the brain.
+
+    A task made inside a section belongs to that section, so the brain's own
+    list must not mix them in: with no `section_id` and `include_sections`
+    off, only unsectioned tasks come back. Pass `include_sections` when you
+    genuinely want everything (search across the whole brain, for instance).
+    """
     query = "SELECT * FROM tasks"
+    where: list[str] = []
     params: list = []
     if status:
-        query += " WHERE status = ?"
+        where.append("status = ?")
         params.append(status)
+    if section_id:
+        where.append("section_id = ?")
+        params.append(section_id)
+    elif not include_sections:
+        where.append("section_id IS NULL")
+    if where:
+        query += " WHERE " + " AND ".join(where)
     query += " ORDER BY created_at"
     rows = conn.execute(query, params).fetchall()
     tasks = [dict(r) for r in rows]
@@ -287,10 +404,11 @@ def batch_delete_tasks(conn: sqlite3.Connection, task_ids: list[int]) -> int:
 
 # ---------- notes ----------
 
-def add_note(conn: sqlite3.Connection, content: str, tags: str | None = None, task_id: int | None = None) -> int:
+def add_note(conn: sqlite3.Connection, content: str, tags: str | None = None, task_id: int | None = None,
+             section_id: str | None = None) -> int:
     cur = conn.execute(
-        "INSERT INTO notes (content, tags, task_id, created_at) VALUES (?, ?, ?, ?)",
-        (content, tags, task_id, _now()),
+        "INSERT INTO notes (content, tags, task_id, section_id, created_at) VALUES (?, ?, ?, ?, ?)",
+        (content, tags, task_id, section_id, _now()),
     )
     conn.commit()
     return cur.lastrowid
@@ -365,13 +483,19 @@ def batch_delete_notes(conn: sqlite3.Connection, note_ids: list[int]) -> int:
 
 
 
-def search_notes(conn: sqlite3.Connection, query: str) -> list[dict]:
+def search_notes(conn: sqlite3.Connection, query: str, section_id: str | None = None,
+                 include_sections: bool = False) -> list[dict]:
+    """Notes matching `query`, scoped the same way get_tasks() is."""
     like = f"%{query}%"
-    rows = conn.execute(
-        "SELECT * FROM notes WHERE content LIKE ? OR tags LIKE ? ORDER BY created_at DESC",
-        (like, like),
-    ).fetchall()
-    return [dict(r) for r in rows]
+    sql = "SELECT * FROM notes WHERE (content LIKE ? OR tags LIKE ?)"
+    params: list = [like, like]
+    if section_id:
+        sql += " AND section_id = ?"
+        params.append(section_id)
+    elif not include_sections:
+        sql += " AND section_id IS NULL"
+    sql += " ORDER BY created_at DESC"
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
 # ---------- memory patterns ----------
@@ -412,7 +536,17 @@ def save_pipeline(conn: sqlite3.Connection, plan: dict):
         "exec_results": plan.get("exec_results", []),
         "deploy_result": plan.get("deploy_result", {}),
         "agent_plan": plan.get("agent_plan", {}),
-        "approved_blueprints": plan.get("approved_blueprints", [])
+        "approved_blueprints": plan.get("approved_blueprints", []),
+        # Clarification intake: the short one-liner the user originally asked for
+        # (the `task` column now holds the full clarified brief) and the path to
+        # the brief file on disk, so a resumed pipeline can re-read it.
+        "task_summary": plan.get("task_summary"),
+        "brief_path": plan.get("brief_path"),
+        # Which stages actually finished (gates the user approved, execution that
+        # passed QA, deployment). `phase` alone can't answer that — it moves when a
+        # stage *starts*, so a pipeline killed while waiting at a gate came back
+        # looking like the gate had already been cleared, and the resume skipped it.
+        "completed_stages": sorted(set(plan.get("completed_stages") or []))
     }
     data_str = json.dumps(data_dict, ensure_ascii=False)
     
@@ -453,3 +587,207 @@ def delete_pipeline(conn: sqlite3.Connection, plan_id: str):
     conn.commit()
 
 
+
+
+# ---------- sections ----------
+#
+# A section is a lasting workspace grown out of one finished pipeline. The
+# pipeline stops being a one-off run and becomes standing knowledge; new
+# pipelines started inside the section build on top of it.
+
+def create_section(conn: sqlite3.Connection, section_id: str, name: str, folder: str,
+                   brief: str = "", founding_plan_id: str | None = None) -> str:
+    conn.execute(
+        """INSERT INTO sections (id, name, folder, brief, founding_plan_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (section_id, name, folder, brief or "", founding_plan_id, _now()),
+    )
+    if founding_plan_id:
+        conn.execute(
+            "INSERT OR IGNORE INTO section_pipelines (section_id, plan_id, added_at) VALUES (?, ?, ?)",
+            (section_id, founding_plan_id, _now()),
+        )
+    conn.commit()
+    return section_id
+
+
+def get_sections(conn: sqlite3.Connection) -> list[dict]:
+    """Every section, newest first, each carrying its pipeline ids."""
+    rows = conn.execute("SELECT * FROM sections ORDER BY created_at DESC").fetchall()
+    sections = []
+    for r in rows:
+        section = dict(r)
+        section["plan_ids"] = get_section_plan_ids(conn, section["id"])
+        sections.append(section)
+    return sections
+
+
+def get_section(conn: sqlite3.Connection, section_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM sections WHERE id = ?", (section_id,)).fetchone()
+    if not row:
+        return None
+    section = dict(row)
+    section["plan_ids"] = get_section_plan_ids(conn, section_id)
+    return section
+
+
+def get_section_by_folder(conn: sqlite3.Connection, folder: str) -> dict | None:
+    """The section owning a project folder, if one does.
+
+    Two pipelines can derive the same project name, so the folder is not a key —
+    but it is how a running pipeline finds the section it belongs to.
+    """
+    row = conn.execute("SELECT * FROM sections WHERE folder = ? ORDER BY created_at LIMIT 1",
+                       (folder,)).fetchone()
+    return get_section(conn, row["id"]) if row else None
+
+
+def update_section(conn: sqlite3.Connection, section_id: str, name: str | None = None,
+                   brief: str | None = None) -> bool:
+    fields, params = [], []
+    if name is not None:
+        fields.append("name = ?")
+        params.append(name)
+    if brief is not None:
+        fields.append("brief = ?")
+        params.append(brief)
+    if not fields:
+        return False
+    params.append(section_id)
+    cur = conn.execute(f"UPDATE sections SET {', '.join(fields)} WHERE id = ?", params)
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_section(conn: sqlite3.Connection, section_id: str) -> bool:
+    """Forget the section. Its folder on disk and its pipelines are left alone —
+    deleting a workspace must not destroy the work that was done inside it."""
+    conn.execute("UPDATE tasks SET section_id = NULL WHERE section_id = ?", (section_id,))
+    conn.execute("UPDATE notes SET section_id = NULL WHERE section_id = ?", (section_id,))
+    conn.execute("DELETE FROM section_chat WHERE section_id = ?", (section_id,))
+    conn.execute("DELETE FROM section_pipelines WHERE section_id = ?", (section_id,))
+    cur = conn.execute("DELETE FROM sections WHERE id = ?", (section_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def add_pipeline_to_section(conn: sqlite3.Connection, section_id: str, plan_id: str):
+    conn.execute(
+        "INSERT OR IGNORE INTO section_pipelines (section_id, plan_id, added_at) VALUES (?, ?, ?)",
+        (section_id, plan_id, _now()),
+    )
+    conn.commit()
+
+
+def get_section_plan_ids(conn: sqlite3.Connection, section_id: str) -> list[str]:
+    rows = conn.execute(
+        "SELECT plan_id FROM section_pipelines WHERE section_id = ? ORDER BY added_at",
+        (section_id,),
+    ).fetchall()
+    return [r["plan_id"] for r in rows]
+
+
+def get_section_for_pipeline(conn: sqlite3.Connection, plan_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT section_id FROM section_pipelines WHERE plan_id = ? LIMIT 1", (plan_id,)
+    ).fetchone()
+    return get_section(conn, row["section_id"]) if row else None
+
+
+# ---------- section chat ----------
+
+def add_section_message(conn: sqlite3.Connection, section_id: str, role: str, content: str) -> int:
+    cur = conn.execute(
+        "INSERT INTO section_chat (section_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+        (section_id, role, content, _now()),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_section_messages(conn: sqlite3.Connection, section_id: str, limit: int = 200) -> list[dict]:
+    """The section's conversation, oldest first.
+
+    `limit` takes the most RECENT messages and then restores reading order, so a
+    long-lived section hands the model what was just said rather than what was
+    said the day it was created.
+    """
+    rows = conn.execute(
+        "SELECT * FROM section_chat WHERE section_id = ? ORDER BY id DESC LIMIT ?",
+        (section_id, limit),
+    ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+# ---------- Antigravity command log & rules ----------
+#
+# The Antigravity CLI can edit files on its own, but every terminal command it
+# wants to run comes here first. These two tables are what the Commands page
+# reads: the log of what was asked and decided, and the standing "always allow"
+# answers that let a later run through without asking again.
+
+def log_command(conn: sqlite3.Connection, entry: dict) -> int:
+    """Record one decided command. Ignores a repeat of the same request_id."""
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO agy_commands
+           (request_id, command, signature, project, plan_id, section_id,
+            conversation_id, decision, decided_by, reason, asked_at, decided_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            entry["request_id"], entry["command"], entry["signature"],
+            entry.get("project"), entry.get("plan_id"), entry.get("section_id"),
+            entry.get("conversation_id"), entry["decision"], entry["decided_by"],
+            entry.get("reason") or "", entry["asked_at"], entry.get("decided_at") or _now(),
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_commands(conn: sqlite3.Connection, plan_id: str | None = None,
+                 project: str | None = None, limit: int = 300) -> list[dict]:
+    """The command log, newest first, optionally narrowed to one run or project."""
+    sql = "SELECT * FROM agy_commands"
+    clauses, params = [], []
+    if plan_id:
+        clauses.append("plan_id = ?")
+        params.append(plan_id)
+    if project:
+        clauses.append("project = ?")
+        params.append(project)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def add_command_rule(conn: sqlite3.Connection, signature: str, scope: str = "",
+                     reason: str = "") -> int:
+    """Store an 'always allow'. Re-allowing the same thing refreshes the reason."""
+    conn.execute(
+        """INSERT INTO agy_command_rules (signature, scope, reason, created_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT (signature, scope)
+           DO UPDATE SET reason = excluded.reason""",
+        (signature, scope or "", reason or "", _now()),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id FROM agy_command_rules WHERE signature = ? AND scope = ?",
+        (signature, scope or ""),
+    ).fetchone()
+    return row["id"] if row else 0
+
+
+def get_command_rules(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM agy_command_rules ORDER BY signature, scope"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_command_rule(conn: sqlite3.Connection, rule_id: int) -> bool:
+    cur = conn.execute("DELETE FROM agy_command_rules WHERE id = ?", (rule_id,))
+    conn.commit()
+    return cur.rowcount > 0
