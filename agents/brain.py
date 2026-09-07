@@ -96,6 +96,48 @@ Enforce the following rules:
 7. Provide specific recommendations in the `recommended_tools` section based on tools that research agents might need.
 """
 
+# Appended to the Brain's system prompt ONLY when the optional coding agent is
+# actually enabled (agents/code_agent.py — the Claude Agent SDK installed and
+# ANTHROPIC_API_KEY set). Enabled, the Brain should plan software work around a
+# tool that genuinely builds and runs code. Not enabled, none of this is added
+# and the Brain plans exactly as it always has.
+CODE_AGENT_CAPABILITY_NOTE = """
+
+AVAILABLE CAPABILITY — REAL CODING AGENT:
+This system has a working coding agent available to execution agents, exposed as the
+tool `code_project`. It does not merely write out file contents: it writes files, RUNS
+them, reads the errors, and fixes them until they work.
+
+When planning:
+- For any deliverable that is software meant to actually run (scripts, apps, APIs,
+  scrapers, data pipelines, tests, automations), give the responsible execution agent
+  `"code_project"` in its tools_needed.
+- Prefer ONE execution agent owning a coherent piece of software end to end over
+  several agents each writing fragments of it — the coding agent does its own
+  multi-step build loop internally, so splitting the work across agents fragments it
+  for no gain. This is the one deliberate exception to the single-purpose rule for
+  code deliverables; roles stay single-purpose everywhere else.
+- Set that agent's output_spec required_keys to describe the built software (e.g.
+  "files_changed", "how_to_run", "limitations") rather than prose word counts, and do
+  not impose a min_word_count on it.
+- `code_project` needs no entry in recommended_tools. It is already connected and
+  requires nothing from the user at the Plugging Gate.
+"""
+
+
+def get_brain_system_prompt() -> str:
+    """The Brain's system prompt, plus the coding-agent capability note when that
+    optional agent is actually enabled. Availability is resolved here rather than
+    baked in at import so an unavailable, uninstalled or unkeyed coding agent
+    simply produces the original prompt — never an error."""
+    try:
+        from agents.tool_executor import code_agent_status
+        available, _ = code_agent_status()
+    except Exception:
+        available = False
+    return BRAIN_SYSTEM_PROMPT + (CODE_AGENT_CAPABILITY_NOTE if available else "")
+
+
 
 def build_agent_plan(
     task: str,
@@ -110,6 +152,7 @@ def build_agent_plan(
     If redirect_note is provided, we adjust the plans based on the rejection feedback.
     """
     client = genai.Client(api_key=GEMINI_API_KEY)
+    system_prompt = get_brain_system_prompt()
 
     user_input = task
     if approved_blueprints:
@@ -153,7 +196,7 @@ def build_agent_plan(
             "data": {
                 "thinking_type": "system_prompt",
                 "role": "Brain Orchestrator",
-                "content": BRAIN_SYSTEM_PROMPT
+                "content": system_prompt
             }
         })
         event_logger({
@@ -176,7 +219,7 @@ def build_agent_plan(
         })
 
     config = types.GenerateContentConfig(
-        system_instruction=BRAIN_SYSTEM_PROMPT,
+        system_instruction=system_prompt,
         response_mime_type="application/json",
     )
 
@@ -246,6 +289,19 @@ def finalize_execution_plan(
     if not execution_agents:
         return execution_agents
 
+    try:
+        from agents.tool_executor import code_agent_status
+        code_agent_available, _ = code_agent_status()
+    except Exception:
+        code_agent_available = False
+    code_agent_rule = (
+        '\nKEEP `code_project`: it is an always-connected coding agent that builds and runs real '
+        'software. Keep it in tools_needed for any agent whose deliverable is software meant to run, '
+        'and add it where research shows it is needed. It requires nothing from the user, so never '
+        'drop it as "not configured".'
+        if code_agent_available else ""
+    )
+
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     user_input = f"""ORIGINAL TASK: {task}
@@ -273,6 +329,8 @@ though the brief itself never names it — include it. Read each tool's "cons"/"
 this kind of dependency before deciding an agent only needs one tool.
 
 If an agent genuinely needs no external tool, leave its tools_needed empty.
+{code_agent_rule}
+
 
 Return JSON: {{"execution_agents": [ ...same agents, each with a corrected tools_needed... ]}}"""
 

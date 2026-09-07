@@ -42,7 +42,7 @@ def _extract_artifact(tool_name: str, tool_args: dict, result) -> dict | None:
     # write_file's own bookkeeping (list_deliverables, read_file) also uses
     # "path" but isn't something the user asked to "open" — only count it as
     # an artifact when this call actually wrote something.
-    if result.get("action") == "write_file":
+    if result.get("action") in ("write_file", "code_project"):
         for key in _ARTIFACT_PATH_KEYS:
             if result.get(key):
                 return {"type": "path", "value": result[key], "label": str(label), "tool": tool_name}
@@ -81,6 +81,20 @@ async def run_execution_agent(
               "part could not be completed and why.\n"
         )
 
+    # Bound only when the optional coding agent is actually enabled — see
+    # agents/code_agent.py. When it isn't, this is empty and the prompt reads
+    # exactly as it did before the coding agent existed.
+    code_agent_note = ""
+    if any(d.get("name") == "code_project" for d in declarations):
+        code_agent_note = (
+            "\nCODING AGENT: You also have `code_project`, which hands a task to a real coding agent "
+            "that writes files, runs them, reads the errors and fixes them until they work. For any "
+            "deliverable that is software meant to actually run, call `code_project` with the full "
+            "task in one go instead of dictating file contents through write_file. Use write_file for "
+            "prose, config, and documents. Report the files it says it changed in your final JSON, and "
+            "if it reports a limitation, pass that through honestly rather than smoothing it over.\n"
+        )
+
     rejection_block = f"GATE REJECTION NOTE (address this specifically in your output):\n{gate_redirect_note}\n" if gate_redirect_note else ""
 
     system_prompt = f"""
@@ -100,7 +114,7 @@ MINIMUM WORD COUNT: {output_spec.get("min_word_count", 0)}
 TOOLS: You have real tools available (write_file, read_file, list_deliverables, and any
 connectors listed below). USE write_file to actually save any code, report, script, or
 document you produce — a deliverable that only exists in your final JSON text is not real work.
-{unavailable_note}
+{code_agent_note}{unavailable_note}
 RULES:
 1. Stay strictly within your brief.
 2. Actually call your tools to do real work before answering. Do not just describe actions.
@@ -180,7 +194,8 @@ RULES:
                             "icon": "🛠️"
                         }
                     })
-                result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
+                result = run_tool(handlers, project_name, agent_id, fc.name, tool_args,
+                                  event_logger=event_logger)
                 artifact = _extract_artifact(fc.name, tool_args, result)
                 if artifact:
                     collected_artifacts.append(artifact)

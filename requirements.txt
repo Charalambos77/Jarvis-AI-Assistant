@@ -13,3 +13,11 @@ httpx>=0.27.0
 requests
 onnxruntime
 
+
+# --- Optional: real coding agent (agents/code_agent.py) ---
+# Jarvis runs fine without this. Install it, and set ANTHROPIC_API_KEY in .env,
+# only if you want pipeline execution agents to build and run real software via
+# the `code_project` tool. Without it nothing breaks — the Brain plans as before
+# and execution agents fall back to write_file.
+#   pip install claude-agent-sdk
+# claude-agent-sdk

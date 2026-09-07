@@ -62,6 +62,7 @@ second-brain-voice/
 │   ├── synthesis.py            # Conflict resolution & master blueprint generator
 │   ├── execution_agent.py      # Blueprint task execution agent
 │   ├── quality_checker.py      # Quality assurance & verification agent
+│   ├── code_agent.py           # Optional real coding agent (Claude Agent SDK) — builds & runs software
 │   └── deployment_agent.py     # Artifact deployment agent
 │
 ├── connectors/                 # API & MCP Connectors
@@ -110,6 +111,25 @@ install_ollama.bat
 ```
 *This downloads Ollama silently and pulls the lightweight `qwen2.5:3b` model.*
 
+### 2b. (Optional) Real Coding Agent
+Pipeline execution agents can write files out of the box, but writing a file and building
+working software are different jobs. Install the optional coding agent and any execution
+agent whose deliverable is *software meant to run* gets a `code_project` tool that writes
+code, runs it, reads the errors, and fixes them until it works:
+```cmd
+pip install claude-agent-sdk
+```
+Then add `ANTHROPIC_API_KEY` to `.env` (see below). Both are required — the package alone,
+or the key alone, leaves it off.
+
+**Entirely optional, and only used by the multi-agent pipeline.** Without it Jarvis runs
+exactly as before: the Brain plans as it always has, execution agents fall back to
+`write_file`, and any agent that asked for the coding agent is told plainly that it isn't
+enabled instead of pretending it ran code. The voice/chat path never uses it either way.
+
+*Note: this is a metered Anthropic API key from the Anthropic Console, separate from any
+Claude Code subscription.*
+
 ### 3. Environment Configuration
 Create or edit `.env` in the root folder:
 ```env
@@ -121,6 +141,10 @@ OLLAMA_MODEL=qwen2.5:3b
 OLLAMA_URL=http://localhost:11434/api/generate
 ELEVENLABS_API_KEY=optional_elevenlabs_key
 ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+
+# Optional — only needed for the coding agent above. Omit it and Jarvis runs normally.
+ANTHROPIC_API_KEY=optional_anthropic_api_key
+JARVIS_CODE_AGENT_TIMEOUT=900   # seconds a single coding task may run
 ```
 
 ---

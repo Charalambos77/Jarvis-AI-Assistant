@@ -43,7 +43,12 @@ async def run_research_agent(
     brief = agent_config.get("brief", "")
     tools_needed = agent_config.get("tools_needed", ["google_search"])
 
-    declarations, handlers, unavailable = get_tools_for_execution_agent(tools_needed, project_name)
+    # include_code_agent=False: research reads, searches and summarizes — building
+    # software is the execution phase's job, and binding a minutes-long coding
+    # agent here would only invite research agents to wander into it.
+    declarations, handlers, unavailable = get_tools_for_execution_agent(
+        tools_needed, project_name, include_code_agent=False
+    )
 
     unavailable_note = ""
     if unavailable:
