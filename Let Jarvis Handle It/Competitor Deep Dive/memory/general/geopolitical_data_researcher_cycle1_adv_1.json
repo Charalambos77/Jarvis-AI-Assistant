@@ -1,0 +1,5 @@
+{
+  "initial_gdp_search_yielded_large_economies": "Initial search included many large English-speaking economies (US, UK, India, Canada, Australia) outside the target GDP range. Subsequent filtering and specific searches were necessary to identify medium economies.",
+  "language_confirmation_needed_for_all_countries": "It was crucial to verify the official language status for each potential country, as 'English-speaking' can be broad, but the requirement was for English to be native/official.",
+  "gdp_variations": "Noted slight variations in GDP figures across different sources for the same country and year, which is common due to differing methodologies and estimation dates. Using the most consistent estimates available."
+}

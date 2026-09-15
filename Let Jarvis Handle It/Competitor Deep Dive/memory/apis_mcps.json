@@ -1,0 +1,73 @@
+{
+  "brain": [
+    {
+      "service": "google_search",
+      "purpose": "General web research and data gathering for all cycles and agents.",
+      "doc_url": "https://developers.google.com/custom-search/v1/overview",
+      "recommended_by": [
+        "Brain"
+      ],
+      "pros": [
+        "Extensive public data access",
+        "Versatile for diverse queries"
+      ],
+      "cons": [
+        "Requires careful query formulation",
+        "Information quality varies"
+      ],
+      "alternatives": [
+        "bing_search"
+      ],
+      "connection_methods": [
+        {
+          "method_id": "browser_access",
+          "label": "Direct Browser Access (manual)",
+          "fields": []
+        }
+      ]
+    },
+    {
+      "service": "google_docs_api",
+      "purpose": "Upload and manage research documents in Google Docs.",
+      "doc_url": "https://developers.google.com/docs/api/overview",
+      "recommended_by": [
+        "Brain"
+      ],
+      "pros": [
+        "Automated document creation and organization",
+        "Integration with Google Workspace"
+      ],
+      "cons": [
+        "Requires OAuth authentication setup",
+        "API rate limits"
+      ],
+      "alternatives": [
+        "manual_google_drive_upload"
+      ],
+      "connection_methods": [
+        {
+          "method_id": "oauth",
+          "label": "OAuth 2.0 Client",
+          "fields": [
+            {
+              "name": "client_id",
+              "label": "Client ID",
+              "type": "text"
+            },
+            {
+              "name": "client_secret",
+              "label": "Client Secret",
+              "type": "password"
+            },
+            {
+              "name": "refresh_token",
+              "label": "Refresh Token",
+              "type": "password"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "agents": []
+}
