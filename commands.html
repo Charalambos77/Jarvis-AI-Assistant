@@ -172,9 +172,10 @@
             <div class="eyebrow">Jarvis · Antigravity</div>
             <h1>Commands</h1>
             <div class="sub">
-                The builder can write files on its own. Anything it wants to <em>run</em> stops here
-                first. Answer and it goes ahead; ignore it and after ten minutes it is refused and the
-                build carries on without that step.
+                Everything a running pipeline needs your say on stops here first: agents asking whether
+                to keep going, agents asking for a tool they don't have, and commands the builder wants
+                to <em>run</em>. Answer and it goes ahead; ignore it for ten minutes and it is turned
+                down, and the work carries on without it.
             </div>
         </div>
         <!-- Filled in by nav_ui.js, which gives every page the same set. -->
@@ -182,6 +183,16 @@
     </header>
 
     <div class="body">
+        <div class="section-title">
+            Agents asking to keep going <span class="count-pill" id="tool-review-count">0</span>
+        </div>
+        <div id="tool-reviews"></div>
+
+        <div class="section-title">
+            Tools agents are asking for <span class="count-pill" id="tool-request-count">0</span>
+        </div>
+        <div id="tool-requests"></div>
+
         <div class="section-title">
             Waiting on you <span class="count-pill" id="pending-count">0</span>
         </div>
@@ -335,6 +346,135 @@ async function decide(requestId, decision) {
     refresh();
 }
 
+/* ---------- keep going? ---------- */
+
+/* Agents have no tool-call limit; every few rounds of calls they stop here and wait to be let on. */
+const reviewDraft = {};
+
+function renderToolReviews(items, answered, waitFor) {
+    const host = document.getElementById('tool-reviews');
+    const pill = document.getElementById('tool-review-count');
+    pill.textContent = items.length;
+    pill.className = items.length ? "count-pill live" : "count-pill";
+
+    if (!items.length) {
+        const recent = (answered || []).slice(0, 5).map(r => `
+            <div class="breakdown">${esc(r.role || r.agent_id)} after ${esc(r.tool_calls)} tool calls
+                — <b>${esc(r.decision === "timeout" ? "stopped (no answer)" : r.decision)}</b> ${esc(ago(r.decided_at))}</div>`).join("");
+        host.innerHTML = `<div class="empty">
+            No agent is waiting. Agents have no tool-call limit — every few rounds of calls they ask here whether to keep going.
+        </div>${recent}`;
+        return;
+    }
+
+    host.innerHTML = items.map(item => {
+        const pct = Math.max(0, Math.min(100, (item.expires_in / waitFor) * 100));
+        const mins = Math.floor(item.expires_in / 60), secs = item.expires_in % 60;
+        const calls = (item.recent_calls || []).map(c => `· <span class="sig">${esc(c)}</span>`).join("<br>");
+        return `
+        <div class="card waiting">
+            <div class="badges">
+                ${item.plan_id ? `<span class="badge link" onclick="openPipeline('${esc(item.plan_id)}')">Pipeline ${esc(item.plan_id)} →</span>` : ""}
+                <span class="badge">${esc(item.role || item.agent_id)} · ${esc(item.kind)} agent</span>
+                <span class="badge">asked ${esc(ago(item.asked_ts))}</span>
+            </div>
+            <div class="cmd">${esc(item.tool_calls)} tool calls so far — keep going?</div>
+            <div class="breakdown"><b>Its job:</b> ${esc(item.brief)}</div>
+            ${calls ? `<div class="breakdown"><b>Latest calls:</b><br>${calls}</div>` : ""}
+            <div class="timer">
+                <div class="timer-bar"><div class="timer-fill" style="width:${pct}%"></div></div>
+                <div class="timer-text">Stopped automatically in ${mins}m ${String(secs).padStart(2, "0")}s if nobody answers — it then answers with what it has.</div>
+            </div>
+            <div class="decide">
+                <input type="text" id="review-why-${item.request_id}" placeholder="Why — optional, the agent is told"
+                       value="${esc(reviewDraft[item.request_id] || "")}"
+                       oninput="reviewDraft['${item.request_id}'] = this.value">
+                <button class="btn go" onclick="decideToolReview('${item.request_id}','continue')">Continue (${esc(item.review_every)} more rounds)</button>
+                <button class="btn no" onclick="decideToolReview('${item.request_id}','stop')">Stop and answer</button>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+async function decideToolReview(requestId, decision) {
+    const why = (document.getElementById('review-why-' + requestId) || {}).value || "";
+    const res = await fetch('/tool_reviews/decide', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId, decision, reason: why })
+    });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    delete reviewDraft[requestId];
+    refresh();
+}
+
+/* ---------- tool requests ---------- */
+
+/* Agents that need a tool they don't have ask here instead of making do. */
+const toolDraft = {};
+const TOOL_AVAILABILITY = {
+    ready: "Jarvis has this tool. Approving gives it to the agent straight away.",
+    needs_setup: "Jarvis supports this, but it isn't connected yet. Approving adds it to the pipeline's tool list so it can be connected at the API/MCP step — the agent can't use it in this run.",
+    no_connector: "Jarvis has no connection for this yet. Approving records that the pipeline wants it — the agent can't use it in this run."
+};
+
+function renderToolRequests(items, answered, waitFor) {
+    const host = document.getElementById('tool-requests');
+    const pill = document.getElementById('tool-request-count');
+    pill.textContent = items.length;
+    pill.className = items.length ? "count-pill live" : "count-pill";
+
+    if (!items.length) {
+        const recent = (answered || []).slice(0, 5).map(r => `
+            <div class="breakdown">${esc(r.role || r.agent_id)} asked for <span class="sig">${esc(r.tool)}</span>
+                — <b>${esc(r.decision)}</b> ${esc(ago(r.decided_at))}</div>`).join("");
+        host.innerHTML = `<div class="empty">
+            No agent is asking for a tool. When one needs a tool it doesn't have, the request appears here.
+        </div>${recent}`;
+        return;
+    }
+
+    host.innerHTML = items.map(item => {
+        const pct = Math.max(0, Math.min(100, (item.expires_in / waitFor) * 100));
+        const mins = Math.floor(item.expires_in / 60), secs = item.expires_in % 60;
+        return `
+        <div class="card waiting">
+            <div class="badges">
+                ${item.plan_id ? `<span class="badge link" onclick="openPipeline('${esc(item.plan_id)}')">Pipeline ${esc(item.plan_id)} →</span>` : ""}
+                <span class="badge">${esc(item.role || item.agent_id)} · ${esc(item.kind)} agent</span>
+                <span class="badge">asked ${esc(ago(item.asked_ts))}</span>
+            </div>
+            <div class="cmd">Tool: ${esc(item.tool)}</div>
+            <div class="breakdown"><b>Why:</b> ${esc(item.why || "—")}</div>
+            <div class="breakdown"><b>Its job:</b> ${esc(item.brief)}</div>
+            <div class="breakdown">${esc(TOOL_AVAILABILITY[item.availability] || item.availability_detail || "")}</div>
+            <div class="timer">
+                <div class="timer-bar"><div class="timer-fill" style="width:${pct}%"></div></div>
+                <div class="timer-text">Turned down automatically in ${mins}m ${String(secs).padStart(2, "0")}s if nobody answers.</div>
+            </div>
+            <div class="decide">
+                <input type="text" id="tool-why-${item.request_id}" placeholder="Why — optional, the agent is told"
+                       value="${esc(toolDraft[item.request_id] || "")}"
+                       oninput="toolDraft['${item.request_id}'] = this.value">
+                <button class="btn go" onclick="decideToolRequest('${item.request_id}','approve')">Approve</button>
+                <button class="btn no" onclick="decideToolRequest('${item.request_id}','reject')">Reject</button>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+async function decideToolRequest(requestId, decision) {
+    const why = (document.getElementById('tool-why-' + requestId) || {}).value || "";
+    const res = await fetch('/tool_requests/decide', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId, decision, reason: why })
+    });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    delete toolDraft[requestId];
+    refresh();
+}
+
 /* ---------- log ---------- */
 
 function renderLog() {
@@ -428,6 +568,23 @@ async function refresh() {
         renderLog();
         renderRules(r.rules || [], r.denylist || []);
     } catch (e) { /* Jarvis restarting; the next tick picks it up. */ }
+
+    // Kept apart so an older server without these routes can't break the commands above.
+    try {
+        const [tp, tl] = await Promise.all([
+            fetch('/tool_requests/pending').then(x => x.json()),
+            fetch('/tool_requests/log').then(x => x.json())
+        ]);
+        renderToolRequests(tp.pending || [], tl.log || [], tp.wait_seconds || 600);
+    } catch (e) { /* Not available yet; the next tick tries again. */ }
+
+    try {
+        const [rp, rl] = await Promise.all([
+            fetch('/tool_reviews/pending').then(x => x.json()),
+            fetch('/tool_reviews/log').then(x => x.json())
+        ]);
+        renderToolReviews(rp.pending || [], rl.log || [], rp.wait_seconds || 600);
+    } catch (e) { /* Not available yet; the next tick tries again. */ }
 }
 
 refresh();

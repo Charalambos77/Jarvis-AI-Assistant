@@ -1765,11 +1765,20 @@
                         return;
                     }
 
+                    // Until the Brain has produced a plan (or while a conflict re-plan
+                    // is in flight) the graph has no cycles. Dividing by zero here made
+                    // sectorSize Infinity, and the old while-loop normalisation then
+                    // spun forever on the first mouse move, freezing the whole window.
+                    if (departments.length === 0) {
+                        clearHoverHighlight();
+                        return;
+                    }
+
                     let mouseAngle = Math.atan2(dy, dx);
                     const sectorSize = (2 * Math.PI) / departments.length;
+                    const TWO_PI = 2 * Math.PI;
                     let adjustedAngle = mouseAngle - (-Math.PI / 2) + (sectorSize / 2);
-                    while (adjustedAngle < 0) adjustedAngle += 2 * Math.PI;
-                    while (adjustedAngle >= 2 * Math.PI) adjustedAngle -= 2 * Math.PI;
+                    adjustedAngle = ((adjustedAngle % TWO_PI) + TWO_PI) % TWO_PI;
 
                     const deptIndex = Math.floor(adjustedAngle / sectorSize) % departments.length;
                     const targetDept = departments[deptIndex];

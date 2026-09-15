@@ -18,6 +18,10 @@ class _FakeResponse:
 
 class _FakeModels:
     def generate_content(self, model=None, contents=None, **kwargs):
+        # A "queue" scripts successive replies; once empty, "response" repeats.
+        queue = genai.FAKE.get("queue")
+        if queue:
+            return _FakeResponse(queue.pop(0))
         return _FakeResponse(genai.FAKE.get("response", ""))
 
 
@@ -236,6 +240,38 @@ check("start_pipeline only opens the gate", res["status"] == "awaiting_details")
 check("no pipeline started by the tool", len(STARTED) == 2)
 check("UI told to ask about details", jarvis.UI_ACTION["type"] == "pipeline_intake_ask")
 
+# ---- 11b. the user's own words survive the chat model's rewrite ---------------
+# From chat or voice the model writes start_pipeline's task as its own summary.
+import coordinator
+said = "find 5 english native countries and make 20 competitors each, don't be lazy"
+summary = "Research top 20 competitors"
+args = coordinator.with_user_words("start_pipeline", {"task": summary}, said)
+check("coordinator attaches the user's words", args == {"task": summary, "user_words": said})
+check("other tools get no user words",
+      "user_words" not in coordinator.with_user_words("add_task", {"content": "x"}, said))
+check("direct tool: calls carry no user words",
+      "user_words" not in coordinator.with_user_words("start_pipeline", {"task": summary}, 'tool:{"x":1}'))
+
+res = jarvis.start_pipeline_local({"task": summary, "user_words": said})
+words_draft = jarvis._get_intake_draft(res["draft_id"])
+check("draft keeps the user's words", words_draft["user_words"] == said)
+brief = jarvis._intake_brief_markdown(words_draft)
+check("brief shows the user's words as the original",
+      f"## Original request (the user's own words)\n{said}" in brief)
+check("brief labels the model's summary", f"## Jarvis's summary of the request\n{summary}" in brief)
+check("brief without words keeps the plain heading",
+      "## Original request\nPlain" in jarvis._intake_brief_markdown({"task": "Plain"}))
+
+# Saying "no details" must not fall back to the summary alone.
+r = app.post("/pipeline/start", json={"task": summary, "draft_id": res["draft_id"]})
+check("no-details start gives agents the user's words",
+      r.status_code == 200 and STARTED[-1]["task"].startswith(said)
+      and STARTED[-1]["task_summary"] == summary)
+check("no-details start discards the draft", jarvis._get_intake_draft(res["draft_id"]) is None)
+r = app.post("/pipeline/start", json={"task": "Bare task"})
+check("start without a draft is unchanged", STARTED[-1]["task"] == "Bare task")
+del STARTED[-2:]
+
 # ---- 12. saying no still builds the old way --------------------------------
 res = jarvis.start_pipeline_local({"task": "Just build it", "skip_intake": True})
 check("skip_intake builds immediately", res["status"] == "pipeline_started" and len(STARTED) == 3)
@@ -266,7 +302,35 @@ check("broken model yields no questions rather than an error", r.get_json()["que
 r = app.post("/pipeline/intake/picture", json={"draft_id": d3})
 body = r.get_json()
 check("broken model still yields an editable brief", bool(body["plan_text"]) and bool(body["degraded"]))
+check("fallback brief is not repeated as the approved plan",
+      "## Approved plan" not in jarvis._intake_brief_markdown(jarvis._get_intake_draft(d3)))
 app.post("/pipeline/intake/cancel", json={"draft_id": d3})
+
+# ---- 14. "no questions left" must still produce a plan ------------------------
+# The model often answers {"questions": []} after the user's answers. That used to
+# pass the user's own notes off as the plan, without saying so.
+d5 = app.post("/pipeline/intake/start", json={"task": "Empty questions job"}).get_json()["draft_id"]
+genai.FAKE["queue"] = ['{"questions": []}', '{"plan_text": "# The real plan"}']
+body = app.post("/pipeline/intake/picture", json={"draft_id": d5}).get_json()
+check("empty questions trigger a second ask for the plan",
+      body["plan_text"] == "# The real plan" and not body.get("degraded"))
+check("the written plan is the approved plan",
+      "## Approved plan\n# The real plan" in jarvis._intake_brief_markdown(jarvis._get_intake_draft(d5)))
+genai.FAKE["queue"] = []
+genai.FAKE["response"] = '{"questions": []}'
+body = app.post("/pipeline/intake/picture", json={"draft_id": d5}).get_json()
+check("no plan after asking again says so", bool(body.get("degraded")))
+d5_draft = jarvis._get_intake_draft(d5)
+check("that fallback is not called a plan in the brief",
+      "## Approved plan" not in jarvis._intake_brief_markdown(d5_draft))
+genai.FAKE["response"] = '{"plan_text": "My own plan"}'
+app.post("/pipeline/intake/edit", json={"draft_id": d5, "edited_text": "My own plan"})
+check("the user's edit becomes the approved plan",
+      "## Approved plan\nMy own plan" in jarvis._intake_brief_markdown(jarvis._get_intake_draft(d5)))
+genai.FAKE["queue"] = ["boom", '{"plan_text": "After a hiccup"}']
+body = app.post("/pipeline/intake/picture", json={"draft_id": d5}).get_json()
+check("a failed model call is retried", body["plan_text"] == "After a hiccup")
+app.post("/pipeline/intake/cancel", json={"draft_id": d5})
 
 # cleanup
 wipe_project(project)

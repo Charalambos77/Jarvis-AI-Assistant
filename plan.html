@@ -541,6 +541,127 @@
             border: 1px solid rgba(255, 255, 255, 0.03);
         }
 
+        /* Per-agent buttons under each brief in the review stage */
+        .agent-detail-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .agent-detail-btn {
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.05);
+            color: #FFFFFF;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            transition: background 0.2s ease, border-color 0.2s ease;
+        }
+
+        .agent-detail-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+
+        .agent-detail-btn:focus-visible {
+            outline: 2px solid #60A5FA;
+            outline-offset: 2px;
+        }
+
+        /* Agent details viewer. Its own overlay, above the gate modal, because the
+           gate modal is rebuilt on every poll. */
+        .agent-viewer-overlay {
+            z-index: 200;
+        }
+
+        .agent-viewer-card {
+            max-width: 760px;
+        }
+
+        /* Agent ids are long unbroken strings; let the title wrap instead of overflowing. */
+        #agent-viewer-title {
+            overflow-wrap: anywhere;
+        }
+
+        .agent-viewer-tabs {
+            display: flex;
+            gap: 6px;
+        }
+
+        .agent-viewer-body {
+            overflow-y: auto;
+            max-height: 60vh;
+            padding: 12px 14px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            font-size: 12px;
+            line-height: 1.55;
+            color: #E5E7EB;
+            overflow-wrap: anywhere;
+        }
+
+        .agent-viewer-body h4 {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin: 16px 0 6px;
+        }
+
+        .agent-viewer-body h4:first-child {
+            margin-top: 0;
+        }
+
+        .agent-viewer-body pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 8px;
+            border-radius: 6px;
+            margin: 4px 0 0;
+        }
+
+        .agent-viewer-body ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .agent-viewer-kv {
+            margin-bottom: 6px;
+        }
+
+        .agent-viewer-kv > strong {
+            color: #FFFFFF;
+        }
+
+        .agent-viewer-empty {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .agent-viewer-pill {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .agent-viewer-pill.ok { background: rgba(52, 211, 153, 0.15); color: #6EE7B7; }
+        .agent-viewer-pill.warn { background: rgba(251, 191, 36, 0.15); color: #FCD34D; }
+        .agent-viewer-pill.bad { background: rgba(239, 68, 68, 0.15); color: #FCA5A5; }
+
         .step-row {
             display: flex;
             align-items: flex-start;
@@ -1043,6 +1164,29 @@
         </div>
     </div>
 
+    <!-- Agent details viewer: one agent's plan, or what it has found so far -->
+    <div id="agent-viewer" class="modal-overlay agent-viewer-overlay" style="display: none;"
+        role="dialog" aria-modal="true" aria-labelledby="agent-viewer-title"
+        onclick="if (event.target === this) closeAgentViewer()">
+        <div class="modal-card agent-viewer-card">
+            <div class="logo" id="agent-viewer-kicker" style="margin-bottom: 4px;">AGENT <span>//</span> DETAILS</div>
+            <h3 id="agent-viewer-title" style="font-size: 15px; font-weight: 700; color: #FFF; margin: 0;">Agent</h3>
+            <div class="agent-viewer-tabs" id="agent-viewer-tabs" role="tablist">
+                <button type="button" class="modal-tab-btn" role="tab" data-view="plan"
+                    onclick="switchAgentView('plan')">Detailed plan</button>
+                <button type="button" class="modal-tab-btn" role="tab" data-view="findings"
+                    onclick="switchAgentView('findings')">Findings so far</button>
+            </div>
+            <div id="agent-viewer-body" class="agent-viewer-body" aria-live="polite"></div>
+            <div style="display: flex; gap: 8px; justify-content: space-between; align-items: center;">
+                <span id="agent-viewer-updated" style="font-size: 10px; color: var(--text-muted);"></span>
+                <button type="button" class="action-button"
+                    style="flex: 0 0 auto; padding: 8px 16px; background: rgba(255,255,255,0.05); color: #FFF; border: 1px solid rgba(255,255,255,0.1);"
+                    onclick="closeAgentViewer()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast / Notification status -->
     <div class="jarvis-toast">Hello. I am Jarvis. How can I help you coordinate the pipeline plan today?</div>
 
@@ -1193,6 +1337,348 @@
             return true;
         }
 
+        // Research gates carry a brief check: places where the research breaks what
+        // the user asked for, and agents that failed or stopped short. The text comes
+        // from the model and from agent output, so it is escaped before display.
+        function escapeGateText(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function briefCheckHtml(check, compact) {
+            if (!check) return '';
+            const violations = Array.isArray(check.violations) ? check.violations : [];
+            const failed = Array.isArray(check.failed_agents) ? check.failed_agents : [];
+            const count = violations.length + failed.length;
+
+            if (!count) {
+                if (compact && check.checked) return '';
+                const msg = check.checked
+                    ? '✅ Brief check: nothing in this research breaks your brief.'
+                    : '⚪ Brief check could not run — compare this research with your brief yourself.';
+                return `<div style="margin-bottom:10px; padding:8px 10px; border-radius:6px; background:rgba(255,255,255,0.03); font-size:${compact ? '10px' : '12px'}; color:var(--text-muted); text-align:left;">${msg}</div>`;
+            }
+
+            const headline = `⚠️ Brief check: ${count} problem${count === 1 ? '' : 's'} with this research`;
+            if (compact) {
+                return `<div style="margin-bottom:8px; padding:6px 8px; border-radius:6px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.35); font-size:10px; color:#fca5a5; text-align:left;">${headline} — open the checklist to read them.</div>`;
+            }
+
+            const rows = violations.map(v =>
+                `<li style="margin-bottom:4px;"><strong>${escapeGateText(v.constraint)}</strong> — ${escapeGateText(v.problem)}</li>`
+            ).concat(failed.map(f =>
+                `<li style="margin-bottom:4px;"><strong>Agent failed: ${escapeGateText(f.agent_id)}</strong> — ${escapeGateText(f.reason)}</li>`
+            )).join('');
+            return `<div style="margin-bottom:10px; padding:10px 12px; border-radius:6px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.35); font-size:12px; color:#fca5a5; text-align:left;">
+                <div style="font-weight:600; margin-bottom:6px;">${headline}</div>
+                <ul style="margin:0; padding-left:18px; color:#fecaca;">${rows}</ul>
+            </div>`;
+        }
+
+        // ---- Agent details: the plan an agent was given, and what it has found so far ----
+        // Opened from the buttons under each brief in the review stage. The viewer is
+        // its own overlay because the gate modal is rebuilt on every poll, and it
+        // refreshes itself while open so "so far" stays true during a live run.
+        const AGENT_VIEWER_REFRESH_MS = 4000;
+        let agentViewer = { planId: "", agentId: "", view: "plan", data: null, timer: null };
+
+        function agentDetailButtonsHtml(agentId) {
+            const id = htmlAttrEscape(agentId || '');
+            return `<div class="agent-detail-actions">
+                <button type="button" class="agent-detail-btn" data-agent-id="${id}"
+                    onclick="openAgentDetails(this.dataset.agentId, 'plan')">Detailed plan</button>
+                <button type="button" class="agent-detail-btn" data-agent-id="${id}"
+                    onclick="openAgentDetails(this.dataset.agentId, 'findings')">Findings so far</button>
+            </div>`;
+        }
+
+        function openAgentDetails(agentId, view) {
+            const planId = modalPlanId || selectedPlanId;
+            if (!planId || !agentId) return;
+            clearInterval(agentViewer.timer);
+            agentViewer = { planId, agentId, view, data: null, timer: null };
+            document.getElementById('agent-viewer-title').innerText = agentId;
+            document.getElementById('agent-viewer-updated').innerText = '';
+            document.getElementById('agent-viewer-body').innerHTML = '<div class="agent-viewer-empty">Loading…</div>';
+            setAgentViewerMode('agent');
+            document.getElementById('agent-viewer').style.display = 'flex';
+            switchAgentView(view, true);
+            loadAgentDetails();
+            agentViewer.timer = setInterval(loadAgentDetails, AGENT_VIEWER_REFRESH_MS);
+        }
+
+        function closeAgentViewer() {
+            clearInterval(agentViewer.timer);
+            agentViewer.timer = null;
+            document.getElementById('agent-viewer').style.display = 'none';
+        }
+
+        // ---- Cycle blueprint: what a research gate is actually asking you to approve ----
+        // The gate lists the cycle's agents; the result they produced (the lead's final
+        // pick, the disagreements, the sources) is the synthesized blueprint.
+
+        function setAgentViewerMode(mode) {
+            const isBlueprint = mode === 'blueprint';
+            document.getElementById('agent-viewer-kicker').innerHTML = isBlueprint
+                ? 'CYCLE <span>//</span> BLUEPRINT' : 'AGENT <span>//</span> DETAILS';
+            document.getElementById('agent-viewer-tabs').style.display = isBlueprint ? 'none' : '';
+        }
+
+        function cycleBlueprintButtonHtml(gateId, data) {
+            const m = /^cycle_(\d+)_research$/.exec(gateId || '');
+            if (!m) return '';
+            // Disagreements settled by who said them, or by nothing, are left for you.
+            const unresolved = Number((data && data.unresolved_disagreements) || 0);
+            const note = unresolved
+                ? `<span style="font-size: 11px; color: #f97316;">${unresolved} disagreement${unresolved === 1 ? '' : 's'} the evidence didn't settle. Decide ${unresolved === 1 ? 'it' : 'them'} before approving.</span>`
+                : '';
+            return `<div class="agent-detail-actions" style="margin: 0 0 10px; align-items: center;">
+                <button type="button" class="agent-detail-btn" onclick="openCycleBlueprint(${m[1]})">Open Cycle ${m[1]} blueprint</button>${note}
+            </div>`;
+        }
+
+        async function openCycleBlueprint(cycleId) {
+            const planId = modalPlanId || selectedPlanId;
+            if (!planId) return;
+            clearInterval(agentViewer.timer);
+            agentViewer = { planId, agentId: '', view: 'blueprint', data: null, timer: null };
+            setAgentViewerMode('blueprint');
+            document.getElementById('agent-viewer-title').innerText = `Cycle ${cycleId} blueprint`;
+            document.getElementById('agent-viewer-updated').innerText = '';
+            const body = document.getElementById('agent-viewer-body');
+            body.innerHTML = '<div class="agent-viewer-empty">Loading…</div>';
+            document.getElementById('agent-viewer').style.display = 'flex';
+            try {
+                const blueprint = await fetchCycleBlueprint(planId, cycleId);
+                if (agentViewer.view !== 'blueprint' || agentViewer.planId !== planId) return;
+                body.innerHTML = blueprint
+                    ? cycleBlueprintHtml(blueprint)
+                    : `<div class="agent-viewer-empty">Cycle ${cycleId} has no blueprint yet.</div>`;
+                body.scrollTop = 0;
+            } catch (e) {
+                if (agentViewer.view !== 'blueprint') return;
+                body.innerHTML = `<div class="agent-viewer-empty">Couldn't load the blueprint: ${escapeGateText(e.message)}</div>`;
+            }
+        }
+
+        async function fetchCycleBlueprint(planId, cycleId) {
+            const res = await fetch(`/api/plans/${encodeURIComponent(planId)}/cycles/${encodeURIComponent(cycleId)}/blueprint`);
+            let data = null;
+            try { data = await res.json(); } catch (e) { /* an HTML 404: this Jarvis predates the route */ }
+            if (data) {
+                if (res.ok) return data.blueprint;
+                if (res.status === 404) return null;
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
+            // A Jarvis started before the route existed can still show it: the
+            // synthesis step's reply in the live event log is the same blueprint.
+            return latestSynthesizedBlueprint(planId);
+        }
+
+        async function latestSynthesizedBlueprint(planId) {
+            const res = await fetch('/agents/events?since=0');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const events = (await res.json()).events || [];
+            for (let i = events.length - 1; i >= 0; i--) {
+                const e = events[i];
+                if (String(e.plan_id) !== String(planId) || e.event_type !== 'response_received') continue;
+                if ((e.source || e.agent_id) !== 'SynthesisAgent') continue;
+                const text = String((e.data && e.data.content) || '').trim()
+                    .replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+                try {
+                    const parsed = JSON.parse(text);
+                    // The conflict check answers through the same agent; skip its verdicts.
+                    if (parsed && typeof parsed === 'object' && !('has_conflicts' in parsed)) return parsed;
+                } catch (err) { /* not JSON, keep looking */ }
+            }
+            return null;
+        }
+
+        function cycleBlueprintHtml(bp) {
+            const own = new Set(['summary', 'recommendation', 'disagreements', 'sources', 'unverified_sources', 'recommended_tools']);
+            let html = '';
+            if (bp.summary) html += `<h4>Summary</h4><div class="agent-viewer-kv">${renderValueHtml(bp.summary)}</div>`;
+            if (bp.recommendation) html += `<h4>Recommendation</h4><div class="agent-viewer-kv">${renderValueHtml(bp.recommendation)}</div>`;
+            Object.keys(bp).filter(k => !own.has(k)).forEach(k => {
+                html += `<details open><summary>${escapeGateText(k.replace(/_/g, ' '))}</summary>${renderValueHtml(bp[k])}</details>`;
+            });
+            const disagreements = bp.disagreements || [];
+            html += `<details ${disagreements.length ? 'open' : ''}><summary>Disagreements between agents (${disagreements.length})</summary>${renderValueHtml(disagreements)}</details>`;
+            const unverified = bp.unverified_sources || [];
+            if (unverified.length) {
+                html += `<details open><summary>Unverified sources (${unverified.length})</summary>${renderValueHtml(unverified)}</details>`;
+            }
+            html += `<details><summary>Sources (${(bp.sources || []).length})</summary>${renderValueHtml(bp.sources || [])}</details>`;
+            return html;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('agent-viewer').style.display === 'flex') {
+                closeAgentViewer();
+            }
+        });
+
+        function switchAgentView(view, skipRender) {
+            agentViewer.view = view;
+            document.querySelectorAll('#agent-viewer .modal-tab-btn').forEach(b => {
+                const active = b.dataset.view === view;
+                b.classList.toggle('active', active);
+                b.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            if (!skipRender) {
+                renderAgentViewer();
+                document.getElementById('agent-viewer-body').scrollTop = 0;
+            }
+        }
+
+        async function loadAgentDetails() {
+            const { planId, agentId } = agentViewer;
+            // Tools are resolved once; the refreshes only need fresh findings.
+            const firstLoad = !agentViewer.data;
+            try {
+                const url = `/api/plans/${encodeURIComponent(planId)}/agents/${encodeURIComponent(agentId)}` + (firstLoad ? '' : '?tools=0');
+                const res = await fetch(url);
+                const data = await res.json();
+                if (agentViewer.planId !== planId || agentViewer.agentId !== agentId) return;
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                if (!firstLoad && data.plan) data.plan.tools = agentViewer.data.plan.tools;
+                agentViewer.data = data;
+                document.getElementById('agent-viewer-updated').innerText = `Updated ${new Date().toLocaleTimeString()}`;
+            } catch (e) {
+                if (agentViewer.planId !== planId || agentViewer.agentId !== agentId) return;
+                if (!agentViewer.data) {
+                    document.getElementById('agent-viewer-body').innerHTML =
+                        `<div class="agent-viewer-empty">Couldn't load this agent: ${escapeGateText(e.message)}</div>`;
+                } else {
+                    document.getElementById('agent-viewer-updated').innerText = `Refresh failed — showing ${new Date().toLocaleTimeString()} data`;
+                }
+                return;
+            }
+            renderAgentViewer();
+        }
+
+        function renderAgentViewer() {
+            const d = agentViewer.data;
+            if (!d) return;
+            const body = document.getElementById('agent-viewer-body');
+            // A refresh must not throw away where the reader is or what they opened.
+            const scroll = body.scrollTop;
+            const openDetails = Array.from(body.querySelectorAll('details')).map(x => x.open);
+            document.getElementById('agent-viewer-title').innerText = d.role ? `${d.role} (${d.agent_id})` : d.agent_id;
+            body.innerHTML = agentViewer.view === 'plan' ? agentPlanHtml(d) : agentFindingsHtml(d);
+            body.querySelectorAll('details').forEach((x, i) => { if (openDetails[i]) x.open = true; });
+            body.scrollTop = scroll;
+        }
+
+        function renderValueHtml(value, depth) {
+            depth = depth || 0;
+            if (value == null || value === '') return '<span class="agent-viewer-empty">—</span>';
+            if (typeof value !== 'object') return escapeGateText(value).replace(/\n/g, '<br>');
+            if (depth > 4) return `<pre>${escapeGateText(JSON.stringify(value, null, 2))}</pre>`;
+            if (Array.isArray(value)) {
+                if (!value.length) return '<span class="agent-viewer-empty">none</span>';
+                return '<ul>' + value.map(v => `<li>${renderValueHtml(v, depth + 1)}</li>`).join('') + '</ul>';
+            }
+            const keys = Object.keys(value);
+            if (!keys.length) return '<span class="agent-viewer-empty">none</span>';
+            return keys.map(k =>
+                `<div class="agent-viewer-kv"><strong>${escapeGateText(k.replace(/_/g, ' '))}:</strong> ${renderValueHtml(value[k], depth + 1)}</div>`
+            ).join('');
+        }
+
+        function agentStatusPill(status) {
+            const s = String(status || 'not started');
+            const cls = /^(completed|ok)$/.test(s) ? 'ok'
+                : /^(running|partial)$/.test(s) ? 'warn'
+                : /^(error|failed)$/.test(s) ? 'bad' : '';
+            return `<span class="agent-viewer-pill ${cls}">${escapeGateText(s)}</span>`;
+        }
+
+        function agentPlanHtml(d) {
+            const p = d.plan || {};
+            let html = '';
+            if (p.cycle) {
+                html += `<h4>Research cycle ${escapeGateText(p.cycle.cycle_id)}${p.is_lead ? ' — lead specialist' : ' — advisory agent'}</h4>
+                    <div class="agent-viewer-kv"><strong>Domain:</strong> ${renderValueHtml(p.cycle.domain)}</div>
+                    <div class="agent-viewer-kv"><strong>Cycle goal:</strong> ${renderValueHtml(p.cycle.goal)}</div>`;
+            } else if (d.kind === 'execution') {
+                html += `<h4>Execution agent</h4>
+                    <div class="agent-viewer-kv">Runs once research is approved, working from the approved research.</div>`;
+            }
+            html += `<h4>Brief</h4><div>${renderValueHtml(p.brief)}</div>`;
+
+            html += '<h4>Tools</h4>';
+            const tools = p.tools;
+            if (tools && !tools.error) {
+                html += `<div class="agent-viewer-kv"><strong>Works:</strong> ${
+                    tools.available.length ? tools.available.map(escapeGateText).join(', ') : '<span class="agent-viewer-empty">none</span>'
+                }</div>`;
+                if (tools.unavailable.length) {
+                    html += `<div class="agent-viewer-kv" style="color:#FCA5A5;"><strong style="color:#FCA5A5;">Asked for but not available:</strong>${renderValueHtml(tools.unavailable)}</div>`;
+                }
+            } else {
+                html += `<div class="agent-viewer-kv"><strong>Asked for:</strong> ${renderValueHtml(p.tools_needed)}</div>`;
+                if (tools && tools.error) html += `<div class="agent-viewer-empty">${escapeGateText(tools.error)}</div>`;
+            }
+
+            if (p.memory_query) html += `<h4>Memory it recalls</h4><div>${renderValueHtml(p.memory_query)}</div>`;
+            if (p.output_spec && Object.keys(p.output_spec).length) {
+                html += `<h4>What it must deliver</h4>${renderValueHtml(p.output_spec)}`;
+            }
+            return html;
+        }
+
+        // Keys an agent returns about itself rather than about what it found.
+        const AGENT_OUTPUT_META_KEYS = new Set([
+            'agent_id', 'role', 'status', 'confidence', 'findings', 'sources', 'recommendation',
+            'blocked_reason', 'recommended_tools', 'high_value_memory', 'general_memory', 'error'
+        ]);
+
+        function agentFindingsHtml(d) {
+            const f = d.findings || {};
+            const out = f.output || null;
+            const calls = f.tool_calls || [];
+            let html = `<h4>Status</h4><div>${agentStatusPill(f.status)}${
+                out && out.confidence != null ? ` &nbsp;<span style="color:var(--text-muted);">Confidence:</span> ${escapeGateText(out.confidence)}` : ''
+            }</div>`;
+
+            if (out && out.blocked_reason) {
+                html += `<h4>What blocked it</h4><div style="color:#FCA5A5;">${renderValueHtml(out.blocked_reason)}</div>`;
+            }
+            if ((f.errors || []).length) html += `<h4>Errors</h4>${renderValueHtml(f.errors)}`;
+
+            if (out) {
+                const found = out.findings !== undefined
+                    ? out.findings
+                    : Object.fromEntries(Object.entries(out).filter(([k]) => !AGENT_OUTPUT_META_KEYS.has(k)));
+                html += `<h4>Findings</h4>${renderValueHtml(found)}`;
+                if (out.recommendation) html += `<h4>Recommendation</h4><div>${renderValueHtml(out.recommendation)}</div>`;
+                if ((out.sources || []).length) html += `<h4>Sources</h4>${renderValueHtml(out.sources)}`;
+            } else if (f.saved_file) {
+                html += `<h4>Saved findings</h4><pre>${escapeGateText(f.saved_file)}</pre>`;
+            }
+
+            if (calls.length) {
+                html += `<h4>Tool calls so far (${calls.length})</h4>` + calls.map(c => `
+                    <details style="margin-bottom:6px;">
+                        <summary style="cursor:pointer;">${c.ok ? '✅' : '❌'} <strong>${escapeGateText(c.tool)}</strong>
+                            <span style="color:var(--text-muted);">${escapeGateText(c.args)}</span></summary>
+                        <pre>${escapeGateText(c.result)}</pre>
+                    </details>`).join('');
+            }
+
+            if (!out && !f.saved_file && !calls.length) {
+                html += `<div class="agent-viewer-empty" style="margin-top:10px;">${
+                    f.status === 'running' ? 'Working on it — nothing found yet.' : 'This agent has not run yet, so it has no findings.'
+                }</div>`;
+            }
+            if (f.approved_research && f.approved_research.length) {
+                html += `<h4>Approved research it will work from</h4>${renderValueHtml(f.approved_research)}`;
+            }
+            return html;
+        }
+
         let selectedPlanId = localStorage.getItem('jarvis_active_pipeline_id') || "";
         let plansCache = [];
 
@@ -1211,6 +1697,11 @@
         let viewMode = selectedPlanId ? "detail" : "listing"; // "listing" or "detail"
         let userClosedModal = true;
         let lastGateId = "";
+        // Both declared again: b640dc0 dropped them. Reading isFirstLoad undeclared
+        // threw on every poll, so the review stage never rendered; activeModalTabId
+        // is read before it is first assigned when the API/MCP gate opens.
+        let isFirstLoad = true;
+        let activeModalTabId = "brain";
         // The plan whose gate the modal is currently showing. This is NOT always
         // selectedPlanId: when nothing is explicitly selected the page falls back to
         // the first running plan and opens its gate anyway, and approving or rejecting
@@ -1636,8 +2127,16 @@
             const isExecutionActive = plan.phase === 'execution' && plan.status === 'running' && plan.active !== false;
             stage4Dot.className = `status-dot ${isExecutionActive ? 'orange pulse' : (plan.exec_results && plan.exec_results.length > 0 ? 'green' : '')}`;
             let execHTML = "";
-            if (plan.master_blueprint && plan.master_blueprint.execution_agents) {
-                plan.master_blueprint.execution_agents.forEach(a => {
+            const planAgents = (plan.agent_plan && plan.agent_plan.execution_agents)
+                || (plan.master_blueprint && plan.master_blueprint.execution_agents);
+            // The Brain's first roster is written before any research; it is planned again afterwards.
+            const execDraft = !(plan.agent_plan && plan.agent_plan.execution_plan_final)
+                && !['execution', 'qa', 'deploy', 'complete'].includes(plan.phase);
+            if (planAgents && planAgents.length && execDraft) {
+                execHTML += '<div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">Draft, planned again after research</div>';
+            }
+            if (planAgents && planAgents.length) {
+                planAgents.forEach(a => {
                     execHTML += `
                         <div class="item-row">
                             <span class="item-icon">🛠️</span>
@@ -1729,6 +2228,8 @@
                     if (cycle.agents && Array.isArray(cycle.agents)) {
                         agents = agents.concat(cycle.agents);
                     }
+
+                    itemsHtml += briefCheckHtml(data.brief_check, true);
 
                     agents.forEach((a, idx) => {
                         const isChecked = previouslyCheckedPanel.has(a.agent_id) ? "checked" : "";
@@ -1881,11 +2382,14 @@
                     html += `
                         <div class="step-row">
                             <input type="checkbox" id="check-${idx}" value="${a.agent_id}" ${isChecked}>
-                            <label for="check-${idx}">
-                                <strong>Agent ${a.agent_id} (${a.role})</strong><br>
-                                Brief: ${a.brief}<br>
-                                Required keys: ${a.output_spec.required_keys.join(', ')}
-                            </label>
+                            <div style="flex: 1; min-width: 0;">
+                                <label for="check-${idx}">
+                                    <strong>Agent ${a.agent_id} (${a.role})</strong><br>
+                                    Brief: ${a.brief}<br>
+                                    Required keys: ${((a.output_spec || {}).required_keys || []).join(', ') || '—'}
+                                </label>
+                                ${agentDetailButtonsHtml(a.agent_id)}
+                            </div>
                         </div>
                     `;
                 });
@@ -2118,15 +2622,21 @@
                     agents = agents.concat(cycle.agents);
                 }
 
+                html += cycleBlueprintButtonHtml(gateId, data);
+                html += briefCheckHtml(data.brief_check, false);
+
                 agents.forEach((a, idx) => {
                     const isChecked = currentlyChecked.has(a.agent_id) ? "checked" : "";
                     html += `
                         <div class="step-row">
                             <input type="checkbox" id="check-${idx}" value="${a.agent_id}" ${isChecked}>
-                            <label for="check-${idx}">
-                                <strong>Research Agent ${a.agent_id} (${a.role})</strong><br>
-                                Focus brief: ${a.brief}
-                            </label>
+                            <div style="flex: 1; min-width: 0;">
+                                <label for="check-${idx}">
+                                    <strong>Research Agent ${a.agent_id} (${a.role})</strong><br>
+                                    Focus brief: ${a.brief}
+                                </label>
+                                ${agentDetailButtonsHtml(a.agent_id)}
+                            </div>
                         </div>
                     `;
                 });

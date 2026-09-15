@@ -36,6 +36,7 @@ import webview
 import db
 import sections as section_store
 import command_gate
+from agents import tool_review, tool_requests
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -191,6 +192,19 @@ def load_pipelines_from_db():
         print(f"Error loading pipelines from DB: {e}")
     finally:
         conn.close()
+
+# Pipelines carried over from another PC arrive as a state file in their project
+# folder (see pipeline_transfer.py); add any this database doesn't have yet.
+try:
+    import pipeline_transfer
+    _transfer_conn = db.get_connection(DB_PATH)
+    try:
+        for _line in pipeline_transfer.import_exported_pipelines(_transfer_conn, BASE_DIR):
+            print(f"[Pipelines] {_line}")
+    finally:
+        _transfer_conn.close()
+except Exception as e:
+    print(f"Could not import pipelines carried over from another PC: {e}")
 
 # Load persisted plans on startup
 load_pipelines_from_db()
@@ -901,9 +915,19 @@ def _ask_model_json(instruction: str, context_text: str, parts: list | None = No
     Shared by both clarification gates — this one, and the section gate further
     down — because they differ only in what they put in the context.
     """
+    import time as _time
     contents = [instruction, context_text] + (parts or [])
-    response = client.models.generate_content(model="gemini-2.5-flash", contents=contents)
-    return _intake_parse_json(response.text)
+    # Gemini throws the odd 500 or garbled reply. One of those used to drop the
+    # user straight to a fallback, so try a couple more times first.
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(model="gemini-2.5-flash", contents=contents)
+            return _intake_parse_json(response.text)
+        except Exception as e:
+            if attempt == 2:
+                raise
+            print(f"[Intake] Model call failed (attempt {attempt + 1} of 3), retrying: {e}")
+            _time.sleep(1 + attempt)
 
 
 def _normalise_questions(data) -> list[dict]:
@@ -945,10 +969,35 @@ _QUESTION_RULES = (
     "alter the work.\n"
     "- Never re-ask something already answered, and never ask for what the attached files "
     "already contain — read them first.\n"
+    "- An answer that hands the choice to you (\"you decide\", \"your call\", \"whatever you think "
+    "is best\") IS an answer. Make that choice yourself in the plan, say what you chose and why, "
+    "and never ask that question again.\n"
+    "- If something the user said later conflicts with or narrows what they said earlier (a "
+    "count, a scope, what or who to study), ask which one stands, unless they said plainly "
+    "that they are replacing it.\n"
     "- Short, plain, one topic each. No compound questions. There is no limit on how many you "
     "ask, but every one has to earn its place.\n"
     "- If nothing material is missing, return an empty list. An empty list is the correct "
     "answer whenever you could proceed without guessing.\n"
+)
+
+# The costliest misreading is choosing the wrong kind of thing to work on. A label
+# like "business software development consultant" fits agencies that build custom
+# apps, companies that sell software products, and advisers who build nothing, and
+# agents handed the label alone reach for its most famous reading. So the gate
+# settles what qualifies, and the plan the user approves says it out loud.
+_WHAT_COUNTS_QUESTION_RULE = (
+    "- If the job means finding or choosing things in the world (competitors, customers, "
+    "suppliers, examples, sources), be sure you know exactly what kind qualifies. A label the "
+    "user gave can fit very different groups; if what they told you does not settle which one "
+    "they mean, ask.\n"
+)
+_WHAT_COUNTS_PLAN_RULE = (
+    "- If the job means finding or choosing things in the world (competitors, customers, "
+    "suppliers, examples, sources), include a section titled \"What counts\" that says plainly "
+    "what qualifies and what does not, with two or three illustrative examples of each, labelled "
+    "as examples. Base it strictly on what the user told you. This is the part the user most "
+    "needs to check, so never leave it vague.\n"
 )
 
 
@@ -957,7 +1006,7 @@ def _intake_next_questions(draft: dict) -> list[dict]:
     instruction = (
         "You are Jarvis, about to hand this job to a team of autonomous agents. Before they start, "
         "find what you genuinely do not know.\n\n"
-        "RULES:\n" + _QUESTION_RULES + "\n"
+        "RULES:\n" + _QUESTION_RULES + _WHAT_COUNTS_QUESTION_RULE + "\n"
         "For each question also write \"gist\": a single short spoken line (under 15 words) that "
         "conveys the question aloud.\n\n"
         "Reply with JSON only: {\"questions\": [{\"question\": \"...\", \"gist\": \"...\"}]}"
@@ -974,18 +1023,22 @@ def _intake_next_questions(draft: dict) -> list[dict]:
 
 def _intake_paint_picture(draft: dict) -> dict:
     """Either the plan, or another round of questions — Jarvis decides."""
-    instruction = (
-        "You are Jarvis. Using everything below, paint a picture of what the user asked for: a "
-        "written plan they can read and correct.\n\n"
-        "RULES:\n"
+    plan_rules = (
         "- Fold in every clarification and everything you can see in the attached files.\n"
         "- Plain language and concrete. Describe what will be built and for whom, not how you "
         "will manage the work.\n"
         "- Invent nothing. Do not add requirements the user never gave you.\n"
+        + _WHAT_COUNTS_PLAN_RULE
+    )
+    instruction = (
+        "You are Jarvis. Using everything below, paint a picture of what the user asked for: a "
+        "written plan they can read and correct.\n\n"
+        "RULES:\n"
+        + plan_rules +
         "- Now that you have read the answers, ask again if they opened something material you "
         "still cannot settle: do NOT guess, return questions instead of a plan. The rules on what "
         "makes a question worth asking apply here exactly as they did before:\n"
-        + _QUESTION_RULES + "\n"
+        + _QUESTION_RULES + _WHAT_COUNTS_QUESTION_RULE + "\n"
         "Reply with JSON only, one of:\n"
         "{\"plan_text\": \"the plan in markdown\"}\n"
         "{\"questions\": [{\"question\": \"...\", \"gist\": \"...\"}]}"
@@ -997,6 +1050,7 @@ def _intake_paint_picture(draft: dict) -> dict:
         print(f"[Intake] Painting the picture failed: {e}")
         return {
             "plan_text": _intake_brief_markdown(draft, include_plan=False),
+            "plan_is_brief": True,
             "degraded": "Jarvis could not reach the model to write the plan, so this is the raw "
                         "brief. You can edit it and build from it.",
         }
@@ -1008,7 +1062,26 @@ def _intake_paint_picture(draft: dict) -> dict:
 
     plan_text = (data or {}).get("plan_text") if isinstance(data, dict) else None
     if not plan_text:
-        plan_text = _intake_brief_markdown(draft, include_plan=False)
+        # Neither a plan nor any questions — typically {"questions": []}, the model
+        # saying it has nothing left to ask. That is a cue to write the plan, so ask
+        # for exactly that rather than passing the user's own notes off as one.
+        try:
+            again = _intake_ask_gemini(draft, (
+                "You are Jarvis. You have no questions left. Using everything below, write the "
+                "plan now: a written plan the user can read and correct. Do not ask questions.\n\n"
+                "RULES:\n" + plan_rules + "\n"
+                "Reply with JSON only: {\"plan_text\": \"the plan in markdown\"}"
+            ))
+            plan_text = again.get("plan_text") if isinstance(again, dict) else None
+        except Exception as e:
+            print(f"[Intake] Asking again for the plan failed: {e}")
+    if not plan_text:
+        return {
+            "plan_text": _intake_brief_markdown(draft, include_plan=False),
+            "plan_is_brief": True,
+            "degraded": "Jarvis could not get the model to write a plan, so this is what you told "
+                        "it. You can edit it and build from it.",
+        }
     return {"plan_text": plan_text}
 
 
@@ -1042,7 +1115,15 @@ def _intake_clean_edit(draft: dict, edited_text: str) -> str:
 def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
     """The complete record handed to the agents."""
     out = [f"# Clarified Brief \u2014 {draft.get('project_name') or 'Project'}", ""]
-    out += ["## Original request", draft.get("task", ""), ""]
+    task = draft.get("task", "")
+    words = (draft.get("user_words") or "").strip()
+    if words and words != task.strip():
+        # Chat and voice hand us the model's summary as the task. Keep the
+        # user's own words as the original, and label the summary for what it is.
+        out += ["## Original request (the user's own words)", words, ""]
+        out += ["## Jarvis's summary of the request", task, ""]
+    else:
+        out += ["## Original request", task, ""]
 
     details = (draft.get("details") or "").strip()
     out += ["## Details from the user", details if details else "_(none given)_", ""]
@@ -1060,7 +1141,9 @@ def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
             out.append(f"- `Inputs/{f['name']}` \u2014 {f.get('mime', 'unknown type')}")
         out.append("")
 
-    if include_plan and draft.get("plan_text"):
+    # A fallback "plan" is only this brief again — printing it would repeat
+    # everything above under a heading that claims it is a plan.
+    if include_plan and draft.get("plan_text") and not draft.get("plan_is_brief"):
         out += ["## Approved plan", draft["plan_text"], ""]
 
     section = _section_for_draft(draft)
@@ -1098,14 +1181,20 @@ def _intake_discard(draft: dict):
     _delete_draft_uploads(draft)
 
 
-def create_intake_draft(task: str, section_id: str | None = None) -> dict:
-    """Start a draft. No pipeline, no DB row, nothing persistent yet."""
+def create_intake_draft(task: str, section_id: str | None = None,
+                        user_words: str | None = None) -> dict:
+    """Start a draft. No pipeline, no DB row, nothing persistent yet.
+
+    `task` is what the caller asked for — from chat or voice that is the model's
+    own summary. `user_words` is what the user actually said, when we have it.
+    """
     import time as _time
     import uuid
     _prune_intake_drafts()
     draft = {
         "draft_id": uuid.uuid4().hex[:8],
         "task": task,
+        "user_words": (user_words or "").strip(),
         # A pipeline started inside a section belongs to it: its folder, its
         # knowledge, its tasks. None means the pipeline stands on its own.
         "section_id": section_id,
@@ -1280,7 +1369,8 @@ def start_pipeline_local(settings_dict):
             attach_pipeline_to_section(section, plan_id)
         return {"status": "pipeline_started", "task": task, "plan_id": plan_id}
 
-    draft = create_intake_draft(task, section_id=section_id)
+    draft = create_intake_draft(task, section_id=section_id,
+                                user_words=settings_dict.get("user_words"))
     with STATE_LOCK:
         UI_ACTION = {
             "type": "pipeline_intake_ask",
@@ -1478,6 +1568,8 @@ coordinator.register_state_provider("read_app_snapshot", get_snapshot_local)
 coordinator.register_state_provider("read_settings", load_settings)
 coordinator.register_state_provider("change_settings", change_settings_local)
 coordinator.register_state_provider("start_pipeline", start_pipeline_local)
+tool_review.set_notifier(lambda text: push_message("system", text))
+tool_requests.set_notifier(lambda text: push_message("system", text))
 coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
 coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
 coordinator.register_state_provider("get_pipelines", get_pipelines_local)
@@ -1544,7 +1636,8 @@ def check_navigation_intent(transcript: str) -> str:
         with STATE_LOCK:
             UI_ACTION = {"type": "navigate", "url": "agent_talk.task_log.html"}
         return "console"
-    elif any(k in t_lower for k in ["execution mode", "execution map", "go to execution", "open execution"]):
+    elif any(k in t_lower for k in ["execution mode", "execution map", "execution page", "go to execution",
+                                    "open execution", "switch to execution", "take me to execution"]):
         with STATE_LOCK:
             UI_ACTION = {"type": "navigate", "url": "execution.html"}
         return "execution"
@@ -2061,6 +2154,59 @@ def _owning_run(project: str) -> tuple[str, str]:
     finally:
         conn.close()
     return plan_id, section_id
+
+
+@app.route("/tool_requests/pending", methods=["GET"])
+def tool_requests_pending():
+    """Tools agents are asking for, waiting on the Commands page."""
+    return jsonify({"pending": tool_requests.pending(), "wait_seconds": tool_requests.WAIT_SECONDS})
+
+
+@app.route("/tool_requests/log", methods=["GET"])
+def tool_requests_log():
+    """Tool requests already answered, newest first."""
+    return jsonify({"log": tool_requests.log()})
+
+
+@app.route("/tool_requests/decide", methods=["POST"])
+def tool_requests_decide():
+    """Approve or reject one agent's request for a tool."""
+    data = request.get_json(force=True) or {}
+    request_id = (data.get("request_id") or "").strip()
+    if not request_id:
+        return jsonify({"error": "request_id is required — without it the wrong request could be "
+                                 "answered when more than one is waiting."}), 400
+    result = tool_requests.decide(request_id, data.get("decision") or "", reason=data.get("reason") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/tool_reviews/pending", methods=["GET"])
+def tool_reviews_pending():
+    """Agents paused every few rounds of tool calls, waiting on the Commands page to be told to continue or stop."""
+    return jsonify({"pending": tool_review.pending(), "review_every": tool_review.REVIEW_EVERY,
+                    "wait_seconds": tool_review.WAIT_SECONDS})
+
+
+@app.route("/tool_reviews/log", methods=["GET"])
+def tool_reviews_log():
+    """Reviews already answered or timed out, newest first."""
+    return jsonify({"log": tool_review.log()})
+
+
+@app.route("/tool_reviews/decide", methods=["POST"])
+def tool_reviews_decide():
+    """Let one paused agent keep calling tools, or stop it so it answers with what it has."""
+    data = request.get_json(force=True) or {}
+    request_id = (data.get("request_id") or "").strip()
+    if not request_id:
+        return jsonify({"error": "request_id is required — without it the wrong agent could be "
+                                 "answered when more than one is waiting."}), 400
+    result = tool_review.decide(request_id, data.get("decision") or "", reason=data.get("reason") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
 
 
 @app.route("/commands/ask", methods=["POST"])
@@ -2591,6 +2737,11 @@ def pipeline_event_logger(event: dict):
                         mark_done("deploy")
                     elif event_type == "running" and event.get("source", "").startswith("Cycle"):
                         plan["phase"] = "research"
+                        # A cycle that is running has no gate open. A pipeline resumed while
+                        # its gate was waiting used to keep showing that gate as waiting.
+                        plan["current_gate"] = None
+                        plan["gate_status"] = "idle"
+                        plan["gate_data"] = None
                         cycle_name = event.get("source")
                         if cycle_name not in plan["cycles"]:
                             plan["cycles"].append(cycle_name)
@@ -2682,6 +2833,217 @@ def get_pipeline_status():
 
 
 
+# ---------------------------------------------------------------------------
+# Agent details — what one agent in one pipeline was told to do, and what it has
+# found so far. Opened from the buttons under each brief in the review stage.
+#
+# Agent ids repeat across pipelines (every competitor run has a
+# `market_research_lead_cycle1_lead`), and AGENT_REGISTRY is keyed by id alone,
+# so nothing here reads it. The plan comes from this pipeline's own agent_plan,
+# the findings from events tagged with this plan_id, and — once those are gone
+# after a restart — from the file this pipeline saved for the agent.
+# ---------------------------------------------------------------------------
+
+_AGENT_DETAIL_TEXT_LIMIT = 4000     # per tool result, so one huge search can't swamp the view
+_AGENT_DETAIL_FILE_LIMIT = 20000
+
+
+def execution_roster_is_draft(plan: dict) -> bool:
+    """True while the execution agents are still the Brain's pre-research draft.
+
+    Plans from before the roster was re-planned after research carry no flag; once
+    they are past research their roster is the one that runs, so it isn't a draft.
+    """
+    agent_plan = (plan or {}).get("agent_plan") or {}
+    if agent_plan.get("execution_plan_final"):
+        return False
+    return (plan or {}).get("phase") not in ("execution", "qa", "deploy", "complete")
+
+
+def _find_plan_agent(agent_plan: dict, agent_id: str):
+    """(kind, config, cycle, is_lead) for an agent of this plan, or all None."""
+    for cycle in (agent_plan or {}).get("cycles", []) or []:
+        lead = cycle.get("lead_specialist") or {}
+        if lead.get("agent_id") == agent_id:
+            return "research", lead, cycle, True
+        for adv in cycle.get("advisory_agents", []) or []:
+            if adv.get("agent_id") == agent_id:
+                return "research", adv, cycle, False
+    for cfg in (agent_plan or {}).get("execution_agents", []) or []:
+        if cfg.get("agent_id") == agent_id:
+            return "execution", cfg, None, False
+    return None, None, None, None
+
+
+def _clip_detail(value, limit: int = _AGENT_DETAIL_TEXT_LIMIT) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    return text if len(text) <= limit else text[:limit] + " …"
+
+
+def _agent_tool_report(config: dict, project_name: str) -> dict:
+    """The tools this agent really gets, and the ones it asked for but won't get.
+
+    Uses the same resolver the agent itself runs through, so this shows exactly
+    what the agent is bound to and told is missing — not a guess from the names.
+    """
+    try:
+        from agents.tool_executor import get_tools_for_execution_agent
+        role, brief = config.get("role", ""), config.get("brief", "")
+        declarations, _handlers, unavailable = get_tools_for_execution_agent(
+            config.get("tools_needed", []), project_name, context=f"{role}: {brief}"[:400]
+        )
+        names = {
+            (d.get("name") if isinstance(d, dict) else getattr(d, "name", None))
+            for d in declarations
+        }
+        return {"available": sorted(n for n in names if n), "unavailable": list(unavailable)}
+    except Exception as e:
+        return {"available": [], "unavailable": [], "error": f"Could not resolve this agent's tools: {e}"}
+
+
+@app.route("/api/plans/<plan_id>/agents/<agent_id>", methods=["GET"])
+def get_plan_agent_details(plan_id, agent_id):
+    """One agent's plan and its findings so far, scoped to one pipeline.
+
+    ?tools=0 skips resolving tools — the viewer polls for fresh findings and
+    already has the tool report from its first load.
+    """
+    import re
+
+    with PLAN_STORE_LOCK:
+        plan = next((p for p in PLAN_STORE if p["id"] == plan_id), None)
+        if not plan:
+            return jsonify({"error": f"Plan '{plan_id}' not found"}), 404
+        agent_plan = plan.get("agent_plan") or {}
+        project_name = plan.get("project_name") or "Default Project"
+        approved_blueprints = list(plan.get("approved_blueprints") or [])
+
+    kind, config, cycle, is_lead = _find_plan_agent(agent_plan, agent_id)
+    if not kind:
+        return jsonify({"error": f"Agent '{agent_id}' is not part of plan '{plan_id}'"}), 404
+    # The id is model-written and ends up in a file name below.
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", agent_id) or ".." in agent_id:
+        return jsonify({"error": "This agent id cannot be looked up safely."}), 400
+
+    tools = None if request.args.get("tools") == "0" else _agent_tool_report(config, project_name)
+
+    with AGENT_OBS_LOCK:
+        events = [
+            e for e in AGENT_EVENT_LOG
+            if e.get("plan_id") == plan_id
+            and (e.get("agent_id") == agent_id or e.get("source") == agent_id)
+        ]
+
+    status, output, tool_calls, errors = "not started", None, [], []
+    for e in events:
+        event_type = e.get("event_type")
+        data = e.get("data")
+        if event_type in ("spawned", "running") and output is None:
+            status = "running"
+        elif event_type == "tool_result" and isinstance(data, dict):
+            result = data.get("result")
+            tool_calls.append({
+                "timestamp": e.get("timestamp"),
+                "tool": data.get("tool"),
+                "args": _clip_detail(data.get("args") or {}, 500),
+                "ok": not (isinstance(result, dict) and result.get("status") == "error"),
+                "result": _clip_detail(result),
+            })
+        elif event_type == "completed":
+            output = data if isinstance(data, dict) else {"result": data}
+            status = output.get("status") or "ok"
+        elif event_type in ("error", "failed"):
+            errors.append(_clip_detail(data, 1000))
+            if output is None:
+                status = "error"
+    if status == "ok":
+        status = "completed"
+
+    saved_file = None
+    if output is None:
+        prefix = "research" if kind == "research" else "execution"
+        path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan",
+                            "Agents", f"{prefix}_{agent_id}_{plan_id}.md")
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    saved_file = f.read(_AGENT_DETAIL_FILE_LIMIT)
+                if status in ("not started", "running"):
+                    status = "completed"
+            except Exception as e:
+                errors.append(f"Could not read the saved findings: {e}")
+
+    return jsonify({
+        "plan_id": plan_id,
+        "agent_id": agent_id,
+        "kind": kind,
+        "role": config.get("role", ""),
+        "plan": {
+            "brief": config.get("brief", ""),
+            "is_lead": bool(is_lead),
+            "cycle": {
+                "cycle_id": cycle.get("cycle_id"),
+                "domain": cycle.get("domain", ""),
+                "goal": cycle.get("goal", ""),
+            } if cycle else None,
+            "tools_needed": config.get("tools_needed", []),
+            "tools": tools,
+            "memory_query": config.get("memory_query", ""),
+            "output_spec": config.get("output_spec") or {},
+        },
+        "findings": {
+            "status": status,
+            "output": output,
+            "tool_calls": tool_calls,
+            "errors": errors,
+            "saved_file": saved_file,
+            # An execution agent that hasn't run has found nothing itself; what it
+            # will work from is the research approved so far.
+            "approved_research": approved_blueprints if kind == "execution" and output is None else None,
+        },
+    })
+
+
+@app.route("/api/plans/<plan_id>/cycles/<int:cycle_id>/blueprint", methods=["GET"])
+def get_cycle_blueprint(plan_id, cycle_id):
+    """A research cycle's synthesized blueprint — what its gate asks the user to approve.
+
+    The gate itself only carries the cycle's agents and the brief check, so the
+    result it waits on (the lead's final pick, the disagreements, the sources)
+    was only ever in the file the pipeline saved.
+    """
+    import re
+
+    with PLAN_STORE_LOCK:
+        plan = next((p for p in PLAN_STORE if p["id"] == plan_id), None)
+        if not plan:
+            return jsonify({"error": f"Plan '{plan_id}' not found"}), 404
+        project_name = plan.get("project_name") or "Default Project"
+    # The id ends up in a file name below.
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", plan_id) or ".." in plan_id:
+        return jsonify({"error": "This plan id cannot be looked up safely."}), 400
+
+    path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan",
+                        "Agents", f"cycle_blueprint_{cycle_id}_{plan_id}.md")
+    if not os.path.isfile(path):
+        return jsonify({"error": f"Cycle {cycle_id} has no blueprint yet."}), 404
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    # save_cycle_blueprint_file writes one fenced JSON block. The last fence is the
+    # closing one: a finding can itself quote ``` inside a string.
+    start, end = text.find("```json"), text.rfind("```")
+    blueprint = None
+    if start != -1 and end > start:
+        try:
+            blueprint = json.loads(text[start + len("```json"):end])
+        except json.JSONDecodeError:
+            pass
+    if not isinstance(blueprint, dict):
+        return jsonify({"error": f"Cycle {cycle_id}'s blueprint file could not be read."}), 500
+    return jsonify({"plan_id": plan_id, "cycle_id": cycle_id, "blueprint": blueprint})
+
+
 @app.route("/plans/<plan_id>", methods=["GET"])
 def get_plan_detail(plan_id):
     """Returns details for a single plan."""
@@ -2764,6 +3126,8 @@ def get_agent_graph(plan_id):
         "task": plan.get("task", ""),
         "cycles": graph_cycles,
         "execution_agents": exec_agents,
+        # Until research finishes these are the Brain's draft; they are planned again after it.
+        "execution_agents_draft": execution_roster_is_draft(plan),
     })
 
 
@@ -2846,7 +3210,20 @@ def start_pipeline():
     task = data.get("task", "").strip()
     if not task:
         return jsonify({"error": "task is required"}), 400
-    plan_id = initiate_pipeline(task)
+
+    # "No details" from the intake ask: the draft holds what the user actually
+    # said, while `task` may only be the chat model's summary of it.
+    words = ""
+    draft = _get_intake_draft((data.get("draft_id") or "").strip())
+    if draft:
+        words = (draft.get("user_words") or "").strip()
+        _intake_discard(draft)
+
+    if words and words != task:
+        agent_task = f"{words}\n\n(Jarvis's summary of the request: {task})"
+        plan_id = initiate_pipeline(agent_task, task_summary=task)
+    else:
+        plan_id = initiate_pipeline(task)
     return jsonify({"status": "pipeline_started", "task": task, "plan_id": plan_id})
 
 
@@ -3026,6 +3403,7 @@ def intake_picture_route():
 
     with INTAKE_DRAFTS_LOCK:
         draft["plan_text"] = result.get("plan_text", "")
+        draft["plan_is_brief"] = bool(result.get("plan_is_brief"))
         draft["stage"] = "picture"
     return jsonify({"plan_text": draft["plan_text"], "degraded": result.get("degraded")})
 
@@ -3059,6 +3437,8 @@ def intake_edit_route():
     set_orb("idle")
     with INTAKE_DRAFTS_LOCK:
         draft["plan_text"] = cleaned
+        # Whatever it started as, the user has now written this plan themselves.
+        draft["plan_is_brief"] = False
         draft["stage"] = "picture"
     return jsonify({"plan_text": cleaned})
 

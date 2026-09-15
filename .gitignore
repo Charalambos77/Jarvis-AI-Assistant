@@ -24,5 +24,10 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Project deliverables / generated plans
-Let Jarvis Handle It/
+# Project deliverables / generated plans. Only pipelines meant to move between PCs
+# are kept (their state file comes with them: see pipeline_transfer.py).
+Let Jarvis Handle It/*
+!Let Jarvis Handle It/Competitor Deep Dive/
+
+# Generated voice audio, rebuilt on demand
+data/tts_cache/

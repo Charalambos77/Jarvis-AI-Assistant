@@ -8,6 +8,8 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
+from agents.user_brief import clip_brief
+
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -16,11 +18,22 @@ async def run_quality_checker(
     execution_results: list[dict],
     agent_plan: dict,
     master_blueprint: dict,
+    user_brief: str | None = None,
 ) -> dict:
     """
     Validates each execution agent's output against the blueprint spec and brief.
     Returns per-agent pass/fail with reasons.
+
+    `user_brief` is what the user actually asked for. The checks used to read only
+    each agent's own brief, so a deliverable could pass while missing what the
+    user wanted.
     """
+    brief_section = ""
+    if user_brief:
+        brief_section = (
+            "THE USER'S BRIEF (what the user actually asked for — the output has to serve it):\n"
+            f"{clip_brief(user_brief)}\n\n"
+        )
     client = genai.Client(api_key=GEMINI_API_KEY)
     loop = asyncio.get_running_loop()
 
@@ -66,7 +79,7 @@ async def run_quality_checker(
         if cfg and len(issues) == 0:
             prompt = f"""You are the Quality Checker Agent. Verify if the execution output below adheres to the agent's brief and spec.
 
-AGENT BRIEF:
+{brief_section}AGENT BRIEF:
 {cfg.get("brief")}
 
 AGENT OUTPUT:
@@ -115,7 +128,7 @@ Return a JSON object:
     if all_passed and len(execution_results) > 0:
         prompt = f"""You are the Quality Checker Agent. Check if all individual execution outputs integrate and align seamlessly based on the master blueprint.
 
-MASTER BLUEPRINT:
+{brief_section}MASTER BLUEPRINT:
 {json.dumps(master_blueprint, indent=2)}
 
 EXECUTION OUTPUTS:
@@ -172,3 +185,130 @@ Return a JSON object:
         "failed_agents": failed_agents,
         "integration_check": {"passed": integration_passed, "issues": integration_issues}
     }
+
+
+# How much of a cycle's results the brief check reads. A cycle blueprint is the
+# synthesised, compressed output, so this is generous; it only guards against a
+# runaway blueprint blowing the model's input.
+MAX_FINDINGS_CHARS = 60000
+
+
+async def check_research_against_brief(
+    user_brief: str | None,
+    cycle: dict,
+    cycle_blueprint: dict,
+    agent_results: list[dict],
+    plan_cycles: list[dict] | None = None,
+) -> dict:
+    """Compare one research cycle's results with what the user actually asked for.
+
+    `plan_cycles` is every cycle in the plan. Without it the check could only judge
+    this cycle's own job, so a requirement no cycle was ever given — pipeline 7
+    dropped "20 competitors from each of 5 countries" at planning — passed as clean.
+
+    Runs just before the cycle's approval gate. Agents drift from a brief quietly —
+    the wrong kind of company, places the brief ruled out, too few results — and
+    nothing else in the pipeline compares their work with the user's own words.
+
+    Agents that failed or stopped short are listed straight from their results, no
+    model needed. Everything else is judged by the model. If that judgement cannot
+    be made, the report says unchecked rather than clean: "no problems found" must
+    only ever mean the check actually ran.
+
+    Returns {"checked": bool, "violations": [{"constraint", "problem"}],
+             "failed_agents": [{"agent_id", "status", "reason"}]}.
+    """
+    failed_agents = []
+    for r in agent_results or []:
+        if not isinstance(r, dict):
+            continue
+        status = r.get("status", "ok")
+        if status != "ok":
+            failed_agents.append({
+                "agent_id": r.get("agent_id", "unknown"),
+                "status": status,
+                "reason": r.get("blocked_reason") or r.get("error") or "No reason given.",
+            })
+
+    report = {"checked": False, "violations": [], "failed_agents": failed_agents}
+    brief = clip_brief(user_brief)
+    if not brief or not GEMINI_API_KEY:
+        return report
+
+    cycle = cycle or {}
+    findings = json.dumps(cycle_blueprint or {}, indent=2, ensure_ascii=False)
+    if len(findings) > MAX_FINDINGS_CHARS:
+        findings = findings[:MAX_FINDINGS_CHARS] + "\n[... results truncated ...]"
+
+    plan_lines = "\n".join(
+        f"- Cycle {c.get('cycle_id', '?')}: {c.get('domain', '')} — {c.get('goal', '')}"
+        for c in (plan_cycles or []) if isinstance(c, dict)
+    ) or "(not given)"
+
+    prompt = f"""You are checking one research cycle against the user's brief, before the user approves it.
+
+THE USER'S BRIEF:
+{brief}
+
+THE WHOLE RESEARCH PLAN (every cycle, in order):
+{plan_lines}
+
+THIS CYCLE'S JOB:
+Domain: {cycle.get("domain", "")}
+Goal: {cycle.get("goal", "")}
+
+WHAT THIS CYCLE PRODUCED:
+{findings}
+
+List every place where these results break a concrete requirement of the brief. Look especially for:
+- the wrong kind of thing chosen: the brief describes one type of company, customer, product or source and the results use a different type
+- places, languages, markets or categories the brief rules in or out
+- counts, quotas or rankings the brief sets, where this cycle was responsible for meeting them
+- scope quietly narrowed: fewer items, places or categories than the brief asks for
+- work this cycle was meant to do that is missing, thin or only partly done
+- a requirement of the brief (a count, quota, place, category or deliverable) that NO cycle in the whole plan is set up to meet. Report it even though it is not this cycle's job, because nothing later will catch it, and say "no cycle covers this".
+- a requirement "covered" only on paper: a cycle whose goal is to design a method, strategy, template or checklist for some work does not deliver that work. If no cycle produces the actual items (e.g. the real list of competitors), that requirement is covered by no cycle.
+
+Rules:
+- Only report real, specific breaks you can point to in the results or the plan. Name the offending items.
+- Where the user's later details plainly change an earlier requirement, judge against the later details.
+- Judge this cycle's own results only against this cycle's job. Work a later cycle is set up to do is not a violation.
+- Do not report style, wording, or ideas for improvement.
+- If nothing breaks the brief, return an empty list.
+
+Return a JSON object:
+{{
+  "violations": [
+    {{"constraint": "the requirement from the brief, in a few words", "problem": "what in the results breaks it, specifically"}}
+  ]
+}}
+"""
+    config = types.GenerateContentConfig(
+        system_instruction="You are a Brief Compliance Checker. Output valid JSON only.",
+        response_mime_type="application/json",
+    )
+    loop = asyncio.get_running_loop()
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=config
+            )
+        )
+        violations = json.loads(response.text).get("violations")
+        if not isinstance(violations, list):
+            raise ValueError("'violations' is not a list")
+    except Exception as e:
+        print(f"[Brief Check] Could not check cycle {cycle.get('cycle_id')} against the brief: {e}")
+        return report
+
+    report["violations"] = [
+        {"constraint": str(v.get("constraint", "")).strip(), "problem": str(v.get("problem", "")).strip()}
+        for v in violations
+        if isinstance(v, dict) and str(v.get("problem", "")).strip()
+    ]
+    report["checked"] = True
+    return report

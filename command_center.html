@@ -4654,13 +4654,13 @@
             hideIntakeAsk();
             const draft = intakeState;
             if (!draft) return;
-            // Throw the draft away and build on the one-liner, exactly as before.
-            intakePost('/pipeline/intake/cancel', { draft_id: draft.draftId });
+            // Build on the one-liner. The server reads the user's own words off
+            // the draft before throwing it away, so don't cancel it here.
             try {
                 const res = await fetch('/pipeline/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ task: draft.task })
+                    body: JSON.stringify({ task: draft.task, draft_id: draft.draftId })
                 });
                 const data = await res.json();
                 intakeState = null;

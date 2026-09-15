@@ -55,6 +55,8 @@ def _safe_join(project_name: str, relative_path: str) -> str:
 # ALWAYS-ON TOOLS — no API key / registry entry required
 # ---------------------------------------------------------------------------
 
+from agents.website_inspector import inspect_website_impl
+
 def write_file_impl(project_name: str, agent_id: str, relative_path: str, content: str) -> dict:
     path = _safe_join(project_name, relative_path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -180,6 +182,35 @@ ALWAYS_ON_TOOLS = {
         },
         "handler": memory_patterns_search_impl,
     },
+    # Runs a local headless browser: nothing to sign up for and no key to give,
+    # so it is always on. Agents asking to scrape, screenshot or analyse a site's
+    # UI resolve here (see _TOKEN_RULES) instead of silently getting web search.
+    "inspect_website": {
+        "declaration": {
+            "name": "inspect_website",
+            "description": (
+                "Open a real website in a browser and inspect its design. Reads the live HTML and CSS "
+                "(fonts and type scale, colour palette, calls to action, navigation, headings, images, "
+                "visual effects, motion, forms), takes screenshots at mobile, tablet and desktop widths, "
+                "and has a vision model describe them (imagery, filters, whitespace, visual hierarchy, "
+                "emotional tone, responsiveness). Use it whenever you need to know what a site actually "
+                "looks like or how it is built — web_search only returns what others wrote about it. "
+                "One call inspects one page and takes about 20-40 seconds."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full address of the page, e.g. https://example.com"},
+                    "focus": {
+                        "type": "string",
+                        "description": "Optional: what to pay extra attention to, e.g. 'pricing page CTAs' or 'how testimonials are presented'.",
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+        "handler": inspect_website_impl,
+    },
 }
 
 
@@ -275,13 +306,77 @@ def arxiv_search_impl(project_name: str, agent_id: str, query: str, max_results:
         return {"status": "error", "action": "arxiv_search", "error": str(e)}
 
 
+_GROUNDING_REDIRECT_HOST = "vertexaisearch.cloud.google.com"
+
+
+def _resolve_grounding_link(uri: str) -> str:
+    """The publisher's own address behind a Google grounding redirect, or the redirect itself.
+
+    Grounding hands back vertexaisearch.cloud.google.com redirects that expire. One
+    HEAD request, with no body and no following, reads where each one points.
+    """
+    if _GROUNDING_REDIRECT_HOST not in (uri or ""):
+        return uri
+    try:
+        resp = requests.head(uri, allow_redirects=False, timeout=5)
+        location = resp.headers.get("Location", "")
+        if 300 <= resp.status_code < 400 and location.startswith(("http://", "https://")):
+            return location
+    except requests.RequestException:
+        pass
+    return uri
+
+
+def _grounding_sources(resp) -> tuple[list[dict], list[dict]]:
+    """(the pages a grounded answer drew on, which sentence of it each one backs)."""
+    try:
+        metadata = resp.candidates[0].grounding_metadata
+    except (AttributeError, IndexError, TypeError):
+        return [], []
+    if not metadata:
+        return [], []
+
+    pages = []
+    for chunk in metadata.grounding_chunks or []:
+        web = getattr(chunk, "web", None)
+        pages.append((getattr(web, "title", "") or "", getattr(web, "uri", "") or "") if web else ("", ""))
+    uris = list(dict.fromkeys(uri for _, uri in pages if uri))
+    if not uris:
+        return [], []
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(8, len(uris))) as pool:
+        resolved = dict(zip(uris, pool.map(_resolve_grounding_link, uris)))
+
+    sources, number_of_url, number_of_chunk = [], {}, {}
+    for index, (title, uri) in enumerate(pages):
+        if not uri:
+            continue
+        url = resolved.get(uri, uri)
+        if url not in number_of_url:
+            sources.append({"n": len(sources) + 1, "title": title, "url": url})
+            number_of_url[url] = len(sources)
+        number_of_chunk[index] = number_of_url[url]
+
+    citations = []
+    for support in metadata.grounding_supports or []:
+        claim = getattr(getattr(support, "segment", None), "text", "") or ""
+        numbers = sorted({number_of_chunk[i] for i in (getattr(support, "grounding_chunk_indices", None) or [])
+                          if i in number_of_chunk})
+        if claim and numbers:
+            citations.append({"claim": claim[:300], "sources": numbers})
+    return sources, citations
+
+
 def web_search_impl(project_name: str, agent_id: str, query: str) -> dict:
     """Real Gemini-grounded web search (same mechanism coordinator.py uses for
     the voice assistant's own google_search tool), exposed as a normal
     function tool so agents can combine it with write_file/arxiv_search/etc.
     in one function-calling loop (Gemini won't let a single call mix its
     built-in google_search grounding tool with custom function declarations,
-    so this wraps grounding in its own inner call instead)."""
+    so this wraps grounding in its own inner call instead).
+
+    The pages the answer drew on come back with it. Returning only the summary left
+    agents with nothing real to cite, and pipeline 9's lead made links up instead."""
     if not GEMINI_API_KEY:
         return {"status": "error", "action": "web_search", "error": "GEMINI_API_KEY not configured."}
     try:
@@ -293,7 +388,12 @@ def web_search_impl(project_name: str, agent_id: str, query: str) -> dict:
             system_instruction="Search the web for the query and return a factual, concise summary with sources if available.",
         )
         resp = client.models.generate_content(model="gemini-2.5-flash", contents=query, config=config)
-        return {"status": "ok", "action": "web_search", "query": query, "summary": resp.text or ""}
+        sources, citations = _grounding_sources(resp)
+        result = {"status": "ok", "action": "web_search", "query": query, "summary": resp.text or "",
+                  "sources": sources, "citations": citations}
+        if not sources:
+            result["note"] = "This search returned no source links. Don't cite a link for it; name the search instead."
+        return result
     except Exception as e:
         return {"status": "error", "action": "web_search", "error": str(e)}
 
@@ -408,10 +508,22 @@ _TOKEN_RULES = [
     # have nothing to do with the web, so a web word is required too. Word
     # forms are listed out rather than stemmed: `web_browsing` has to land
     # here deterministically instead of falling through to a model call.
+    # Looking at an actual site — scraping it, screenshotting it, analysing its UI —
+    # is the website inspector, never web search. Before this rule `web_scraper`
+    # resolved to google_search: agents believed they could read a page and got
+    # search summaries instead. It sits ahead of google_search for that reason.
+    ("inspect_website", [
+        {"web", "website", "websites", "site", "sites", "page", "pages", "webpage", "webpages",
+         "url", "urls", "html", "css", "ui", "ux", "visual", "design", "browser", "landing"},
+        {"scrape", "scraper", "scrapers", "scraping", "crawl", "crawler", "crawling",
+         "inspect", "inspector", "inspection", "screenshot", "screenshots", "capture",
+         "analysis", "analyzer", "analyser", "audit", "extraction", "extractor",
+         "testing", "tester", "review"},
+    ]),
     ("google_search", [
         {"web", "internet", "google", "online", "www"},
         {"search", "searches", "searching", "browse", "browsing", "browser",
-         "query", "queries", "lookup", "retrieval", "scrape", "scraper", "scraping", "crawl"},
+         "query", "queries", "lookup", "retrieval"},
     ]),
 ]
 

@@ -15,11 +15,11 @@ from google.genai import types
 from dotenv import load_dotenv
 
 from agents.tool_executor import get_tools_for_execution_agent, run_tool
+from agents.user_brief import user_brief_block
+from agents import tool_review, tool_requests
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-MAX_TOOL_TURNS = 6
 
 # Keys, in priority order, that a tool result might carry the "thing that got
 # created" under. Generic on purpose — any current or future tool (Docs,
@@ -55,6 +55,7 @@ async def run_execution_agent(
     gate_redirect_note: str | None = None,
     event_logger=None,                  # NEW
     project_name: str = "Default Project",
+    user_brief: str | None = None,      # the user's clarified brief, verbatim
 ) -> dict:
     """
     Runs a single execution agent asynchronously.
@@ -72,6 +73,7 @@ async def run_execution_agent(
     declarations, handlers, unavailable = get_tools_for_execution_agent(
         tools_needed, project_name, context=f"{role}: {brief}"[:400]
     )
+    declarations = list(declarations) + [tool_requests.DECLARATION]
 
     unavailable_note = ""
     if unavailable:
@@ -89,6 +91,7 @@ You are a highly specialized {role} agent in the Jarvis multi-agent system.
 YOUR BRIEF:
 {brief}
 
+{user_brief_block(user_brief)}
 APPROVED RESEARCH BLUEPRINT (use this as your source of truth):
 {blueprint_str}
 
@@ -100,6 +103,11 @@ MINIMUM WORD COUNT: {output_spec.get("min_word_count", 0)}
 TOOLS: You have real tools available (write_file, read_file, list_deliverables, and any
 connectors listed below). USE write_file to actually save any code, report, script, or
 document you produce — a deliverable that only exists in your final JSON text is not real work.
+To see what a real website looks like or how it is built — fonts, colours, layout, imagery, calls
+to action — call inspect_website with its URL. web_search only returns what others wrote about it.
+If you need a tool you don't have, or a better one for this job, call request_tool with its name and
+why. The user approves or rejects it on the Commands page and the call returns their answer. Don't
+decide on your own that no tool could help — ask.
 {unavailable_note}
 RULES:
 1. Stay strictly within your brief.
@@ -157,9 +165,13 @@ RULES:
         current_message = "Execute your deliverable now according to your brief and blueprint. Use your tools to do real work, then give your final JSON summary."
 
         final_text = None
-        for turn in range(MAX_TOOL_TURNS):
+        # No cap on tool calls: every tool_review.REVIEW_EVERY rounds of them the user decides.
+        call_log, since_review, stopped_after = [], 0, None
+        chat_config = None   # set once an approved tool request adds a tool mid-run
+        while True:
             response = await loop.run_in_executor(
-                None, lambda m=current_message: chat.send_message(m)
+                None, lambda m=current_message, c=chat_config: (
+                    chat.send_message(m, config=c) if c is not None else chat.send_message(m))
             )
 
             function_calls = response.function_calls
@@ -180,7 +192,19 @@ RULES:
                             "icon": "🛠️"
                         }
                     })
-                result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
+                if fc.name == tool_requests.REQUEST_TOOL_NAME:
+                    result, tools_changed = await tool_requests.handle(
+                        tool_args, agent_config=agent_config, kind="execution", project_name=project_name,
+                        declarations=declarations, handlers=handlers, event_logger=event_logger)
+                    if tools_changed:
+                        chat_config = types.GenerateContentConfig(
+                            system_instruction=system_prompt,
+                            tools=[{"function_declarations": declarations}],
+                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                        )
+                else:
+                    result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
+                call_log.append({"tool": fc.name, "args": tool_args})
                 artifact = _extract_artifact(fc.name, tool_args, result)
                 if artifact:
                     collected_artifacts.append(artifact)
@@ -197,11 +221,23 @@ RULES:
                     )
                 )
             current_message = tool_response_parts
+            # Rounds, not calls: a model often asks for several tools at once, and
+            # counting each one paused an agent after its very first round.
+            since_review += 1
+            if since_review >= tool_review.REVIEW_EVERY:
+                since_review = 0
+                review = await tool_review.checkpoint(agent_id, role, "execution", brief, call_log, event_logger)
+                if review["decision"] != "continue":
+                    stopped_after = len(call_log)
+                    final_text = await tool_review.finish_without_tools(loop, chat, tool_response_parts, review)
+                    break
+                current_message = tool_review.with_review_note(tool_response_parts, review)
 
         if final_text is None:
-            final_text = "{}"
+            final_text = json.dumps({"status": "partial",
+                                     "blocked_reason": "Stopped by the user, and gave no final answer."})
             if event_logger:
-                event_logger({"event_type": "error", "source": agent_id, "data": "Exceeded max tool-call turns without a final answer."})
+                event_logger({"event_type": "error", "source": agent_id, "data": "Stopped by the user, and gave no final answer."})
 
         if event_logger:
             event_logger({
@@ -222,6 +258,8 @@ RULES:
         result = json.loads(cleaned)
         result["agent_id"] = agent_id
         result.setdefault("status", "ok")
+        if stopped_after is not None:
+            result["stopped_by_user_after_tool_calls"] = stopped_after
         if collected_artifacts:
             result["artifacts"] = collected_artifacts
         return result

@@ -32,5 +32,10 @@
     "status": "up",
     "method_id": "http_request",
     "last_updated": "2026-08-31 00:18:52"
+  },
+  "web_scraper": {
+    "status": "up",
+    "method_id": "local_setup",
+    "last_updated": "2026-09-14 00:17:34"
   }
 }

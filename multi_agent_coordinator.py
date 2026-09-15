@@ -9,10 +9,12 @@ import os
 from google import genai
 from google.genai import types
 import db
-from agents.brain import build_agent_plan, finalize_execution_plan
+from agents.brain import build_agent_plan, plan_execution_agents, refresh_cycle_briefs
 from agents.research_agent import run_research_agent
 from agents.execution_agent import run_execution_agent
-from agents.synthesis import run_synthesis_agent, run_master_synthesis
+from agents.synthesis import (run_synthesis_agent, run_master_synthesis, MERGE_FACT_RULES,
+                              DISAGREEMENT_RULES, DISAGREEMENT_SHAPE)
+from agents.links import URL_RE, Evidence, strip_unevidenced_links, cap_for_invented_links
 
 # What a clarified brief means for the agents: it fixes WHAT the user wants, not
 # HOW they are allowed to work. Kept here so every planning call says the same thing.
@@ -23,7 +25,8 @@ BRIEF_USAGE_RULE = (
     "one instead of choosing your own. Attached files live at the paths listed in the brief; open "
     "them when they are relevant."
 )
-from agents.quality_checker import run_quality_checker
+from agents.quality_checker import run_quality_checker, check_research_against_brief
+from agents.user_brief import user_brief_block
 from agents.deployment_agent import run_deployment_agent
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +40,7 @@ async def run_research_phase_for_cycle(
     approved_blueprints: list[dict],
     event_logger=None,
     project_name: str = "Default Project",
+    user_brief: str | None = None,
 ) -> dict:
     """Spawns all research agents for a cycle in parallel and returns their results."""
     if not agents:
@@ -95,7 +99,7 @@ async def run_research_phase_for_cycle(
         if physical_memories:
             combined_mem = "\n\nPHYSICAL PROJECT MEMORY FILES:\n" + "\n".join(physical_memories) + "\n\n" + combined_mem
         
-        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context, on_chunk_callback=on_chunk, event_logger=event_logger, project_name=project_name))
+        tasks.append(run_research_agent(agent_config, combined_mem or None, prior_context, on_chunk_callback=on_chunk, event_logger=event_logger, project_name=project_name, user_brief=user_brief))
 
     print(f"[Multi-Agent] Spawning {len(tasks)} research agents in parallel...")
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -126,12 +130,217 @@ async def run_research_phase_for_cycle(
     }
 
 
+def pick_cycle(updated_cycles, cycle_id) -> dict | None:
+    """The re-planned cycle, matched by its id.
+
+    The Brain is asked to re-plan one cycle but sometimes returns the whole plan.
+    Taking the first cycle then replaced cycle 2 with cycle 1's team. A lone cycle
+    with a different id is still accepted, since that is the one that was asked for.
+    """
+    cycles = [c for c in (updated_cycles or []) if isinstance(c, dict)]
+    match = next((c for c in cycles if str(c.get("cycle_id")) == str(cycle_id)), None)
+    if match is None and len(cycles) == 1:
+        match = cycles[0]
+    return match
+
+
+# Starts the note added to a brief when a conflict reruns its agent. A later conflict
+# replaces the note instead of stacking another one under it.
+CONFLICT_NOTE_MARKER = "\n\nYOUR LAST FINDINGS CONFLICTED WITH ANOTHER AGENT'S. "
+
+
+def rebrief_for_conflict(cycle: dict, updated_cycle: dict | None, involved_ids, conflict_note) -> list[str]:
+    """Re-brief only the agents a conflict involves, and return their ids.
+
+    The team never changes: a conflict about customer reviews used to let the Brain
+    re-plan the whole cycle, which dropped the ad and sales-process agents the user
+    asked for and added agents that duplicated a later cycle. Agents the conflict
+    names take their new brief from the Brain's re-plan when it has one for them,
+    otherwise their old brief plus the conflict. If the conflict names no agent in
+    this cycle, everyone runs again.
+    """
+    roster = [cycle["lead_specialist"]] + list(cycle.get("advisory_agents") or [])
+    wanted = set(involved_ids or [])
+    rerun = [a.get("agent_id") for a in roster if a.get("agent_id") in wanted]
+    if not rerun:
+        rerun = [a.get("agent_id") for a in roster]
+
+    proposed = []
+    if isinstance(updated_cycle, dict):
+        proposed = [updated_cycle.get("lead_specialist")] + list(updated_cycle.get("advisory_agents") or [])
+        proposed = [a for a in proposed if isinstance(a, dict)]
+
+    note = str(conflict_note)[:1500]
+    for agent in roster:
+        if agent.get("agent_id") not in rerun:
+            continue
+        replacement = (
+            next((a for a in proposed if a.get("agent_id") == agent.get("agent_id")), None)
+            or next((a for a in proposed if a.get("role") and a.get("role") == agent.get("role")), None)
+        )
+        if replacement and replacement.get("brief"):
+            agent["brief"] = replacement["brief"]
+        else:
+            # Build on the brief without any earlier conflict's note. The brief is saved
+            # in the plan, so notes used to pile up there with every conflict.
+            base = str(agent.get("brief", "")).split(CONFLICT_NOTE_MARKER, 1)[0]
+            agent["brief"] = f"{base}{CONFLICT_NOTE_MARKER}Your earlier findings are kept, so only settle this: {note}"
+    return rerun
+
+
+def merge_with_previous(new: dict, old: dict | None) -> dict:
+    """A rerun adds to what an agent found before; it never erases it.
+
+    In pipeline 8 the lead reran only to settle one UK market figure, and its UK-only
+    answer replaced the five-country comparison it had already done. Earlier findings
+    stay, the rerun's findings are laid over them, and sources are combined. If the
+    rerun itself failed, the earlier result stands and the failure is noted on it.
+    """
+    if not isinstance(new, dict) or not isinstance(old, dict) or old.get("status") != "ok":
+        return new
+    old_findings = old.get("findings") if isinstance(old.get("findings"), dict) else {}
+    if not old_findings:
+        return new
+    if new.get("status") != "ok":
+        kept = dict(old)
+        kept["rerun_problem"] = new.get("blocked_reason") or new.get("error") or "The rerun gave no answer."
+        return kept
+    new_findings = new.get("findings") if isinstance(new.get("findings"), dict) else {}
+    merged = dict(new)
+    merged["findings"] = {**old_findings, **new_findings}
+    for key in ("sources", "unverified_sources"):
+        combined = []
+        for s in list(old.get(key) or []) + list(new.get(key) or []):
+            if s not in combined:
+                combined.append(s)
+        if combined:
+            merged[key] = combined
+    return merged
+
+
+def keep_previous_file(file_path: str, label: str) -> str | None:
+    """Move an existing file aside as `<name>_<label>N` with the first free N.
+
+    Saves used to reuse a number, so a rerun after a restart replaced the attempt
+    file from the run before it.
+    """
+    if not os.path.exists(file_path):
+        return None
+    root, ext = os.path.splitext(file_path)
+    n = 1
+    while os.path.exists(f"{root}_{label}{n}{ext}"):
+        n += 1
+    target = f"{root}_{label}{n}{ext}"
+    os.replace(file_path, target)
+    return target
+
+
+def _agents_dir(project_name: str) -> str:
+    return os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Agents")
+
+
+# Saved with each agent's research: the brief it was done on.
+RESEARCHED_BRIEF_KEY = "researched_brief"
+
+
+def without_invented_links(result: dict) -> dict:
+    """Research saved before links were checked still carries the links its agent made up.
+
+    Pipeline 9's Cycle 1 files do. Resuming must not hand those to the lead again.
+    """
+    evidence = Evidence([str(s) for s in result.get("sources") or []]
+                        + [str(u) for u in result.get("evidence_links") or []])
+    rest = {k: v for k, v in result.items() if k not in ("sources", "evidence_links", "recommended_tools")}
+    cleaned, removed = strip_unevidenced_links(rest, evidence)
+    result.update(cleaned)
+    return cap_for_invented_links(result, removed)
+
+
+def load_saved_cycle_research(plan_id: str, cycle: dict, project_name: str) -> dict:
+    """Research this cycle's agents saved before a restart, still valid for the current plan.
+
+    Resuming a cycle nobody approved used to run all of its research again. A saved
+    result is reused only if it finished successfully and was done on the brief the
+    agent has now. That used to be judged by the agent plan file's age, but the plan
+    is saved for changes that leave most briefs alone — a conflict re-briefs only the
+    agents involved — so a restart after a conflict re-ran agents whose findings still
+    stood. Files saved before the brief was recorded fall back to that age check.
+    """
+    agents_dir = _agents_dir(project_name)
+    plan_file = os.path.join(agents_dir, f"agent_plan_{plan_id}.md")
+    plan_time = os.path.getmtime(plan_file) if os.path.exists(plan_file) else 0
+    found = {}
+    for agent in [cycle.get("lead_specialist")] + list(cycle.get("advisory_agents") or []):
+        agent_id = (agent or {}).get("agent_id")
+        path = os.path.join(agents_dir, f"research_{agent_id}_{plan_id}.md")
+        if not agent_id or not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = f.read().split("## Full JSON Payload\n```json\n", 1)[1].rsplit("\n```", 1)[0]
+            result = json.loads(payload)
+        except (IndexError, ValueError, OSError):
+            continue
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            continue
+        if RESEARCHED_BRIEF_KEY in result:
+            researched = str(result.pop(RESEARCHED_BRIEF_KEY) or "").strip()
+            if researched != str(agent.get("brief") or "").strip():
+                continue
+        elif os.path.getmtime(path) < plan_time:
+            continue
+        found[agent_id] = without_invented_links(result)
+    return found
+
+
+def merge_review_sources(final: dict, lead_result: dict, advisory_results: list[dict],
+                         extra_evidence=None) -> dict:
+    """A lead's review cites only its agents' real sources, and only links their tools returned.
+
+    `extra_evidence` is research the user already approved in earlier cycles: its
+    links were checked when they were found.
+    """
+    known, evidence_texts = [], list(extra_evidence or [])
+    for r in [lead_result] + list(advisory_results or []):
+        if isinstance(r, dict):
+            for s in r.get("sources") or []:
+                if s not in known:
+                    known.append(s)
+            evidence_texts += [str(u) for u in r.get("evidence_links") or []]
+    evidence = Evidence(known + evidence_texts)
+
+    invented_links, unverified = [], []
+    for s in final.get("sources") or []:
+        if s in known:
+            continue
+        urls = URL_RE.findall(str(s))
+        if urls and all(evidence.has(u) for u in urls):
+            known.append(s)          # a real link one of its agents' tools returned
+        elif urls:
+            invented_links.append(s)
+        else:
+            unverified.append(s)
+    final["sources"] = known
+    if unverified:
+        final["unverified_sources"] = list(final.get("unverified_sources") or []) + unverified
+
+    # The findings, disagreements and notes too: a link none of its agents' tools returned
+    # is taken out, however the review came to write it.
+    rest = {k: v for k, v in final.items() if k not in ("sources", "recommended_tools")}
+    cleaned, removed = strip_unevidenced_links(rest, evidence)
+    final.update(cleaned)
+    cap_for_invented_links(final, invented_links + removed)
+    final["evidence_links"] = evidence.urls
+    return final
+
+
 async def run_lead_review(
     lead_config: dict,
     lead_result: dict,
     advisory_results: list[dict],
     approved_blueprints: list[dict],
     event_logger=None,                  # NEW
+    user_brief: str | None = None,
 ) -> list[dict]:
     """
     Pass 2 — Lead Specialist LLM call reviewing advisory findings and merging them.
@@ -149,6 +358,7 @@ Your task is to review the research findings from your advisory agents and conso
 YOUR BRIEF:
 {lead_brief}
 
+{user_brief_block(user_brief)}
 YOUR INITIAL FINDINGS:
 {json.dumps(lead_result.get("findings", lead_result), indent=2)}
 
@@ -158,7 +368,17 @@ ADVISORY FINDINGS TO REVIEW:
 APPROVED BLUEPRINTS FROM PRIOR CYCLES (for context):
 {json.dumps(approved_blueprints, indent=2)}
 
-Produce your final authoritative findings and aggregate any tool recommendations. Output a single JSON object. Do not overwrite your core domain focus, but enhance it with the advisory insights.
+Produce the cycle's final findings from ALL of the findings above, and aggregate any tool recommendations. Output a single JSON object.
+You write the final answer, but your initial findings carry no more weight than any advisor's: being the lead decides who writes, not whose facts win.
+
+RULES FOR MERGING:
+{MERGE_FACT_RULES}
+- If an advisor studied a different subject than you did (for example a different company), do not blend their findings into yours as if they were about your subject. Keep them apart and say so under "disagreements".
+
+RULES FOR DISAGREEMENTS:
+{DISAGREEMENT_RULES}
+- Every candidate, item or recommendation an advisor backed that your final findings leave out goes under "not_adopted", with the evidence that ruled it out. Never drop one silently.
+
 The output format must be JSON matching your original format:
 {{
   "agent_id": "{lead_id}",
@@ -168,7 +388,9 @@ The output format must be JSON matching your original format:
     "key": "value",
     ...
   }},
-  "sources": ["source1", "source2"],
+  "sources": ["web_search: a query an agent ran", "https://a-link-an-agent's-tool-returned"],
+  "disagreements": [{DISAGREEMENT_SHAPE}],
+  "not_adopted": [{{"item": "what was left out", "proposed_by": "agent_id", "reason": "the evidence that ruled it out"}}],
   "recommendation": "one sentence action recommendation",
   "recommended_tools": [
     {{
@@ -251,6 +473,8 @@ The output format must be JSON matching your original format:
 
         final_lead_result = json.loads(response.text)
         final_lead_result["agent_id"] = lead_id
+        merge_review_sources(final_lead_result, lead_result, advisory_results,
+                             extra_evidence=[approved_blueprints])
         return [final_lead_result]
     except Exception as e:
         print(f"[Lead Review] Error parsing Lead review output: {e}")
@@ -312,6 +536,7 @@ async def run_execution_phase(
     agent_ids_to_run: list[str] | None = None,
     event_logger=None,
     project_name: str = "Default Project",
+    user_brief: str | None = None,
 ) -> dict:
     """Spawns all execution agents in parallel."""
     execution_agents = agent_plan.get("execution_agents", [])
@@ -332,7 +557,7 @@ async def run_execution_phase(
             event_logger({"event_type": "running", "agent_id": agent_id})
 
     tasks = [
-        run_execution_agent(cfg, blueprint, gate_redirect_note, event_logger=event_logger, project_name=project_name)
+        run_execution_agent(cfg, blueprint, gate_redirect_note, event_logger=event_logger, project_name=project_name, user_brief=user_brief)
         for cfg in execution_agents
     ]
 
@@ -422,15 +647,22 @@ def load_apis_mcps_file(plan_id: str, project_name: str = "Default Project") -> 
             print(f"[load_apis_mcps_file] Error reading {file_path}: {e}")
     return {"brain": [], "agents": []}
 
-def save_research_findings_file(plan_id: str, agent_id: str, findings: dict, project_name: str = "Default Project"):
+def save_research_findings_file(plan_id: str, agent_id: str, findings: dict, project_name: str = "Default Project",
+                                attempt: int = 0, brief: str | None = None):
     if not plan_id or not agent_id:
         return
     dir_path = os.path.join(BASE_DIR, "Let Jarvis Handle It", project_name, "Implementation plan", "Agents")
     os.makedirs(dir_path, exist_ok=True)
     file_path = os.path.join(dir_path, f"research_{agent_id}_{plan_id}.md")
-    
+    # A rerun — in this run or after a restart — keeps the agent's id, so it used to
+    # overwrite what the agent found before. Keep every earlier attempt beside the new one.
+    keep_previous_file(file_path, "attempt")
+
     content = f"# Research Findings - Agent ID: {agent_id} (Plan ID: {plan_id})\n"
     content += f"**Role:** {findings.get('role', 'Researcher')}\n"
+    content += f"**Status:** {findings.get('status', 'ok')}\n"
+    if findings.get("blocked_reason") or findings.get("error"):
+        content += f"**Stopped because:** {findings.get('blocked_reason') or findings.get('error')}\n"
     content += f"**Confidence:** {findings.get('confidence', 'N/A')}\n\n"
     content += "## Findings Details\n"
     
@@ -448,8 +680,21 @@ def save_research_findings_file(plan_id: str, agent_id: str, findings: dict, pro
     for src in findings.get('sources', []):
         content += f"- {src}\n"
     content += "\n"
-    
-    content += "## Full JSON Payload\n```json\n" + json.dumps(findings, indent=2) + "\n```\n"
+
+    if findings.get("unverified_sources"):
+        content += "## Unverified sources (claimed, but no tool call this run produced them)\n"
+        for src in findings["unverified_sources"]:
+            content += f"- {src}\n"
+        content += "\n"
+
+    if findings.get("invented_links_removed"):
+        content += ("## Links removed\n"
+                    f"{findings['invented_links_removed']} link(s) the agent wrote were taken out: "
+                    "none of its tools returned them.\n\n")
+
+    # The brief this research was done on, so a restart can tell whether it still stands.
+    saved = findings if brief is None else {**findings, RESEARCHED_BRIEF_KEY: brief}
+    content += "## Full JSON Payload\n```json\n" + json.dumps(saved, indent=2) + "\n```\n"
     
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -670,6 +915,11 @@ async def run_full_pipeline(
             f"that agent actually needs, and repeat this rule to them.]"
         )
 
+    # What every agent is shown as the user's own words. `task` IS the clarified
+    # brief when the pipeline came through the intake gate, so agents read it
+    # verbatim instead of only the Brain's one-line paraphrase of their slice.
+    user_brief = task
+
     conn = db.get_connection(DB_PATH)
     retry_history = []
 
@@ -734,7 +984,8 @@ async def run_full_pipeline(
                 elif existing_plan.get("phase") in ("execution", "qa", "deploy", "complete"):
                     # Pre-dates the approval record, but the plan is past research, so
                     # every cycle blueprint on disk did clear its gate.
-                    reconstructable = list(range(1, 10))
+                    # No ceiling on cycles: the loop below stops at the first missing file.
+                    reconstructable = list(range(1, 1000))
                 else:
                     reconstructable = []
 
@@ -796,8 +1047,9 @@ async def run_full_pipeline(
                 save_apis_mcps_file(plan_id, {"brain": init_tools, "agents": []}, project_name)
 
         cycles = agent_plan.get("cycles", [])
-        if len(cycles) < 3:
-            return {"error": "Brain must plan at least 3 research cycles"}
+        # As many cycles as the task needs — one is enough, and there is no ceiling.
+        if not cycles:
+            return {"error": "Brain planned no research cycles"}
 
         # Phase 2: Ordered research cycle loop
         for cycle in cycles:
@@ -821,7 +1073,31 @@ async def run_full_pipeline(
             if event_logger:
                 event_logger({"event_type": "narrative", "data": {"phase": "research", "message": f"Starting Cycle {cycle_id}: {domain}...", "icon": "🔄"}})
 
+            # Resuming a cycle nobody approved: reuse the research its agents saved before
+            # the restart, and move its old blueprint aside so pages don't show a stale one
+            # as this cycle's result while it runs.
+            resumed_research = load_saved_cycle_research(plan_id, cycle, project_name) if existing_plan else {}
+            keep_previous_file(os.path.join(_agents_dir(project_name), f"cycle_blueprint_{cycle_id}_{plan_id}.md"), "previous")
+            if resumed_research and event_logger:
+                event_logger({"event_type": "narrative", "data": {
+                    "phase": "research", "icon": "♻️",
+                    "message": f"Reusing research {len(resumed_research)} agent(s) saved before the restart for Cycle {cycle_id}.",
+                }})
+
+            # The flow: before a cycle starts, its briefs are rewritten from what the approved
+            # cycles before it actually found, instead of the Brain's guesses from before any
+            # research existed. Not when research is being reused: those briefs were refreshed
+            # before that research ran, and rewriting them again would leave the reused
+            # findings answering briefs the plan no longer shows.
+            if approved_blueprints and not resumed_research:
+                refresh_cycle_briefs(planning_task, cycle, approved_blueprints, event_logger=event_logger)
+                save_agent_plan_file(plan_id, agent_plan, project_name)
+
             retry_count = 0
+            # Findings kept from agents a conflict did not involve, so they don't run again.
+            kept_results: dict = dict(resumed_research)
+            # What rerun agents had found before, added back to what they find next.
+            previous_results: dict = {}
 
             while retry_count < MAX_RETRIES:
                 if event_logger:
@@ -832,16 +1108,30 @@ async def run_full_pipeline(
                 
                 # 2a: Spawn Lead + Advisory agents in parallel (Pass 1)
                 all_agents = [cycle["lead_specialist"]] + cycle.get("advisory_agents", [])
+                agents_to_run = [a for a in all_agents if a.get("agent_id") not in kept_results]
                 research_output = await run_research_phase_for_cycle(
-                    all_agents, conn, agent_plan.get("task_type", "research"),
+                    agents_to_run, conn, agent_plan.get("task_type", "research"),
                     approved_blueprints=approved_blueprints, event_logger=event_logger,
-                    project_name=project_name
+                    project_name=project_name, user_brief=user_brief
                 )
+                new_results = [
+                    merge_with_previous(r, previous_results.get(r.get("agent_id")))
+                    for r in research_output.get("agent_results", [])
+                ]
+                previous_results = {}
+                results_by_id = dict(kept_results)
+                results_by_id.update({r.get("agent_id"): r for r in new_results})
+                research_output["agent_results"] = [
+                    results_by_id[a["agent_id"]] for a in all_agents if a.get("agent_id") in results_by_id
+                ]
                 
                 # Save each research agent's findings and save structured memory
-                for r in research_output.get("agent_results", []):
+                briefs = {a.get("agent_id"): a.get("brief", "") for a in all_agents}
+                for r in new_results:
+                    # Partial and failed agents are saved too: what they found, and why they stopped.
+                    save_research_findings_file(plan_id, r.get("agent_id"), r, project_name, attempt=retry_count,
+                                                brief=briefs.get(r.get("agent_id")))
                     if r.get("status") == "ok":
-                        save_research_findings_file(plan_id, r.get("agent_id"), r, project_name)
                         
                         # Save high value memory
                         if "high_value_memory" in r and r["high_value_memory"]:
@@ -865,7 +1155,8 @@ async def run_full_pipeline(
                                    if r["agent_id"] == lead_config["agent_id"])
 
                 authoritative_output = await run_lead_review(
-                    lead_config, lead_result, advisory_results, approved_blueprints, event_logger=event_logger
+                    lead_config, lead_result, advisory_results, approved_blueprints, event_logger=event_logger,
+                    user_brief=user_brief
                 )
                 
                 # Extract and merge tools from authoritative_output into apis_mcps.json
@@ -898,7 +1189,12 @@ async def run_full_pipeline(
                 if event_logger:
                     event_logger({"event_type": "narrative", "data": {"phase": "synthesis", "message": f"Synthesizing Cycle {cycle_id} research into blueprint...", "icon": "🔬"}})
 
-                synthesis_result = await run_synthesis_agent(authoritative_output, event_logger=event_logger)
+                # Every agent's own findings go in beside the lead's review, so what the review
+                # dropped or overrode can be seen — not only what it chose to keep.
+                synthesis_result = await run_synthesis_agent(
+                    authoritative_output, event_logger=event_logger,
+                    agent_results=research_output.get("agent_results", []),
+                )
 
                 if synthesis_result.get("has_conflicts"):
                     # Route conflicts to Brain for adjudication
@@ -907,23 +1203,63 @@ async def run_full_pipeline(
                     retry_history.append(f"Cycle {cycle_id} conflict retry {retry_count + 1} due to findings contradictions.")
                     if event_logger:
                         event_logger({"event_type": "conflict", "source": "synthesis", "data": synthesis_result})
-                    agent_plan_update = build_agent_plan(
-                        planning_task, redirect_note=f"Conflicts in cycle {cycle_id}: {conflict_note}",
-                        cycle_id=cycle_id, approved_blueprints=approved_blueprints, event_logger=event_logger
-                    )
-                    updated_cycles = agent_plan_update.get("cycles", [])
-                    if updated_cycles:
-                        cycle.update(updated_cycles[0])
+                    involved = [a for c in synthesis_result["conflicts"] for a in (c.get("agents_involved") or [])]
+                    updated_cycle = None
+                    try:
+                        agent_plan_update = build_agent_plan(
+                            planning_task,
+                            redirect_note=(
+                                f"Conflicts in cycle {cycle_id}: {conflict_note}\n\n"
+                                "Keep this cycle's team exactly as it is: the same agent_ids and roles. "
+                                "Only rewrite the briefs of the agents involved, so they can settle these conflicts. "
+                                "Their earlier findings are kept, so each brief only needs to settle its conflict."
+                            ),
+                            cycle_id=cycle_id, approved_blueprints=approved_blueprints, event_logger=event_logger
+                        )
+                        updated_cycle = pick_cycle(agent_plan_update.get("cycles", []), cycle_id)
+                    except Exception as e:
+                        print(f"[Pipeline] Re-briefing for the conflict failed; rerunning with the conflict as a note: {e}")
+                    rerun_ids = rebrief_for_conflict(cycle, updated_cycle, involved, conflict_note)
+                    # Agents that failed or stopped short get another go too, rather than
+                    # their empty result being kept as if it were finished work.
+                    rerun_ids += [aid for aid, r in results_by_id.items()
+                                  if r.get("status") != "ok" and aid not in rerun_ids]
+                    previous_results = {aid: results_by_id[aid] for aid in rerun_ids if aid in results_by_id}
+                    kept_results = {aid: r for aid, r in results_by_id.items() if aid not in rerun_ids}
+                    save_agent_plan_file(plan_id, agent_plan, project_name)
+                    if event_logger:
+                        event_logger({"event_type": "narrative", "data": {
+                            "phase": "research", "icon": "🔁",
+                            "message": f"Cycle {cycle_id} conflict: re-checking with {', '.join(rerun_ids)}; "
+                                       f"keeping the other agents' findings.",
+                        }})
                     retry_count += 1
                     continue
 
                 # Save cycle blueprint
                 save_cycle_blueprint_file(plan_id, cycle_id, synthesis_result.get("blueprint", {}), project_name)
 
+                # Check the research against the user's own brief before asking for
+                # approval, so problems are in front of the user when they decide.
+                # Advisory only: it informs the gate, it never blocks or re-runs.
+                brief_check = await check_research_against_brief(
+                    user_brief, cycle, synthesis_result.get("blueprint", {}),
+                    research_output.get("agent_results", []),
+                    plan_cycles=cycles,
+                )
+                problem_count = len(brief_check["violations"]) + len(brief_check["failed_agents"])
+                if event_logger and problem_count:
+                    event_logger({"event_type": "narrative", "data": {"phase": "gate", "message": f"Brief check found {problem_count} problem(s) in Cycle {cycle_id} — review them before approving.", "icon": "⚠️"}})
+
+                # Disagreements the evidence didn't settle are the user's to decide, so say so.
+                unresolved = synthesis_result.get("unresolved_disagreements") or 0
+                if event_logger and unresolved:
+                    event_logger({"event_type": "narrative", "data": {"phase": "gate", "message": f"{unresolved} disagreement(s) in Cycle {cycle_id} were not settled by evidence — open the Cycle {cycle_id} blueprint and decide them before approving.", "icon": "⚖️"}})
+
                 # 2c: Per-cycle approval gate
                 print(f"[Pipeline] Waiting for human approval of Cycle {cycle_id} research...")
                 if event_logger:
-                    event_logger({"event_type": "gate_waiting", "source": f"cycle_{cycle_id}_research", "data": cycle})
+                    event_logger({"event_type": "gate_waiting", "source": f"cycle_{cycle_id}_research", "data": {"cycle": cycle, "brief_check": brief_check, "unresolved_disagreements": unresolved}})
                     event_logger({"event_type": "narrative", "data": {"phase": "gate", "message": f"Waiting for your approval of Cycle {cycle_id} research...", "icon": "🚧"}})
 
                 gate_result = await gate_approve_fn(
@@ -932,6 +1268,8 @@ async def run_full_pipeline(
                         "cycle": cycle,
                         "synthesis": synthesis_result,
                         "approved_so_far": approved_blueprints,
+                        "brief_check": brief_check,
+                        "unresolved_disagreements": unresolved,
                     }
                 )
 
@@ -974,11 +1312,9 @@ async def run_full_pipeline(
                         
                         # Update only this cycle's agents (match by cycle_id)
                         updated_cycles = agent_plan_update.get("cycles", [])
-                        matching_cycle = next((c for c in updated_cycles if c.get("cycle_id") == cycle_id), None)
+                        matching_cycle = pick_cycle(updated_cycles, cycle_id)
                         if matching_cycle:
                             cycle.update(matching_cycle)
-                        elif updated_cycles:
-                            cycle.update(updated_cycles[0])
                         
                         save_agent_plan_file(plan_id, agent_plan, project_name)
                         if event_logger:
@@ -990,6 +1326,13 @@ async def run_full_pipeline(
                             push_message("system", f"Re-planning failed: {e}. Retrying cycle with existing instructions.")
                         except ImportError:
                             pass
+                    kept_results = {}  # a rejected cycle is re-planned, so all of it runs again
+                    previous_results = {}
+                    # Move the rejected research aside too. A brief can come through the re-plan
+                    # unchanged (or the re-plan can fail), and a restart must not reuse it.
+                    for agent in all_agents:
+                        keep_previous_file(os.path.join(_agents_dir(project_name),
+                                                        f"research_{agent.get('agent_id')}_{plan_id}.md"), "attempt")
                     retry_count += 1
 
             if retry_count >= MAX_RETRIES:
@@ -1048,14 +1391,16 @@ async def run_full_pipeline(
         skip_exec_gate = "execution_blueprint" in completed_stages
 
         if not skip_exec_gate:
-            # Phase 4: Finalize execution agents' tools_needed against the NOW-COMPLETE
-            # research, instead of trusting Brain's pre-research Phase-1 guess. Only runs
-            # once (guarded the same way the gate below is) — a resume after this gate was
+            # Phase 4: Plan the execution agents from the NOW-COMPLETE research. Phase 1's
+            # roster was only a draft written before any research existed. Only runs once
+            # (guarded the same way the gate below is) — a resume after this gate was
             # already approved should never silently rewrite an already-reviewed plan.
-            print("[Pipeline] Phase 4: Finalizing execution plan against completed research...")
-            agent_plan["execution_agents"] = finalize_execution_plan(
-                planning_task, agent_plan.get("execution_agents", []), master_blueprint, event_logger=event_logger
+            print("[Pipeline] Phase 4: Planning execution agents from completed research...")
+            agent_plan["execution_agents"] = plan_execution_agents(
+                planning_task, agent_plan.get("execution_agents", []), master_blueprint,
+                user_brief=user_brief, event_logger=event_logger
             )
+            agent_plan["execution_plan_final"] = True
             save_agent_plan_file(plan_id, agent_plan, project_name)
             if event_logger:
                 event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
@@ -1081,10 +1426,14 @@ async def run_full_pipeline(
                 retry_history.append(f"Execution Blueprint rejection retry {exec_retry + 1}. Feedback: {redirect_note}")
                 if event_logger:
                     event_logger({"event_type": "gate_resolved", "source": "execution_blueprint", "data": gate2})
-                agent_plan = build_agent_plan(
-                    planning_task, redirect_note=redirect_note, approved_blueprints=approved_blueprints,
-                    rejected_steps=rejected_steps
+                # Re-plan execution only. This used to rebuild the whole plan, replacing
+                # the research cycles the user had already approved.
+                agent_plan["execution_agents"] = plan_execution_agents(
+                    planning_task, agent_plan.get("execution_agents", []), master_blueprint,
+                    user_brief=user_brief, redirect_note=redirect_note, rejected_steps=rejected_steps,
+                    event_logger=event_logger
                 )
+                agent_plan["execution_plan_final"] = True
                 save_agent_plan_file(plan_id, agent_plan, project_name)
                 if event_logger:
                     event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
@@ -1202,7 +1551,7 @@ async def run_full_pipeline(
             if event_logger:
                 event_logger({"event_type": "narrative", "data": {"phase": "execution", "message": "Execution agents producing deliverables...", "icon": "⚡"}})
 
-            exec_output = await run_execution_phase(agent_plan, master_blueprint, event_logger=event_logger, project_name=project_name)
+            exec_output = await run_execution_phase(agent_plan, master_blueprint, event_logger=event_logger, project_name=project_name, user_brief=user_brief)
             exec_results = exec_output.get("agent_results", [])
             for r in exec_results:
                 if r.get("status") == "ok":
@@ -1211,7 +1560,7 @@ async def run_full_pipeline(
             if event_logger:
                 event_logger({"event_type": "narrative", "data": {"phase": "qa", "message": "Quality checker validating agent outputs...", "icon": "✅"}})
 
-            qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint)
+            qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint, user_brief=user_brief)
 
             qa_retry = 0
             while not qa_result["all_passed"] and qa_retry < MAX_RETRIES:
@@ -1223,14 +1572,15 @@ async def run_full_pipeline(
                 
                 retry_history.append(f"QA verification failure retry {qa_retry + 1} for agents {failed_ids}.")
                 exec_output = await run_execution_phase(
-                    agent_plan, master_blueprint, agent_ids_to_run=failed_ids, event_logger=event_logger, project_name=project_name
+                    agent_plan, master_blueprint, agent_ids_to_run=failed_ids, event_logger=event_logger, project_name=project_name,
+                    user_brief=user_brief
                 )
                 retry_map = {r["agent_id"]: r for r in exec_output["agent_results"]}
                 exec_results = [retry_map.get(r["agent_id"], r) for r in exec_results]
                 for r in exec_results:
                     if r.get("status") == "ok":
                         save_execution_output_file(plan_id, r.get("agent_id"), r, project_name)
-                qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint)
+                qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint, user_brief=user_brief)
                 qa_retry += 1
 
             if not qa_result["all_passed"]:
@@ -1286,7 +1636,7 @@ async def run_full_pipeline(
                 exec_output = await run_execution_phase(
                     agent_plan, master_blueprint,
                     agent_ids_to_run=rejected_ids, gate_redirect_note=redirect_note, event_logger=event_logger,
-                    project_name=project_name
+                    project_name=project_name, user_brief=user_brief
                 )
                 retry_map = {r["agent_id"]: r for r in exec_output["agent_results"]}
                 exec_results = [retry_map.get(r["agent_id"], r) for r in exec_results]

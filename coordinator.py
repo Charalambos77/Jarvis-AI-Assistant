@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import time
 import threading
@@ -1160,6 +1161,59 @@ def describe_empty_model_reply(response) -> str:
     return "The model came back empty, Sir. Please try that again."
 
 
+def with_user_words(tool_name: str, args: Any, transcript: str) -> dict:
+    """The model writes start_pipeline's `task` itself, as its own summary.
+
+    Hand the pipeline what the user actually said as well, so the brief records
+    their words rather than only the model's rewrite of them.
+    """
+    args = dict(args or {})
+    words = (transcript or "").strip()
+    if tool_name == "start_pipeline" and words and not words.lower().startswith("tool:"):
+        args.setdefault("user_words", words)
+    return args
+
+
+# "Starting a pipeline to research…" with no start_pipeline call behind it: the
+# model is free to answer in text instead of calling a tool, and when it does the
+# user hears a pipeline is on its way while nothing was created at all. Only
+# first-person starting phrasing counts — "your pipeline is running" is a status
+# answer, and forcing a start on that would open an intake nobody asked for.
+_PIPELINE_START_CLAIM = re.compile(
+    r"\b(?:start(?:ing)?|launch(?:ing)?|kick(?:ing)? off|set(?:ting)? up|"
+    r"initiat(?:e|ing)|creat(?:e|ing)|begin(?:ning)?)\b"
+    r"(?:\s+(?:a|an|the|your|new|multi-agent))*\s+pipeline\b",
+    re.IGNORECASE,
+)
+
+PIPELINE_NUDGE = (
+    "You told the user a pipeline is starting, but you did not call start_pipeline, "
+    "so nothing was created. Call start_pipeline now with the user's request as the task."
+)
+
+
+def claims_pipeline_start(reply: str) -> bool:
+    """True when a reply announces a pipeline start, not when it offers or explains one."""
+    for sentence in re.findall(r"[^.!?]+[.!?]?", reply or ""):
+        if sentence.rstrip().endswith("?"):
+            continue                  # "Shall I start a pipeline for that?" is an offer
+        if _PIPELINE_START_CLAIM.search(sentence):
+            return True
+    return False
+
+
+def forced_tool_config(tool_name: str):
+    """The session's config, but the model must call `tool_name` on this one send."""
+    return _session_config(ACTIVE_SECTION).model_copy(update={
+        "tool_config": types.ToolConfig(
+            include_server_side_tool_invocations=False,
+            function_calling_config=types.FunctionCallingConfig(
+                mode="ANY", allowed_function_names=[tool_name]
+            ),
+        )
+    })
+
+
 def handle_request(transcript: str) -> str:
     conn = db.get_connection(DB_PATH)
     try:
@@ -1193,17 +1247,30 @@ def handle_request(transcript: str) -> str:
         if provider == "gemini":
             chat = get_chat_session()
             current_message = transcript
+            send_config = None            # None: the session's own config
+            called_tools = set()
+            pipeline_nudged = False
             for _ in range(5):
                 try:
-                    response = chat.send_message(current_message)
+                    response = chat.send_message(current_message, config=send_config)
                 except Exception as e:
                     print(f"Error calling Gemini API: {e}")
                     return f"Sorry, I had trouble talking to the Gemini model: {e}"
-                
+                send_config = None
+
                 # Check for function calls
                 function_calls = response.function_calls
                 if not function_calls:
                     reply = (response.text or "").strip()
+                    if not called_tools and not pipeline_nudged and claims_pipeline_start(reply):
+                        # One forced retry. If the model still won't call it, the
+                        # user at least hears the reply it gave rather than silence.
+                        print("[Coordinator] Model announced a pipeline without calling "
+                              "start_pipeline. Asking it to call the tool.")
+                        pipeline_nudged = True
+                        send_config = forced_tool_config("start_pipeline")
+                        current_message = PIPELINE_NUDGE
+                        continue
                     # Never hand back an empty string: /ask pushes whatever it gets
                     # straight into the chat, so "" shows as a blank JARVIS line and
                     # is spoken as silence, telling the user nothing at all.
@@ -1214,9 +1281,10 @@ def handle_request(transcript: str) -> str:
                 for fc in function_calls:
                     fname = fc.name
                     fargs = fc.args
+                    called_tools.add(fname)
                     print(f"[Gemini tool call] {fname}({fargs})")
                     try:
-                        result = perform_tool_action(conn, fname, **fargs)
+                        result = perform_tool_action(conn, fname, **with_user_words(fname, fargs, transcript))
                         for listener in tool_listeners:
                             try:
                                 listener(fname, fargs, result)
@@ -1328,7 +1396,7 @@ def handle_request(transcript: str) -> str:
                     fargs = {}
                 print(f"[Ollama tool call] {fname}({fargs})")
                 try:
-                    result = perform_tool_action(conn, fname, **fargs)
+                    result = perform_tool_action(conn, fname, **with_user_words(fname, fargs, transcript))
                     for listener in tool_listeners:
                         try:
                             listener(fname, fargs, result)
