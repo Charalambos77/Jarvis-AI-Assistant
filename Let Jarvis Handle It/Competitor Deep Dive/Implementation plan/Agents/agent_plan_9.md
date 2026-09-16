@@ -3,13 +3,13 @@
 **Task Type:** research
 
 ## Research Cycles
-### Cycle 1: Country Selection & Market Definition
-- **Goal:** Identify 5 English-speaking countries with medium economies and emerging AI adoption trends.
-- **Lead Specialist:** Economic & AI Trend Analyst (ID: economic_ai_trend_analyst_cycle1_lead)
-  - Brief: Synthesize findings from the 'Geopolitical Data Researcher' and 'AI Adoption Indicator Specialist' for a comprehensive list of potential English-speaking countries. Select the five best countries that meet all criteria: English-speaking, medium economy (GDP between $200B and $1T USD nominal, 2023-2024 estimates), and showing emerging AI adoption within the last 1-2 years. For each selected country, provide clear justification. For any country considered but not selected, explicitly state the reason for exclusion, ensuring to address all countries provided by advisors, including Pakistan and Hong Kong if they were presented.
+### Cycle 1: Market & Country Analysis
+- **Goal:** Identify 5 English-speaking countries that are highly competitive and mature markets for AI solutions and custom software, where businesses are actively competing and demonstrating effective marketing strategies.
+- **Lead Specialist:** Competitive Market Analyst (ID: competitive_market_analyst_cycle1_lead)
+  - Brief: Synthesize insights from the advisory agents to identify and recommend 5 English-speaking countries that are highly competitive and mature markets for B2B AI solutions and custom software agencies. Prioritize countries with a high density of such businesses and demonstrably effective, sophisticated marketing strategies.
 - **Advisory Agents:**
-  - Geopolitical Data Researcher (ID: geopolitical_data_researcher_cycle1_adv_1): Research potential English-speaking countries globally that could fit the 'medium economy' criteria (GDP between $200B and $1T USD nominal, based on 2023-2024 estimates). For each identified country, provide its GDP, a brief source, and indicate if it falls within the specified range. Your research should be broad to cover all plausible candidates, including countries like Pakistan and Hong Kong.
-  - AI Adoption Indicator Specialist (ID: ai_adoption_indicator_specialist_cycle1_adv_2): For a comprehensive list of potential English-speaking countries, research indicators of emerging AI adoption within the last 1-2 years. Look for evidence of national AI strategies, growth in local AI communities/meetups, AI-related websites, public data on AI application usage, and recent news highlighting initial AI integration across business sectors. Provide a summary of AI adoption status and supporting evidence for each country, including countries like Pakistan and Hong Kong.
+  - AI Market Density Researcher (ID: ai_market_density_researcher_cycle1_adv_1): Research and identify English-speaking countries exhibiting a high density and volume of B2B agencies offering AI solutions and custom software. Provide data and qualitative assessments to support the selection of 5 countries that demonstrate a crowded and active competitive landscape in this sector.
+  - Digital Marketing Landscape Analyst (ID: digital_marketing_landscape_analyst_cycle1_adv_2): Analyze the digital marketing ecosystem for B2B AI solution and custom software agencies in various English-speaking countries. Identify regions where these businesses are employing highly effective, diverse, and sophisticated marketing strategies, indicating a mature and competitive marketing landscape.
 
 ### Cycle 2: Competitor Identification
 - **Goal:** Identify 20 'top' competitor agencies per chosen country (100 total) that offer AI solutions and custom software for B2B clients.
@@ -50,35 +50,36 @@
     {
       "cycle_id": 1,
       "depends_on": [],
-      "domain": "Country Selection & Market Definition",
-      "goal": "Identify 5 English-speaking countries with medium economies and emerging AI adoption trends.",
+      "domain": "Market & Country Analysis",
+      "goal": "Identify 5 English-speaking countries that are highly competitive and mature markets for AI solutions and custom software, where businesses are actively competing and demonstrating effective marketing strategies.",
       "lead_specialist": {
-        "agent_id": "economic_ai_trend_analyst_cycle1_lead",
-        "role": "Economic & AI Trend Analyst",
-        "brief": "Synthesize findings from the 'Geopolitical Data Researcher' and 'AI Adoption Indicator Specialist' for a comprehensive list of potential English-speaking countries. Select the five best countries that meet all criteria: English-speaking, medium economy (GDP between $200B and $1T USD nominal, 2023-2024 estimates), and showing emerging AI adoption within the last 1-2 years. For each selected country, provide clear justification. For any country considered but not selected, explicitly state the reason for exclusion, ensuring to address all countries provided by advisors, including Pakistan and Hong Kong if they were presented.",
+        "agent_id": "competitive_market_analyst_cycle1_lead",
+        "role": "Competitive Market Analyst",
+        "brief": "Synthesize insights from the advisory agents to identify and recommend 5 English-speaking countries that are highly competitive and mature markets for B2B AI solutions and custom software agencies. Prioritize countries with a high density of such businesses and demonstrably effective, sophisticated marketing strategies.",
         "tools_needed": [
-          "google_search"
+          "google_search",
+          "search_memory_patterns"
         ],
-        "memory_query": "countries with emerging AI adoption, national AI strategies report, GDP by country list"
+        "memory_query": "highly competitive AI software markets"
       },
       "advisory_agents": [
         {
-          "agent_id": "geopolitical_data_researcher_cycle1_adv_1",
-          "role": "Geopolitical Data Researcher",
-          "brief": "Research potential English-speaking countries globally that could fit the 'medium economy' criteria (GDP between $200B and $1T USD nominal, based on 2023-2024 estimates). For each identified country, provide its GDP, a brief source, and indicate if it falls within the specified range. Your research should be broad to cover all plausible candidates, including countries like Pakistan and Hong Kong.",
+          "agent_id": "ai_market_density_researcher_cycle1_adv_1",
+          "role": "AI Market Density Researcher",
+          "brief": "Research and identify English-speaking countries exhibiting a high density and volume of B2B agencies offering AI solutions and custom software. Provide data and qualitative assessments to support the selection of 5 countries that demonstrate a crowded and active competitive landscape in this sector.",
           "tools_needed": [
             "google_search"
           ],
-          "memory_query": "countries by GDP 2023, official languages of countries"
+          "memory_query": "countries with most AI software companies B2B"
         },
         {
-          "agent_id": "ai_adoption_indicator_specialist_cycle1_adv_2",
-          "role": "AI Adoption Indicator Specialist",
-          "brief": "For a comprehensive list of potential English-speaking countries, research indicators of emerging AI adoption within the last 1-2 years. Look for evidence of national AI strategies, growth in local AI communities/meetups, AI-related websites, public data on AI application usage, and recent news highlighting initial AI integration across business sectors. Provide a summary of AI adoption status and supporting evidence for each country, including countries like Pakistan and Hong Kong.",
+          "agent_id": "digital_marketing_landscape_analyst_cycle1_adv_2",
+          "role": "Digital Marketing Landscape Analyst",
+          "brief": "Analyze the digital marketing ecosystem for B2B AI solution and custom software agencies in various English-speaking countries. Identify regions where these businesses are employing highly effective, diverse, and sophisticated marketing strategies, indicating a mature and competitive marketing landscape.",
           "tools_needed": [
             "google_search"
           ],
-          "memory_query": "emerging AI markets, AI strategy by country, AI startup growth reports"
+          "memory_query": "best digital marketing strategies for B2B AI software"
         }
       ]
     },

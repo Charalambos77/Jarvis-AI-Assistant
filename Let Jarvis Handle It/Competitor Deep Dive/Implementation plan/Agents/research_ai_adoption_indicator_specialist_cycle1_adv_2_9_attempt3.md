@@ -1,0 +1,503 @@
+# Research Findings - Agent ID: ai_adoption_indicator_specialist_cycle1_adv_2 (Plan ID: 9)
+**Role:** AI Adoption Indicator Specialist
+**Status:** ok
+**Confidence:** 0.95
+
+## Findings Details
+### countries_with_emerging_ai_adoption
+[{'country': 'Pakistan', 'ai_adoption_status': 'Emerging AI adoption, with a recent national strategy and significant challenges in infrastructure and skills, despite high individual AI tool usage.', 'evidence': {'national_ai_strategy': "Pakistan approved and unveiled its first 'National Artificial Intelligence Policy – 2025' on July 30, 2025. This very recent and foundational development provides a six-pillar framework for AI innovation, public awareness, secure systems, sectoral transformation, infrastructure, and international partnerships. Earlier efforts like the Presidential Initiative for Artificial Intelligence and Computing (PIAIC) (2018) laid groundwork, but the comprehensive national policy itself is less than 1.5 years old. (Source: web_search: Pakistan national AI strategy last 2 years)", 'growth_in_local_ai_communities_meetups': "Evidence of growing activity, including AI Summits in 2023 and 2024, 'Build with AI: Lahore 2024', and AI Tinkerers meetups in 2026. Plans to establish seven AI Hubs and train a large workforce indicate future growth rather than a fully mature ecosystem. (Source: web_search: Pakistan AI community growth meetups last 2 years)", 'ai_related_websites': 'Mentions of digitalpakistan.pk, pc.gov.pk, and various university/organization sites dedicated to AI indicate a growing online presence. (Source: web_search: Pakistan AI application usage public data)', 'public_data_on_ai_application_usage': 'Pakistan ranks fourth globally for utilizing AI tools and applications in a 2025 survey. However, only 15% of Pakistanis reported having used AI chatbots like ChatGPT or Gemini as of April 2026, suggesting a nascent stage for advanced AI application awareness. Workplace AI adoption is high (84% weekly usage in early 2025), but the overall AI readiness faces significant challenges including underdeveloped digital infrastructure, fragmented data, and limited access to official datasets. (Source: web_search: Pakistan AI application usage public data)', 'recent_news_initial_ai_integration_business_sectors': 'Significant integration is seen in IT and ITES, manufacturing, financial services (fintech), healthcare, agriculture, retail, e-commerce, and logistics. However, despite rapid growth, challenges like a shortage of skilled AI professionals (demand exceeding supply 8:1) and the need for stronger digital foundations are highlighted. News often describes the *start* of AI deployment or the *potential* in various sectors, rather than widespread mature integration. (Source: web_search: Pakistan initial AI integration business sectors news last 1 year)'}}, {'country': 'Philippines', 'ai_adoption_status': 'Emerging AI adoption, characterized by recent and ambitious national strategies, high individual tool usage, but most organizational initiatives remaining in proof-of-concept stages due to challenges.', 'evidence': {'national_ai_strategy': 'The National AI Strategy Roadmap 2.0 (NAISR 2.0) was released in July 2024, building on a 2021 roadmap. The Philippines AI+ Infrastructure Masterplan (PAIIM) 2026-2033 was finalized in September 2026, outlining a $34.4 billion roadmap to increase AI data center capacity. These are very recent and ambitious plans, indicating a strong push to establish a comprehensive AI ecosystem. (Source: web_search: Philippines national AI strategy last 2 years)', 'growth_in_local_ai_communities_meetups': 'Active community groups like AI Pilipinas (100+ events since founding), Global AI Community Philippines, and DevKada. Numerous conferences and summits are scheduled for 2025 and 2026, indicating growing community engagement. (Source: web_search: Philippines AI community growth meetups last 2 years)', 'ai_related_websites': 'Websites such as aiplipinas.ph, globalaicouncil.ph, and dost.gov.ph (Department of Science and Technology) are dedicated to AI in the Philippines. (Source: web_search: Philippines AI application usage public data)', 'public_data_on_ai_application_usage': "86% of Filipino knowledge workers use AI at work (2024), and 42.4% used ChatGPT in the past month (6th globally). However, while over 92% of Philippine organizations used AI in some capacity, 'most organizations struggle to move beyond pilot stages, with 65% remaining at the proof-of-concept stage and only 12% scaling their AI initiatives.' Barriers include talent scarcity (57%) and security concerns (40%). (Source: web_search: Philippines AI application usage public data)", 'recent_news_initial_ai_integration_business_sectors': 'Sectors like IT-BPM, financial, and retail show adoption, but the emphasis is on initial deployment, pilot stages, and addressing challenges. PLDT (telecom) deployed UiPath AI in September 2026, a very recent integration. Startups are outpacing large enterprises in AI innovation. (Source: web_search: Philippines initial AI integration business sectors news last 1 year)'}}, {'country': 'South Africa', 'ai_adoption_status': 'Emerging AI adoption, characterized by rapid community growth and high individual usage, but a notably turbulent and nascent national policy development, coupled with significant infrastructure and skills challenges.', 'evidence': {'national_ai_strategy': 'The National Artificial Intelligence Policy Framework was published in October 2024. A Draft National Artificial Intelligence Policy was approved by Cabinet in March 2026 but *withdrawn* in April 2026 due to fictitious sources. This withdrawal is a significant indicator of an early and turbulent policy development phase, clearly not a mature and stable strategic environment. (Source: web_search: South Africa national AI strategy last 2 years)', 'growth_in_local_ai_communities_meetups': "Recognized as one of Africa's most advanced AI ecosystems. The South African Artificial Intelligence Association (SAAIA) membership grew by 71% in the year to March 2026. Many conferences and summits are scheduled for 2026 (e.g., AI Expo Africa, Activate SA), showing rapid growth in community engagement. (Source: web_search: South Africa AI community growth meetups last 2 years)", 'ai_related_websites': 'SAAIA (saaiassociation.co.za), AI Expo Africa (aiexpoafrica.com), and miiafrica.org are prominent AI-related websites. (Source: web_search: South Africa AI community growth meetups last 2 years)', 'public_data_on_ai_application_usage': '23.1% of the working-age population used an AI product in Q1 2026. 45.4% of adults used generative AI tools (December 2025), and 70% used an AI chatbot (early 2026). 95% of managers and 91% of private individuals reported weekly AI use in Q1 2026. Despite high individual usage, SMEs often struggle with integrating AI and feel overwhelmed. Challenges include unreliable electricity, limited internet connectivity, digital skills gaps, and the need for unified digital health infrastructure. (Source: web_search: South Africa AI application usage public data)', 'recent_news_initial_ai_integration_business_sectors': "Initial integration is seen in financial services (banks using ML/GenAI for fraud, risk), healthcare (AI-supported diagnostics), retail (personalized recommendations), and mining (operational efficiency). There's a shift from experimentation to large-scale deployment, but scaling AI in financial services remains a challenge. (Source: web_search: South Africa initial AI integration business sectors news last 1 year)"}}, {'country': 'Nigeria', 'ai_adoption_status': 'Emerging AI adoption, characterized by a very recent national strategy, high individual AI tool usage contrasted with challenges in enterprise integration and infrastructure, and a strong drive for local AI development.', 'evidence': {'national_ai_strategy': 'Nigeria formally launched its National Artificial Intelligence Strategy (NAIS) in September 2025, with a five-year vision from 2025 to 2029. The development process (co-creation workshop April 2024, public feedback January 2025) falls within the last two years, marking a very recent and foundational strategic development. (Source: web_search: Nigeria national AI strategy last 2 years)', 'growth_in_local_ai_communities_meetups': 'Significant growth and activity over the last two years, including numerous conferences and summits (InnovateAI Lagos 2024/2025, AI Summit Nigeria 2024, Pan-African AI Conference 2024, ICAIR 2024/2025, Digital Nigeria International Conference 2025, IndabaX Nigeria 2025, Abuja AI Week 2025). Active community groups like AI in Nigeria Community and Data Science Nigeria, with free AI classes and hackathons. (Source: web_search: Nigeria AI community growth meetups last 2 years)', 'ai_related_websites': 'aiinnigeria.com, nigeriaaihub.com, nitda.gov.ng, datasciencenigeria.org. (Source: web_search: Nigeria AI community growth meetups last 2 years)', 'public_data_on_ai_application_usage': 'A 2026 BCG report indicates 91% of Nigerians use AI weekly, the highest globally. 88% of adults interacted with AI chatbots (March 2026). While 93% of Nigerian organizations had begun implementing AI (September 2025), challenges include a shortage of technical expertise (37%), privacy/security concerns (35%), inadequate digital infrastructure, and skills gaps. A notable gap exists between high AI workforce literacy and lower enterprise AI adoption (ranking 19th among 25 major outsourcing destinations). (Source: web_search: Nigeria AI application usage public data)', 'recent_news_initial_ai_integration_business_sectors': "Financial services are leading adoption (customer service, software development, marketing). Public sector AI adoption is 'still in its early stages.' There is a strong drive towards 'Sovereign AI' to shift from being a consumer to a developer of AI, with a focus on local capacity building and indigenous solutions. (Source: web_search: Nigeria initial AI integration business sectors news last 1 year)"}}, {'country': 'Malaysia', 'ai_adoption_status': 'Emerging AI adoption, with recent national strategic initiatives and rapid community growth, but a majority of businesses still focused on basic AI applications and facing challenges in scaling beyond experimentation.', 'evidence': {'national_ai_strategy': "The National AI Action Plan 2026-2030 aims to position Malaysia as an 'AI Nation' by 2030, building upon the National Artificial Intelligence Roadmap (AI-Rmap) 2021-2025. The establishment of AI Malaysia Berhad (National AI office) in July 2026 and the development of an AI Governance Bill (expected by June 2026) are very recent and indicative of a country actively building its foundational AI strategy and infrastructure. (Source: web_search: Malaysia national AI strategy last 2 years)", 'growth_in_local_ai_communities_meetups': 'Numerous active meetup groups (Artificial Intelligence and Machine Learning Malaysia, AI Tinkerers Kuala Lumpur, Build with AI, Malaysia AI Tech Hub, CoderPuffs, PyData Kuala Lumpur). An increase in larger AI events like Global AI Bootcamp 2024, ASEAN AI Summit 2025, and World AI Show – Malaysia 2025, shows a rapidly growing and engaged community. (Source: web_search: Malaysia AI community growth meetups last 2 years)', 'ai_related_websites': 'ai.gov.my, malaysian.ai, digital.gov.my, and websites of various AI-focused organizations and events. (Source: web_search: Malaysia AI community growth meetups last 2 years)', 'public_data_on_ai_application_usage': "Around 79% of Malaysians have used AI before (early 2024), with 62% in the past six months. Malaysia's AI adoption rate climbed to 38% among businesses in 2026, up from 27% in 2025. However, 'many companies are still utilizing basic tools. Among AI adopters, 67% primarily use basic applications... Only 19% have a formal strategy for scaling AI across multiple functions.' Only 6% of businesses fully deployed agentic AI. (Source: web_search: Malaysia AI application usage public data)", 'recent_news_initial_ai_integration_business_sectors': 'Financial services and manufacturing are leading adoption, with other sectors like semiconductors, electronics, advanced manufacturing, logistics, healthcare, agriculture, and public services seeing increased deployment and potential. The focus is shifting from consuming AI technologies to developing home-grown solutions. Challenges include uneven adoption among SMEs due to limited expertise and infrastructure gaps. (Source: web_search: Malaysia initial AI integration business sectors news last 1 year)'}}]
+
+## Recommendation
+Proceed with detailed competitor research in Pakistan, Philippines, South Africa, Nigeria, and Malaysia to identify top AI solutions and custom software agencies.
+
+## Sources
+- web_search: English speaking countries by GDP 2023-2024 medium economy
+- web_search: GDP of Pakistan 2023 2024 nominal USD
+- web_search: GDP of Hong Kong 2023 2024 nominal USD
+- web_search: Is English an official language in Pakistan?
+- web_search: Is English an official language in Hong Kong?
+- web_search: Is English an official language in Bangladesh?
+- web_search: New Zealand national AI strategy last 2 years
+- web_search: New Zealand AI community growth meetups last 2 years
+- web_search: New Zealand AI application usage public data
+- web_search: New Zealand initial AI integration business sectors news last 1 year
+- web_search: Ireland national AI strategy last 2 years
+- web_search: Ireland AI community growth meetups last 2 years
+- web_search: Ireland AI application usage public data
+- web_search: Ireland initial AI integration business sectors news last 1 year
+- web_search: Singapore national AI strategy last 2 years
+- web_search: Singapore AI community growth meetups last 2 years
+- web_search: Singapore AI application usage public data
+- web_search: Singapore initial AI integration business sectors news last 1 year
+- web_search: Pakistan national AI strategy last 2 years
+- web_search: Pakistan AI community growth meetups last 2 years
+- web_search: Pakistan AI application usage public data
+- web_search: Pakistan initial AI integration business sectors news last 1 year
+- web_search: Hong Kong national AI strategy last 2 years
+- web_search: Hong Kong AI community growth meetups last 2 years
+- web_search: Hong Kong AI application usage public data
+- web_search: Hong Kong initial AI integration business sectors news last 1 year
+- web_search: English speaking countries with developing AI ecosystems GDP between 200 billion and 1 trillion USD
+- web_search: Is English an official language in Malaysia?
+- web_search: Is English an official language in Egypt?
+- web_search: Philippines national AI strategy last 2 years
+- web_search: Philippines AI community growth meetups last 2 years
+- web_search: Philippines AI application usage public data
+- web_search: Philippines initial AI integration business sectors news last 1 year
+- web_search: South Africa national AI strategy last 2 years
+- web_search: South Africa AI community growth meetups last 2 years
+- web_search: South Africa AI application usage public data
+- web_search: South Africa initial AI integration business sectors news last 1 year
+- web_search: Nigeria national AI strategy last 2 years
+- web_search: Nigeria AI community growth meetups last 2 years
+- web_search: Nigeria AI application usage public data
+- web_search: Nigeria initial AI integration business sectors news last 1 year
+- web_search: Malaysia national AI strategy last 2 years
+- web_search: Malaysia AI community growth meetups last 2 years
+- web_search: Malaysia AI application usage public data
+- web_search: Malaysia initial AI integration business sectors news last 1 year
+
+## Full JSON Payload
+```json
+{
+  "agent_id": "ai_adoption_indicator_specialist_cycle1_adv_2",
+  "role": "AI Adoption Indicator Specialist",
+  "status": "ok",
+  "confidence": 0.95,
+  "findings": {
+    "countries_with_emerging_ai_adoption": [
+      {
+        "country": "Pakistan",
+        "ai_adoption_status": "Emerging AI adoption, with a recent national strategy and significant challenges in infrastructure and skills, despite high individual AI tool usage.",
+        "evidence": {
+          "national_ai_strategy": "Pakistan approved and unveiled its first 'National Artificial Intelligence Policy \u2013 2025' on July 30, 2025. This very recent and foundational development provides a six-pillar framework for AI innovation, public awareness, secure systems, sectoral transformation, infrastructure, and international partnerships. Earlier efforts like the Presidential Initiative for Artificial Intelligence and Computing (PIAIC) (2018) laid groundwork, but the comprehensive national policy itself is less than 1.5 years old. (Source: web_search: Pakistan national AI strategy last 2 years)",
+          "growth_in_local_ai_communities_meetups": "Evidence of growing activity, including AI Summits in 2023 and 2024, 'Build with AI: Lahore 2024', and AI Tinkerers meetups in 2026. Plans to establish seven AI Hubs and train a large workforce indicate future growth rather than a fully mature ecosystem. (Source: web_search: Pakistan AI community growth meetups last 2 years)",
+          "ai_related_websites": "Mentions of digitalpakistan.pk, pc.gov.pk, and various university/organization sites dedicated to AI indicate a growing online presence. (Source: web_search: Pakistan AI application usage public data)",
+          "public_data_on_ai_application_usage": "Pakistan ranks fourth globally for utilizing AI tools and applications in a 2025 survey. However, only 15% of Pakistanis reported having used AI chatbots like ChatGPT or Gemini as of April 2026, suggesting a nascent stage for advanced AI application awareness. Workplace AI adoption is high (84% weekly usage in early 2025), but the overall AI readiness faces significant challenges including underdeveloped digital infrastructure, fragmented data, and limited access to official datasets. (Source: web_search: Pakistan AI application usage public data)",
+          "recent_news_initial_ai_integration_business_sectors": "Significant integration is seen in IT and ITES, manufacturing, financial services (fintech), healthcare, agriculture, retail, e-commerce, and logistics. However, despite rapid growth, challenges like a shortage of skilled AI professionals (demand exceeding supply 8:1) and the need for stronger digital foundations are highlighted. News often describes the *start* of AI deployment or the *potential* in various sectors, rather than widespread mature integration. (Source: web_search: Pakistan initial AI integration business sectors news last 1 year)"
+        }
+      },
+      {
+        "country": "Philippines",
+        "ai_adoption_status": "Emerging AI adoption, characterized by recent and ambitious national strategies, high individual tool usage, but most organizational initiatives remaining in proof-of-concept stages due to challenges.",
+        "evidence": {
+          "national_ai_strategy": "The National AI Strategy Roadmap 2.0 (NAISR 2.0) was released in July 2024, building on a 2021 roadmap. The Philippines AI+ Infrastructure Masterplan (PAIIM) 2026-2033 was finalized in September 2026, outlining a $34.4 billion roadmap to increase AI data center capacity. These are very recent and ambitious plans, indicating a strong push to establish a comprehensive AI ecosystem. (Source: web_search: Philippines national AI strategy last 2 years)",
+          "growth_in_local_ai_communities_meetups": "Active community groups like AI Pilipinas (100+ events since founding), Global AI Community Philippines, and DevKada. Numerous conferences and summits are scheduled for 2025 and 2026, indicating growing community engagement. (Source: web_search: Philippines AI community growth meetups last 2 years)",
+          "ai_related_websites": "Websites such as aiplipinas.ph, globalaicouncil.ph, and dost.gov.ph (Department of Science and Technology) are dedicated to AI in the Philippines. (Source: web_search: Philippines AI application usage public data)",
+          "public_data_on_ai_application_usage": "86% of Filipino knowledge workers use AI at work (2024), and 42.4% used ChatGPT in the past month (6th globally). However, while over 92% of Philippine organizations used AI in some capacity, 'most organizations struggle to move beyond pilot stages, with 65% remaining at the proof-of-concept stage and only 12% scaling their AI initiatives.' Barriers include talent scarcity (57%) and security concerns (40%). (Source: web_search: Philippines AI application usage public data)",
+          "recent_news_initial_ai_integration_business_sectors": "Sectors like IT-BPM, financial, and retail show adoption, but the emphasis is on initial deployment, pilot stages, and addressing challenges. PLDT (telecom) deployed UiPath AI in September 2026, a very recent integration. Startups are outpacing large enterprises in AI innovation. (Source: web_search: Philippines initial AI integration business sectors news last 1 year)"
+        }
+      },
+      {
+        "country": "South Africa",
+        "ai_adoption_status": "Emerging AI adoption, characterized by rapid community growth and high individual usage, but a notably turbulent and nascent national policy development, coupled with significant infrastructure and skills challenges.",
+        "evidence": {
+          "national_ai_strategy": "The National Artificial Intelligence Policy Framework was published in October 2024. A Draft National Artificial Intelligence Policy was approved by Cabinet in March 2026 but *withdrawn* in April 2026 due to fictitious sources. This withdrawal is a significant indicator of an early and turbulent policy development phase, clearly not a mature and stable strategic environment. (Source: web_search: South Africa national AI strategy last 2 years)",
+          "growth_in_local_ai_communities_meetups": "Recognized as one of Africa's most advanced AI ecosystems. The South African Artificial Intelligence Association (SAAIA) membership grew by 71% in the year to March 2026. Many conferences and summits are scheduled for 2026 (e.g., AI Expo Africa, Activate SA), showing rapid growth in community engagement. (Source: web_search: South Africa AI community growth meetups last 2 years)",
+          "ai_related_websites": "SAAIA (saaiassociation.co.za), AI Expo Africa (aiexpoafrica.com), and miiafrica.org are prominent AI-related websites. (Source: web_search: South Africa AI community growth meetups last 2 years)",
+          "public_data_on_ai_application_usage": "23.1% of the working-age population used an AI product in Q1 2026. 45.4% of adults used generative AI tools (December 2025), and 70% used an AI chatbot (early 2026). 95% of managers and 91% of private individuals reported weekly AI use in Q1 2026. Despite high individual usage, SMEs often struggle with integrating AI and feel overwhelmed. Challenges include unreliable electricity, limited internet connectivity, digital skills gaps, and the need for unified digital health infrastructure. (Source: web_search: South Africa AI application usage public data)",
+          "recent_news_initial_ai_integration_business_sectors": "Initial integration is seen in financial services (banks using ML/GenAI for fraud, risk), healthcare (AI-supported diagnostics), retail (personalized recommendations), and mining (operational efficiency). There's a shift from experimentation to large-scale deployment, but scaling AI in financial services remains a challenge. (Source: web_search: South Africa initial AI integration business sectors news last 1 year)"
+        }
+      },
+      {
+        "country": "Nigeria",
+        "ai_adoption_status": "Emerging AI adoption, characterized by a very recent national strategy, high individual AI tool usage contrasted with challenges in enterprise integration and infrastructure, and a strong drive for local AI development.",
+        "evidence": {
+          "national_ai_strategy": "Nigeria formally launched its National Artificial Intelligence Strategy (NAIS) in September 2025, with a five-year vision from 2025 to 2029. The development process (co-creation workshop April 2024, public feedback January 2025) falls within the last two years, marking a very recent and foundational strategic development. (Source: web_search: Nigeria national AI strategy last 2 years)",
+          "growth_in_local_ai_communities_meetups": "Significant growth and activity over the last two years, including numerous conferences and summits (InnovateAI Lagos 2024/2025, AI Summit Nigeria 2024, Pan-African AI Conference 2024, ICAIR 2024/2025, Digital Nigeria International Conference 2025, IndabaX Nigeria 2025, Abuja AI Week 2025). Active community groups like AI in Nigeria Community and Data Science Nigeria, with free AI classes and hackathons. (Source: web_search: Nigeria AI community growth meetups last 2 years)",
+          "ai_related_websites": "aiinnigeria.com, nigeriaaihub.com, nitda.gov.ng, datasciencenigeria.org. (Source: web_search: Nigeria AI community growth meetups last 2 years)",
+          "public_data_on_ai_application_usage": "A 2026 BCG report indicates 91% of Nigerians use AI weekly, the highest globally. 88% of adults interacted with AI chatbots (March 2026). While 93% of Nigerian organizations had begun implementing AI (September 2025), challenges include a shortage of technical expertise (37%), privacy/security concerns (35%), inadequate digital infrastructure, and skills gaps. A notable gap exists between high AI workforce literacy and lower enterprise AI adoption (ranking 19th among 25 major outsourcing destinations). (Source: web_search: Nigeria AI application usage public data)",
+          "recent_news_initial_ai_integration_business_sectors": "Financial services are leading adoption (customer service, software development, marketing). Public sector AI adoption is 'still in its early stages.' There is a strong drive towards 'Sovereign AI' to shift from being a consumer to a developer of AI, with a focus on local capacity building and indigenous solutions. (Source: web_search: Nigeria initial AI integration business sectors news last 1 year)"
+        }
+      },
+      {
+        "country": "Malaysia",
+        "ai_adoption_status": "Emerging AI adoption, with recent national strategic initiatives and rapid community growth, but a majority of businesses still focused on basic AI applications and facing challenges in scaling beyond experimentation.",
+        "evidence": {
+          "national_ai_strategy": "The National AI Action Plan 2026-2030 aims to position Malaysia as an 'AI Nation' by 2030, building upon the National Artificial Intelligence Roadmap (AI-Rmap) 2021-2025. The establishment of AI Malaysia Berhad (National AI office) in July 2026 and the development of an AI Governance Bill (expected by June 2026) are very recent and indicative of a country actively building its foundational AI strategy and infrastructure. (Source: web_search: Malaysia national AI strategy last 2 years)",
+          "growth_in_local_ai_communities_meetups": "Numerous active meetup groups (Artificial Intelligence and Machine Learning Malaysia, AI Tinkerers Kuala Lumpur, Build with AI, Malaysia AI Tech Hub, CoderPuffs, PyData Kuala Lumpur). An increase in larger AI events like Global AI Bootcamp 2024, ASEAN AI Summit 2025, and World AI Show \u2013 Malaysia 2025, shows a rapidly growing and engaged community. (Source: web_search: Malaysia AI community growth meetups last 2 years)",
+          "ai_related_websites": "ai.gov.my, malaysian.ai, digital.gov.my, and websites of various AI-focused organizations and events. (Source: web_search: Malaysia AI community growth meetups last 2 years)",
+          "public_data_on_ai_application_usage": "Around 79% of Malaysians have used AI before (early 2024), with 62% in the past six months. Malaysia's AI adoption rate climbed to 38% among businesses in 2026, up from 27% in 2025. However, 'many companies are still utilizing basic tools. Among AI adopters, 67% primarily use basic applications... Only 19% have a formal strategy for scaling AI across multiple functions.' Only 6% of businesses fully deployed agentic AI. (Source: web_search: Malaysia AI application usage public data)",
+          "recent_news_initial_ai_integration_business_sectors": "Financial services and manufacturing are leading adoption, with other sectors like semiconductors, electronics, advanced manufacturing, logistics, healthcare, agriculture, and public services seeing increased deployment and potential. The focus is shifting from consuming AI technologies to developing home-grown solutions. Challenges include uneven adoption among SMEs due to limited expertise and infrastructure gaps. (Source: web_search: Malaysia initial AI integration business sectors news last 1 year)"
+        }
+      }
+    ]
+  },
+  "sources": [
+    "web_search: English speaking countries by GDP 2023-2024 medium economy",
+    "web_search: GDP of Pakistan 2023 2024 nominal USD",
+    "web_search: GDP of Hong Kong 2023 2024 nominal USD",
+    "web_search: Is English an official language in Pakistan?",
+    "web_search: Is English an official language in Hong Kong?",
+    "web_search: Is English an official language in Bangladesh?",
+    "web_search: New Zealand national AI strategy last 2 years",
+    "web_search: New Zealand AI community growth meetups last 2 years",
+    "web_search: New Zealand AI application usage public data",
+    "web_search: New Zealand initial AI integration business sectors news last 1 year",
+    "web_search: Ireland national AI strategy last 2 years",
+    "web_search: Ireland AI community growth meetups last 2 years",
+    "web_search: Ireland AI application usage public data",
+    "web_search: Ireland initial AI integration business sectors news last 1 year",
+    "web_search: Singapore national AI strategy last 2 years",
+    "web_search: Singapore AI community growth meetups last 2 years",
+    "web_search: Singapore AI application usage public data",
+    "web_search: Singapore initial AI integration business sectors news last 1 year",
+    "web_search: Pakistan national AI strategy last 2 years",
+    "web_search: Pakistan AI community growth meetups last 2 years",
+    "web_search: Pakistan AI application usage public data",
+    "web_search: Pakistan initial AI integration business sectors news last 1 year",
+    "web_search: Hong Kong national AI strategy last 2 years",
+    "web_search: Hong Kong AI community growth meetups last 2 years",
+    "web_search: Hong Kong AI application usage public data",
+    "web_search: Hong Kong initial AI integration business sectors news last 1 year",
+    "web_search: English speaking countries with developing AI ecosystems GDP between 200 billion and 1 trillion USD",
+    "web_search: Is English an official language in Malaysia?",
+    "web_search: Is English an official language in Egypt?",
+    "web_search: Philippines national AI strategy last 2 years",
+    "web_search: Philippines AI community growth meetups last 2 years",
+    "web_search: Philippines AI application usage public data",
+    "web_search: Philippines initial AI integration business sectors news last 1 year",
+    "web_search: South Africa national AI strategy last 2 years",
+    "web_search: South Africa AI community growth meetups last 2 years",
+    "web_search: South Africa AI application usage public data",
+    "web_search: South Africa initial AI integration business sectors news last 1 year",
+    "web_search: Nigeria national AI strategy last 2 years",
+    "web_search: Nigeria AI community growth meetups last 2 years",
+    "web_search: Nigeria AI application usage public data",
+    "web_search: Nigeria initial AI integration business sectors news last 1 year",
+    "web_search: Malaysia national AI strategy last 2 years",
+    "web_search: Malaysia AI community growth meetups last 2 years",
+    "web_search: Malaysia AI application usage public data",
+    "web_search: Malaysia initial AI integration business sectors news last 1 year"
+  ],
+  "recommendation": "Proceed with detailed competitor research in Pakistan, Philippines, South Africa, Nigeria, and Malaysia to identify top AI solutions and custom software agencies.",
+  "high_value_memory": {
+    "GDP_range_medium_economy": "Between $200 billion and $1 trillion USD (nominal, 2023-2024 estimates)",
+    "AI_adoption_indicators_emerging_ecosystem": "National AI strategies (last 1-2 years), growth in AI communities (last 1-2 years), news on initial AI integration (last 0.5-1 year), public data on AI app usage or academic programs. Emphasize initial stages and acknowledge challenges over mature, widespread integration.",
+    "countries_assessed_and_reasons_for_exclusion_inclusion": {
+      "Ireland": "Too mature AI ecosystem (high adoption, extensive government initiatives).",
+      "New Zealand": "Too mature AI ecosystem (high adoption, advanced strategies, 'second wave' of adoption).",
+      "Singapore": "Too mature AI ecosystem (high adoption, substantial investment, sophisticated governance frameworks, leading in Asia).",
+      "Hong Kong": "Too mature AI ecosystem (high adoption across all sectors, significant investment, advanced infrastructure and governance).",
+      "Bangladesh": "English not an official language.",
+      "Kenya": "GDP below $200B.",
+      "Ghana": "GDP below $200B.",
+      "Uganda": "GDP below $200B.",
+      "Cameroon": "GDP below $200B.",
+      "Egypt": "English not an official language.",
+      "Pakistan": "Included (recent national strategy, acknowledged challenges despite high individual usage, emerging business integration).",
+      "Philippines": "Included (recent ambitious national strategies, high individual usage but organizations mostly in proof-of-concept stages, acknowledged challenges).",
+      "South Africa": "Included (turbulent and nascent national policy development due to withdrawal, rapid community growth and high individual usage, but significant infrastructure and skills challenges).",
+      "Nigeria": "Included (very recent national strategy, high individual adoption contrasted with challenges in enterprise integration and infrastructure, strong drive for local AI development).",
+      "Malaysia": "Included (recent national strategic initiatives, rapid community growth, but majority of businesses focused on basic AI applications and facing scaling challenges; English widely used and official in specific regions). "
+    }
+  },
+  "general_memory": {
+    "evaluation_process": "Systematically evaluated English-speaking countries with GDP between $200B and $1T USD nominal (2023-2024) against criteria for 'just starting to incorporate AI'. Prioritized direct outputs from advisory agents and detailed web search findings for AI adoption status. Re-evaluated countries with nuanced adoption profiles to ensure strict adherence to 'just starting' criterion. Resolved GDP and English official language data inconsistencies to ensure reliable selection."
+  },
+  "tool_calls_made": 45,
+  "evidence_links": [
+    "https://www.focus-economics.com/countries/afghanistan/",
+    "https://www.worldometers.info/gdp/cameroon-gdp/",
+    "https://www.worldometers.info/gdp/tonga-gdp/",
+    "https://datacommons.org/place/country/TON",
+    "https://www.trade.gov/country-commercial-guides/zambia-market-overview",
+    "https://gradschool.utk.edu/future-students/office-of-graduate-admissions/applying-to-graduate-school/admission-requirements/testing-requirements/countries-with-english-as-official-language/",
+    "https://www.maltadvice.com/en/english-speaking-countries/",
+    "https://srv1.worldometers.info/gdp/ethiopia-gdp/",
+    "https://www.worldometers.info/gdp/vanuatu-gdp/",
+    "https://statisticstimes.com/economy/country/vanuatu-gdp.php",
+    "https://www.gbosdata.org/downloads/147-gdp-2024",
+    "https://www.focus-economics.com/countries/cameroon/",
+    "https://www.trade.gov/country-commercial-guides/cameroon-market-overview",
+    "https://statisticstimes.com/economy/country/zambia-gdp.php",
+    "https://www.focus-economics.com/countries/zambia/",
+    "https://www.economy.com/tonga/indicators",
+    "https://en.wikipedia.org/wiki/Economy_of_Ethiopia",
+    "https://srv1.worldometers.info/gdp/pakistan-gdp/",
+    "https://www.focus-economics.com/country-indicator/pakistan/gdp/",
+    "https://www.focus-economics.com/countries/pakistan/",
+    "https://www.worldometers.info/gdp/pakistan-gdp/",
+    "https://www.theglobaleconomy.com/Pakistan/GDP_current_USD/",
+    "https://statbase.org/data/pak-gdp/",
+    "https://www.facebook.com/PMLNPunjabPK/posts/pakistans-gdp-hits-historic-record-of-4521-billioneconomicreforms/1569795014717332/",
+    "https://www.focus-economics.com/countries/hong-kong/",
+    "https://research.hktdc.com/en/article/MzIwNjkzNTY5",
+    "https://www.theglobaleconomy.com/Hong-Kong/GDP_current_USD/",
+    "https://statbase.org/data/hkg-gdp/",
+    "https://tradingeconomics.com/hong-kong/gdp",
+    "https://en.wikipedia.org/wiki/Economy_of_Hong_Kong",
+    "https://www.sprachcaffe.com/en/uc/magazine-article/languages-pakistan.htm",
+    "https://www.eliteasia.co/what-language-is-spoken-in-pakistan/",
+    "https://en.wikipedia.org/wiki/Languages_of_Pakistan",
+    "https://www.dynamiclanguage.com/exploring-the-rich-linguistic-landscape-of-pakistan/",
+    "https://www.polilingua.com/blog/post/language-of-pakistan.htm",
+    "https://en.wikipedia.org/wiki/Pakistani_English",
+    "https://www.thefridaytimes.com/28-Feb-2026/english-pakistan-language-status-success-opportunity",
+    "https://data.mendeley.com/datasets/vpf2n8c7ty",
+    "https://plhr.org.pk/article/official-status-of-english-language-and-difficulties-in-learning-a-pakistani-perspective",
+    "https://jahan-e-tahqeeq.com/index.php/jahan-e-tahqeeq/article/download/558/465",
+    "https://intlaffairs.hku.hk/backend/faqs/6-what-are-the-official-languages-in-hong-kong/",
+    "https://asialocalize.com/blog/languages-spoken-in-hong-kong/",
+    "https://www.eliteasia.co/languages-spoken-in-hong-kong/",
+    "https://en.wikipedia.org/wiki/Languages_of_Hong_Kong",
+    "https://www.csb.gov.hk/english/aboutus/org/scsd/1470.html",
+    "https://www.worldatlas.com/articles/what-languages-are-spoken-in-bangladesh.html",
+    "https://worldpopulationreview.com/countries/bangladesh/language",
+    "https://en.wikipedia.org/wiki/Languages_of_Bangladesh",
+    "https://www.britannica.com/place/Bangladesh/Languages",
+    "https://www.langmedia.fivecolleges.edu/resources/bangladesh/society-social-issues/bangla-language",
+    "https://www.youtube.com/watch?v=okwamf9bLFE",
+    "https://outlook.stpi.niar.org.tw/pdfview/tdop/4b1141009778e31f019806cfa3603db4",
+    "https://dns.govt.nz/standards-and-guidance/technology-and-architecture/artificial-intelligence/new-zealands-ai-strategy-and-guidance-for-business",
+    "https://www.mbie.govt.nz/business-and-employment/economic-growth/digital-policy/new-zealands-ai-strategy-investing-with-confidence",
+    "https://oecd.ai/en/dashboards/national/new-zealand",
+    "https://www.digital.govt.nz/standards-and-guidance/technology-and-architecture/artificial-intelligence",
+    "https://www.brainbox.institute/nz-ai-tracker",
+    "https://www.interest.co.nz/technology/140260/mark-laurence-presents-his-proposed-draft-ai-policy-new-zealand-and-calls",
+    "https://lawnews.nz/politics/labour-unveils-plans-to-control-and-regulate-the-use-of-ai/",
+    "https://kinetics.co.nz/ai-driven-productivity-gains-in-new-zealand-2025/",
+    "https://aiforum.org.nz/reports/ai-adoption-surges-across-new-zealand-six-months-of-growth/",
+    "https://digital.nemko.com/news/new-zealand-ai-strategy-2025",
+    "https://www.nucamp.co/blog/coding-bootcamp-new-zealand-nzl-top-10-mustattend-tech-meetups-and-conferences-in-new-zealand",
+    "https://techevents.co.nz/events/past",
+    "https://www.newzealand.ai/roadshow/",
+    "https://10times.com/new-zealand/artificial-intelligence",
+    "https://www.meetup.com/auckland-ai-collective/",
+    "https://www.youngkiwisai.nz/events",
+    "https://aiforum.org.nz/events/photo/2021-06-21/?eventDisplay=past",
+    "https://www.meetup.com/topics/ai/nz/",
+    "https://www.facebook.com/YounityNZ/posts/over-250-people-registered-for-an-incredible-ai-engineering-nz-meetup-fueled-by-/1616879007115685/",
+    "https://theaicorner.co.nz/p/ai-events-in-new-zealand",
+    "https://internetnz.nz/news-and-articles/new-zealanders-concerned-about-ai-harm-and-impact-on-society-new-research-shows/",
+    "https://www.newzealand.ai/ai-in-aotearoa-in-2025-by-the-numbers/",
+    "https://www.kantarnewzealand.com/ai-in-the-public-sector/",
+    "https://changeable.co.nz/new-zealand-government-ai-200-million-in-strategy-55-operational-use-cases-to-show-for-it/",
+    "https://www.digital.govt.nz/standards-and-guidance/technology-and-architecture/artificial-intelligence/public-service-artificial-intelligence-framework",
+    "https://www.beehive.govt.nz/release/guidance-safe-use-ai-public-sector",
+    "https://www.digital.govt.nz/standards-and-guidance/technology-and-architecture/artificial-intelligence/research-ai-public-service/2025-cross-agency-ai-survey-highlights",
+    "https://www.digital.govt.nz/dmsdocument/263~full-results-2025-cross-agency-survey-for-artificial-intelligence-ai-use-cases/html",
+    "https://psablogfiles.blob.core.windows.net/blogassets/PSA%20member%20survey%20Report%20of%20Experience%20of%20AI.pdf?sp=r&st=2025-09-08T01:09:14Z&se=2030-09-08T09:24:14Z&sv=2024-11-04&sr=b&sig=sUsJmS4Y%2BIDg3vF4NL%2FyH7Avf5KVVlpgN1hLMp8Dcno%3D",
+    "https://thecolab.ai/blog/nz-ai-adoption-2025/",
+    "https://www.kiwiunity.co.nz/how-nz-works/3115179_how-technology-is-changing-new-zealand",
+    "https://b2bnews.co.nz/news/nz-ai-adoption-91-percent-but-only-4-percent-transform-core-ops/",
+    "https://www.2degrees.nz/business/insights/productivity-propelled-ai-adoption-new-zealand",
+    "https://aiforum.org.nz/wp-content/uploads/2025/03/AI-in-Action_March2025-Report-compressed.pdf",
+    "https://www.reseller.co.nz/article/4221921/ai-coming-to-comms-systems-as-focus-shifts-to-productivity-outcomes-digital-island.html",
+    "https://telconews.co.nz/story/new-zealand-firms-turn-to-ai-for-productivity-gains",
+    "https://www.newzealand.ai/new-zealand-ai-adoption-in-2025/",
+    "https://www.usenylon.com/nz/newsroom/kiwi-firms-putting-their-own-spin-on-international-ai-tech",
+    "https://itbrief.co.nz/story/reso-launches-ai-dispute-platform-for-new-zealand-hr",
+    "https://www.oxygenit.co.nz/new-zealand-government-boosts-small-business-productivity-with-new-ai-pilot-program/",
+    "https://www.digital.govt.nz/standards-and-guidance/technology-and-architecture/artificial-intelligence/public-service-ai-work-programme",
+    "https://dns.govt.nz/standards-and-guidance/technology-and-architecture/artificial-intelligence",
+    "https://www.mbie.govt.nz/dmsdocument/31026-going-for-growth-enabling-ai-uptake-across-the-economy-proactiverelease-pdf",
+    "https://thewebcompany.digital/ai-new-zealand-2025-state-adoption-barriers/",
+    "https://www.pwc.co.nz/insights-and-publications/2026-publications/nz-ai-jobs-barometer-the-real-opportunity-is-reinvention-not-replacement.html",
+    "https://enterprise.gov.ie/en/what-we-do/innovation-research-development/artificial-intelligence/digital-and-ai-strategy.html",
+    "https://enterprise.gov.ie/en/publications/national-ai-strategy-refresh-2024.html",
+    "https://enterprise.gov.ie/en/publications/progress-report-national-ai-strategy.html",
+    "https://www.williamfry.com/knowledge/ireland-publishes-new-national-digital-and-ai-strategy-key-takeaways-for-business/",
+    "https://stip.oecd.org/stip/interactive-dashboards/policy-initiatives/2025%2Fdata%2FpolicyInitiatives%2F200002612",
+    "https://digital-skills-jobs.europa.eu/en/initiatives/national-strategies/ireland-digital-and-ai-strategy-2030",
+    "https://www.trade.gov/market-intelligence/ireland-information-technology-emerging-ai-opportunities",
+    "https://www.techcentral.ie/ireland-leads-europe-in-ai-adoption-but-struggles-to-turn-use-into-transformation/",
+    "https://www.aboutamazon.eu/news/aws/ireland-leads-europe-on-ai-adoption",
+    "https://www.irishexaminer.com/business/companies/arid-41910325.html",
+    "https://www.nucamp.co/blog/coding-bootcamp-ireland-irl-top-10-mustattend-tech-meetups-and-conferences-in-ireland",
+    "https://www.meetup.com/topics/ai/ie/",
+    "https://www.meetup.com/ai-in-action-dublin/",
+    "https://dublin.aitinkerers.org/",
+    "https://startupnetwork.eu/sne_events/the-dublin-ai-conference-2025/",
+    "https://www.dublinaiweek.com/about",
+    "https://www.pulseit.news/irish-digital-health/international-ai-summit-comes-to-dublin/",
+    "https://www.facebook.com/offalyindependent/posts/this-interesting-event-next-week-will-look-at-how-artificial-intelligence-is-lik/1716535779831647/",
+    "https://ictskillnet.ie/news-and-insights/from-hype-to-impact-insights-from-national-ai-meet-2025/",
+    "https://news.microsoft.com/europe/2025/03/13/ai-expected-to-add-e250bn-to-irelands-economy-by-2035-as-ai-use-surges-to-91-according-to-a-report-by-microsoft-and-trinity-college-dublin/",
+    "https://www.ey.com/en_ie/insights/ai/how-ai-users-in-ireland-are-shaping-the-next-phase-of-adoption",
+    "https://ai-watch.ec.europa.eu/topics/public-sector/public-sector-dimension-ai-national-strategies/ireland-public-sector-dimension-ai-strategy_en",
+    "https://www.irishtimes.com/business/2025/05/15/government-departments-and-agencies-take-mixed-approach-to-ai-survey-finds/",
+    "https://www.cso.ie/en/csolatestnews/featurearticles/featurearticles2026/understandingofaianditsuseinireland-whatcsodatatellsus/",
+    "https://enable-research.ie/artificial-intelligence-ireland/",
+    "https://www.thinkbusiness.ie/articles/irish-manufacturers-ai-sustainability-skills-investment-imr-report-2025/",
+    "https://eirbusinesstalent.ie/blog/latest-irish-ai-news/",
+    "https://www.openpr.com/news/4629541/irish-erp-software-company-enterpryze-launches-enterpryze",
+    "https://www.facebook.com/DeptEnterprise/videos/minister-niamh-smyth-td-calls-on-businesses-to-shape-irelands-future-ai-strategy/1307872171114958/",
+    "https://montrealethics.ai/ai-policy-corner-singapores-national-ai-strategy-2-0/",
+    "https://law.nus.edu.sg/trail/keeping-ahead-of-the-pack/",
+    "https://www.edb.gov.sg/market-and-industry-reports/singapores-national-ai-strategy-ai-for-the-public-good-for-singapore-and-the-world",
+    "https://www.edb.gov.sg/en/news-and-insights/singapore-updates-ai-strategy-with-aim-to-contribute-globally-valuable-breakthroughs",
+    "https://digital.nemko.com/regulations/singapore-ai-regulation",
+    "https://www.mddi.gov.sg/newsroom/update-to-singapore-s-national-ai-strategy--refreshed-priorities-to-harness-ai-for-the-public-good-factsheet/",
+    "https://www.edb.gov.sg/news-and-insights/singapore-updates-national-ai-strategy-partners-google-and-openai",
+    "https://www.smartnation.gov.sg/initiatives/national-ai-strategy/",
+    "https://www.imda.gov.sg/resources/press-releases-factsheets-and-speeches/factsheets/2026/national-ai-impact-programme",
+    "https://blogs.duanemorris.com/duanemorrisandselvam/2026/03/03/singapores-digital-ai-governance-a-pro-innovation-framework-driven-model/",
+    "https://isomer-user-content.by.gov.sg/39/23a2fe74-a085-4e78-ae0d-481dbfefc3d1/NAIS%20Update.pdf",
+    "https://smart.mit.edu/post/mit-singapore-ai-symposium-2024-how-ai-empowers-people-institutions-and-the-city-in-singapore",
+    "https://www.bagevent.com/event/8824713",
+    "https://www.innoget.com/innovation-events/4317/7th-international-conference-on-artificial-intelligence-and-machine-learning",
+    "https://www.tech.gov.sg/events/singapore-ai-ctf-2024/",
+    "https://www.mas.gov.sg/news/media-releases/2023/artificial-intelligence-to-take-centre-stage-at-the-singapore-fintech-festival-2023",
+    "https://asianbankingandfinance.net/news/artificial-intelligence-epicenter-singapore-fintech-festival-2023",
+    "https://aisingapore.org/student-developer-conference/",
+    "https://atc.sg/event-info.php?data-&-ai-leaders",
+    "https://www.meetup.com/global-ai-singapore-community/",
+    "https://globalai.community/chapters/singapore",
+    "https://www.meetup.com/meetup-group-aimeetupsingapore/",
+    "https://singapore.aitinkerers.org/",
+    "https://saia.org.sg/",
+    "https://centreforaileadership.org/",
+    "https://www.meetup.com/topics/ai/sg/",
+    "https://www.eco-business.com/news/singapore-dominates-southeast-asia-ai-funding-as-investment-surges/",
+    "https://halodata.asia/singapore-retains-second-place-in-global-ai-adoption-survey/",
+    "https://www.imda.gov.sg/resources/press-releases-factsheets-and-speeches/press-releases/2025/singapore-digital-economy",
+    "https://www.channelnewsasia.com/singapore/more-singapore-workers-managing-bots-ai-agents-6382646",
+    "https://itbrief.asia/story/singapore-agentic-ai-adoption-rises-to-51-in-2026",
+    "https://oasiswebasia.com/blog/singapore-sme-ai-adoption-gap/",
+    "https://www.mti.gov.sg/newsroom/oral-reply-to-pqs-on-impact-of-global-ai-capital-expenditure-and-expansion-on-singapore-s-economic---wage-and-jobs-growth/",
+    "https://www.thinkchina.sg/technology/why-hyper-efficient-singapore-asias-most-ai-anxious-society",
+    "https://ground.news/article/singapore-consumers-adopt-autonomous-ai-despite-trust-fears",
+    "https://news.microsoft.com/source/asia/2026/04/29/fast-ai-adoption-is-not-enough-singapore-must-care-about-redesigning-work/",
+    "https://futurecio.tech/research-finds-frequent-ai-use-in-singapore-but-few-see-a-positive-job-impact/",
+    "https://www.facebook.com/thebusinesstimes/posts/singapore-had-the-most-number-of-consumers-who-said-they-would-not-make-a-major-/1397671032580921/",
+    "https://govinsider.asia/intl-en/article/an-infrastructure-first-approach-as-key-to-scaling-public-sector-ai",
+    "https://www.tech.gov.sg/about-us/what-we-do/govtech-role-in-digital-transformation-for-the-public-sector/ai-and-data-in-singapore-government/",
+    "https://sbr.com.sg/information-technology/news/businesses-double-agentic-ai-adoption-few-transform-processes-study",
+    "https://fintechnews.sg/131104/ai/singapore-surpasses-traditional-economic-powerhouses-in-ai-adoption/",
+    "https://www.edb.gov.sg/news-and-insights/latest-in-singapores-ai-scene-that-businesses-should-know-a-round-up-from-january-to-march-2026",
+    "https://www.imda.gov.sg/assets/e77d879a-6b39-4de4-b024-5e0c6da0eff3.pdf",
+    "https://govmedia.com/news/singapore-launches-ai-powered-bizsg-initiative-streamline-sme-support",
+    "https://www.straitstimes.com/business/companies-markets/smes-in-singapore-to-receive-more-support-for-ai-adoption",
+    "https://www.businesstimes.com.sg/singapore/economy-policy/revenue-employment-improve-business-ai-use-mti-report",
+    "https://www.humanresourcesonline.net/mti-highlights-ai-growth-opportunities-and-risks-for-singapore-economy",
+    "https://www.crnasia.com/news/2026/artificial-intelligence/singapore-businesses-expect-agentic-ai-payoff-despite-readin",
+    "https://www.arabnews.pk/pakistan/pakistan-unveils-national-ai-policy-to-boost-innovation-jobs-and-ethical-governance-2611685",
+    "https://www.icmainternational.com/downloads/RP_Portal_Files/ResearchPapers/PakistansNationalAIPolicy2025RoadmaptoDigitalTransformation.pdf",
+    "https://issi.org.pk/issue-brief-on-pakistans-national-ai-policy-2025-developing-ai-ecosystem-and-ethical-data-governance/",
+    "https://imjdagency.com/blog/national-ai-policy-2025-pakistan",
+    "https://pide.org.pk/research/will-ai-transform-pakistan-assessing-the-2025-national-policy/",
+    "https://www.innovapath.us/index.php/IN/article/download/121/74/1158",
+    "https://globaladvisoryexperts.com/national-ai-policy-pakistan/",
+    "https://www.manar.pk/policy.html",
+    "https://www.brecorder.com/news/40432005/govt-unveils-national-ai-initiative-with-seven-innovation-hubs",
+    "https://pc.gov.pk/web/press/get_press/1441",
+    "https://www.trade.gov/country-commercial-guides/pakistan-strategic-technologies",
+    "https://luma.com/aisummit24",
+    "https://www.atomcamp.com/events/",
+    "https://www.brecorder.com/news/40228845",
+    "https://tribune.com.pk/story/2403694/ai-summit-2023-held-in-islamabad",
+    "https://www.app.com.pk/national/pakistans-first-artificial-intelligence-summit-concluded/",
+    "https://pakaisummit.com/archive-23",
+    "https://aisummit.io/conference-old-2/",
+    "https://aisummit.pk/conference/",
+    "https://gdglahore.com/events",
+    "https://islamabad-rawalpindi.aitinkerers.org/",
+    "https://codeforpakistan.org/events",
+    "https://www.meetup.com/en-AU/topics/mlops/pk/",
+    "https://www.meetup.com/topics/ai/pk/",
+    "https://wenewsenglish.com/pakistan-plans-20000-ai-training-programmes-to-build-future-workforce/",
+    "https://nspp.gov.pk/3-conference-ai/",
+    "https://nspp.gov.pk/workshop-artificial-intelligence/",
+    "https://www.nucamp.co/blog/coding-bootcamp-pakistan-pak-top-10-mustattend-tech-meetups-and-conferences-in-pakistan",
+    "https://tribune.com.pk/story/2565710/pakistanis-among-top-ai-users",
+    "https://www.dawn.com/news/2006530",
+    "https://www.brecorder.com/news/40424717/pakistani-consumers-turning-to-ai-to-enhance-shopping-experience-report",
+    "https://propakistani.pk/2026/06/09/over-90-pakistanis-are-using-ai-for-shopping-but-only-few-seem-to-trust-it-study/",
+    "https://gallup.com.pk/post/39864",
+    "https://aiopportunity.publicfirst.co/handouts/Seizing_Pakistans_AI_Opportunity.pdf",
+    "https://www.atomcamp.com/is-pakistan-ready-for-the-ai-economy-herewhat-the-data-says/",
+    "https://digitalpakistan.pk/pakistan-ai-ecosystem",
+    "https://www.geo.tv/latest/678630-pakistan-google-to-use-ai-to-improve-public-services-boost-government-efficiency",
+    "https://www.straitsai.institute/state-of-applied-ai/pakistan",
+    "https://www.theigc.org/blogs/data-and-ai/harnessing-ai-data-technology-growth-pakistan",
+    "https://www.brecorder.com/news/40428933/ai-adoption-drives-pakistans-call-centre-exports-beyond-300mn",
+    "https://newspk2.wordpress.com/2026/09/10/pakistan-ai-adoption-surge-artificial-intelligence-2026/",
+    "https://emporionsoft.com/ai-adoption-in-pakistan/",
+    "https://partners.wsj.com/pseb/pakistans-ai-bet-is-on-people-not-platforms/",
+    "https://mettisglobal.news/Pakistan-targets-shift-from-IT-services-to-tech-products-63463",
+    "https://tribune.com.pk/story/2622495/ai-adoption-faces-barriers",
+    "https://www.oax.org/2026/04/10/A-Deep-Dive-into-how-Hong-Kong-is-Leading-the-AI-Initiative-and-Growth-in-Asia.html",
+    "https://www.budget.gov.hk/2025/eng/budget06.html",
+    "https://www.hsfkramer.com/insights/reports/ai-tracker/hong-kong",
+    "https://www.policyaddress.gov.hk/2025/en/p66.html",
+    "https://www.itib.gov.hk/en/legislative_council_business/questions/2025/pr_20251015a.html",
+    "https://www.cgcc.org.hk/en/temp_publication.php?sid=78&tid=0&tabid=0&id=205&cpid=432",
+    "https://technine.io/en/%E6%96%BD%E6%94%BF%E5%A0%B1%E5%91%8A2025%EF%BC%9A%E5%85%A8%E5%8A%9B%E6%8E%A8%E5%8B%95%E5%89%B5%E6%96%B0%E7%A7%91%E6%8A%80%E7%9B%B8%E9%97%9C%E6%8E%AA%E6%96%BD",
+    "https://www.digitalpolicy.gov.hk/en/initiatives/",
+    "https://ecosystm.io/insight/building-hong-kong-ai-advantage/",
+    "https://www.info.gov.hk/gia/general/202607/15/P2026071500328.htm",
+    "https://lawaigovhub.com/region/HK/",
+    "https://www.policyaddress.gov.hk/2025/en/p73.html",
+    "https://www.chinadailyhk.com/hk/article/637197",
+    "https://www.itib.gov.hk/en/legislative_council_business/questions/2024/pr_20240131b.html",
+    "https://aixsociety.com/hong-kongs-ai-industry-hits-the-accelerator-from-a-game-we-cannot-afford-to-lose-to-global-competitiveness/",
+    "https://www.chinadailyhk.com/hk/article/638354",
+    "https://www.thestandard.com.hk/news/article/340694/Chinas-AI-boom-powers-HKs-economic-growth-Paul-Chan",
+    "https://www.alphamatch.ai/blog/hong-kong-2026-budget-ai-push",
+    "https://hong-kong.aitinkerers.org/",
+    "https://www.startmeup.hk/events-detail/ai-tinkerers-hong-kong-online-meetup/",
+    "https://www.meetup.com/artificial-intelligence-hk/",
+    "https://www.meetup.com/hong-kong-machine-learning-meetup/",
+    "https://globalai.community/chapters/hong-kong",
+    "https://www.eventbrite.com/d/hong-kong-sar/ai/",
+    "https://www.eventbrite.com/d/hong-kong-sar/artificial-intelligence/",
+    "https://www.digitalpolicy.gov.hk/en/our_work/digital_infrastructure/industry_development/industry_support/event_calendar/",
+    "https://conferencealerts.co.in/hong-kong/artificial-intelligence",
+    "https://www.i2hk.com/tech-trend/state-government-ai-adoption-hong-kong-2026-industry-report-public-sector-leaders",
+    "https://www.thestandard.com.hk/news/article/340146/Govt-task-force-rolling-out-30-AI-projects-to-streamline-public-services",
+    "https://www.info.gov.hk/gia/general/202607/15/P2026071500276.htm",
+    "https://hkust.edu.hk/news/hkust-workplace-ai-study-reveals-hong-kong-leads-world-adoption-rate-over-70-employees-using",
+    "https://www.scmp.com/news/hong-kong/hong-kong-economy/article/3363518/72-hong-kong-professionals-use-ai-weekly-double-global-average-survey",
+    "https://www-scmp-com.libproxy1.nus.edu.sg/news/hong-kong/hong-kong-economy/article/3363518/72-hong-kong-professionals-use-ai-weekly-double-global-average-survey",
+    "https://www.ptsconsulting.com.hk/blog/state-of-ai-in-hong-kong-business-2026",
+    "https://www.facebook.com/hongkongfp/posts/over-90-of-hong-kong-organisations-use-ai-tools-despite-training-and-policy-gaps/1472479411590361/",
+    "https://www.dataguidance.com/news/hong-kong-pcpd-publishes-findings-compliance-checks-ai",
+    "https://www.mckinsey.com/cn/updates/ai-usage-among-white-collar-workers-and-students-in-hong-kong-survey-findings",
+    "https://www.marketing-interactive.com/over-85-of-hk-consumers-use-ai-but-dont-trust-it",
+    "https://hkfei.org.hk/en/research-reports/ai-adoption-and-data-governance-in-hong-kong-primary-and-secondary-schools/",
+    "https://www.finastra.com/press-media/hong-kong-financial-institutions-accelerate-ai-deployment-and-digital-maturity-finastra",
+    "https://www.fsdc.org.hk/en/media/hong-kong-emerges-as-a-global-ai-for-finance-hub-where-capital-markets-regulation-and-production-scale-deployment-converge",
+    "https://www.alphamatch.ai/blog/hong-kong-ai-finance-applications-2026",
+    "https://www.randstad.com.hk/career-advice/tips-and-resources/fintech-ai-revolution-finance-accounting-hong-kong/",
+    "https://theglobaleconomics.com/2025/06/16/ai-hong-kongs-healthcare/",
+    "https://www.hk-ecosystem.tech/ai-health",
+    "https://www.scmp.com/native/business/topics/building-hong-kongs-future/article/3336568/hong-kongs-focus-ai-breakthroughs-entices-healthcare-and-robotics-firms",
+    "https://www.youtube.com/watch?v=AET5DOWHeHo",
+    "https://www.scmp.com/news/hong-kong/health-environment/article/3327134/hong-kong-get-tough-lung-cancer-new-ai-screening-tools-minister",
+    "https://www.adyen.com/press-and-media/adyen-index-hk-2026",
+    "https://futureiot.tech/hk-retailers-embrace-ai-but-checkout-trust-gap-persists/",
+    "https://cmotech.asia/story/hong-kong-shoppers-embrace-ai-but-not-at-checkout",
+    "https://www.crowdfundinsider.com/2026/07/291548-artificial-intelligence-ai-is-transforming-digital-commerce-experiences-in-hong-kong-research/",
+    "https://kpmg.com/cn/en/media/press-releases/2025/10/ai-adoption-in-retail-and-sustainability-redefine-consumer-spending-habits-across-hk-and-the-gba.html",
+    "https://www.beehivestrategy.com/blog/articles/hong-kong-ai-adoption-index-september-2026",
+    "https://bbcincorp.com/hk/articles/hong-kong-ai-startups",
+    "https://www.businesstimes.com.sg/international/global/booming-ai-chip-trade-seals-hong-kongs-role-gateway-china",
+    "https://financialpost.com/pmn/business-pmn/booming-ai-chip-trade-seals-hong-kongs-role-as-gateway-to-china",
+    "https://www.facebook.com/scmp/posts/hong-kong-chief-executive-john-lee-ka-chiu-is-set-to-deliver-the-citys-inaugural/1483673747142006/",
+    "https://www.scmp.com/news/hong-kong/hong-kong-economy/article/3365474/hong-kong-launch-free-ai-courses-tech-giants-google-microsoft-smes",
+    "https://coingeek.com/hong-kong-invests-38-million-to-support-smes-ai-adoption/",
+    "https://www.info.gov.hk/gia/general/202607/08/P2026070800534.htm",
+    "https://www.scmp.com/business/banking-finance/article/3284120/hong-kong-unveils-rules-responsible-ai-use-it-gets-ahead-disruptive-technology",
+    "https://veecotech.com.my/blog/malaysia-ai-landscape/",
+    "https://www.trade.gov/market-intelligence/malaysia-artificial-intelligence-roadmap",
+    "https://oecd.ai/en/dashboards/policy-initiatives/national-artificial-intelligence-roadmap-ai%E2%80%91rmap",
+    "https://www.malaymail.com/news/malaysia/2026/12/14/malaysias-ai-nation-plan-by-2030-how-the-government-is-preparing-its-people/234593",
+    "https://livegdp.com/malaysia-gdp/",
+    "https://en.wikipedia.org/wiki/Economy_of_Malaysia",
+    "https://en.wikipedia.org/wiki/Economy_of_the_Philippines",
+    "https://www.focus-economics.com/countries/philippines/news/gdp/philippines-national-accounts-07-08-2026-economic-growth-slows-in-the-second-quarter-of-2026/",
+    "https://tradingeconomics.com/philippines/gdp",
+    "https://lightcastlepartners.com/insights/2026/07/artificial-intelligence-in-bangladesh-readiness-gap/",
+    "https://en.wikipedia.org/wiki/Economy_of_Bangladesh",
+    "https://www.kaz.com.bd/blog/bangladesh-s-ai-moment-from-global-delivery-to-indigenous-intelligence",
+    "https://arxiv.org/html/2601.12934v1",
+    "https://www.daily-sun.com/20/869610",
+    "https://aipolicy.gov.bd/docs/national-ai-policy-bangladesh-2026-2030-draft-v2.0.pdf",
+    "https://livegdp.com/bangladesh-gdp/",
+    "https://english.news.cn/asiapacific/20260610/0847529fc3614ce79c4565f454b1bcd0/c.html",
+    "https://www.imf.org/external/datamapper/profile/BGD"
+  ],
+  "researched_brief": "For a comprehensive list of potential English-speaking countries, research indicators of emerging AI adoption within the last 1-2 years. Look for evidence of national AI strategies, growth in local AI communities/meetups, AI-related websites, public data on AI application usage, and recent news highlighting initial AI integration across business sectors. Provide a summary of AI adoption status and supporting evidence for each country, including countries like Pakistan and Hong Kong."
+}
+```

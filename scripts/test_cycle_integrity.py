@@ -197,4 +197,33 @@ check("an agent that still uses no tools is marked and its confidence capped",
 check("research agents must search before calling something unavailable",
       "searches_tried" in inspect.getsource(research_agent.run_research_agent))
 
+
+# ---- 4. an answer that is not quite JSON is repaired, never thrown away ----------------
+# Pipeline 9's Cycle 1 lead lost about twenty searches to one \' inside a link title.
+BS = chr(92)
+parse = research_agent.parse_agent_json
+check("plain JSON parses", parse('{"a": 1}') == {"a": 1})
+check("a fenced answer parses", parse('```json\n{"a": 1}\n```') == {"a": 1})
+check("a Python-style escaped apostrophe is repaired",
+      parse('{"title": "Nigeria' + BS + '\'s AI strategy"}')["title"] == "Nigeria's AI strategy")
+check("a lone backslash is kept, not dropped",
+      parse('{"path": "C:' + BS + 'Users' + BS + 'docs.md"}')["path"] == "C:" + BS + "Users" + BS + "docs.md")
+check("a real escape still means what it says", parse('{"a": "line\\nbreak"}')["a"] == "line\nbreak")
+check("prose around the object is ignored", parse('Here it is:\n{"a": 1}\nhope that helps')["a"] == 1)
+for bad, label in ((" ", "nothing at all"), ("sorry, I cannot", "nothing that parses"), ('[1, 2]', "a list, not an answer")):
+    try:
+        parse(bad)
+        check(f"an answer with {label} is refused", False)
+    except (ValueError, json.JSONDecodeError):
+        check(f"an answer with {label} is refused", True)
+
+answer = '{"confidence": 0.9, "findings": {"x": 1}, "sources": [], "note": "Nigeria' + BS + '\'s plan"}'
+result, chat = run_agent_with([reply(calls=[search]), reply(answer)])
+check("an agent whose answer has a Python escape is not lost", result["status"] == "ok" and result["note"] == "Nigeria's plan")
+
+result, chat = run_agent_with([reply(calls=[search]), reply("sorry, I can't answer in JSON")])
+check("an answer that cannot be read keeps the agent's work instead of erroring",
+      result["status"] == "partial" and result["raw_answer"] == "sorry, I can't answer in JSON"
+      and "could not be read" in result["blocked_reason"] and result["tool_calls_made"] == 1)
+
 print("\nAll cycle integrity checks passed.")

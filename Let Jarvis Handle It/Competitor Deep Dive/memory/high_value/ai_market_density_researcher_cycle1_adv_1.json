@@ -1,6 +1,6 @@
 {
   "GDP_range_medium_economy": "Between $200 billion and $1 trillion USD (nominal, 2023-2024 estimates)",
-  "AI_adoption_indicators_emerging_ecosystem": "National AI strategies (last 1-2 years), growth in AI communities (last 1-2 years), news on initial AI integration (last 0.5-1 year), public data on AI app usage or academic programs. Emphasize initial stages and acknowledge challenges over mature, widespread integration.",
+  "AI_adoption_indicators_emerging_ecosystem": "National AI strategies (last 1-2 years), growth in AI communities (last 1-2 years), news on initial AI integration (last 0.5-1 year), public data on AI application usage or academic programs, and observed challenges indicating early stages over mature widespread integration.",
   "countries_assessed_and_reasons_for_exclusion_inclusion": {
     "Ireland": "Too mature AI ecosystem (high adoption, extensive government initiatives).",
     "New Zealand": "Too mature AI ecosystem (high adoption, advanced strategies, 'second wave' of adoption).",
@@ -16,6 +16,6 @@
     "Philippines": "Included (recent ambitious national strategies, high individual usage but organizations mostly in proof-of-concept stages, acknowledged challenges).",
     "South Africa": "Included (turbulent and nascent national policy development due to withdrawal, rapid community growth and high individual usage, but significant infrastructure and skills challenges).",
     "Nigeria": "Included (very recent national strategy, high individual adoption contrasted with challenges in enterprise integration and infrastructure, strong drive for local AI development).",
-    "Malaysia": "Included (recent national strategic initiatives, rapid community growth, but majority of businesses focused on basic AI applications and facing scaling challenges; English widely used and official in specific regions). "
+    "Malaysia": "Included (recent national strategic initiatives, rapid community growth, but majority of businesses focused on basic AI applications and facing scaling challenges; English widely used and official in specific regions)."
   }
 }

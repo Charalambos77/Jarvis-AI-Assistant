@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from agents.tool_executor import get_tools_for_execution_agent, run_tool
 from agents.user_brief import user_brief_block
-from agents import tool_review, tool_requests
+from agents import tool_review, tool_requests, agent_questions
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -73,7 +73,7 @@ async def run_execution_agent(
     declarations, handlers, unavailable = get_tools_for_execution_agent(
         tools_needed, project_name, context=f"{role}: {brief}"[:400]
     )
-    declarations = list(declarations) + [tool_requests.DECLARATION]
+    declarations = list(declarations) + [tool_requests.DECLARATION, agent_questions.DECLARATION]
 
     unavailable_note = ""
     if unavailable:
@@ -117,6 +117,7 @@ RULES:
 5. If you cannot complete part of the task (e.g. a tool isn't connected), set "status": "partial"
    and explain exactly what's missing in a "blocked_reason" key — never fabricate success.
 6. Your final response must be valid JSON only, no markdown code fences.
+7. If what the user wants is genuinely unclear, or a choice is theirs to make, call ask_user and wait for their answer. Ask as many questions as you need, one at a time. Never guess at their meaning to keep going, and never use it for something you could look up yourself.
 """
 
     if event_logger:
@@ -192,7 +193,10 @@ RULES:
                             "icon": "🛠️"
                         }
                     })
-                if fc.name == tool_requests.REQUEST_TOOL_NAME:
+                if fc.name == agent_questions.ASK_USER_NAME:
+                    result = await agent_questions.handle(
+                        tool_args, agent_config=agent_config, kind="execution", event_logger=event_logger)
+                elif fc.name == tool_requests.REQUEST_TOOL_NAME:
                     result, tools_changed = await tool_requests.handle(
                         tool_args, agent_config=agent_config, kind="execution", project_name=project_name,
                         declarations=declarations, handlers=handlers, event_logger=event_logger)

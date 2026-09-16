@@ -10,7 +10,9 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 
-from agents.links import Evidence, strip_unevidenced_links
+from urllib.parse import urlsplit
+
+from agents.links import URL_RE, Evidence, strip_unevidenced_links
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -43,6 +45,10 @@ DISAGREEMENT_RULES = (
     "- \"The lead's finding\", \"my own output\", \"it aligns with the lead's output\" and \"internal "
     "consistency\" are not reasons. If the evidence does not settle it, set \"resolution\": "
     "\"unresolved\" and keep both sides for the user to decide.\n"
+    "- Name the source that shows it in \"decided_by_source\": a link from the findings, or the exact "
+    "search an agent ran. An agent saying it checked, resolved, verified or confirmed something is "
+    "not evidence — that is the agent vouching for itself. Cite what the tool returned, or leave it "
+    "unresolved.\n"
     "- Apply the user's brief as written. Never redefine one of its criteria to fit a candidate."
 )
 
@@ -50,7 +56,8 @@ DISAGREEMENT_SHAPE = (
     '{"description": "what the agents disagree on", '
     '"sides": [{"agent": "agent_id", "value": "what it found", "evidence": "the source or tool result behind it"}], '
     '"resolution": "the agent_id whose value is kept, or unresolved", '
-    '"decided_by": "the evidence that settled it"}'
+    '"decided_by": "the evidence that settled it", '
+    '"decided_by_source": "the link or the exact search it comes from"}'
 )
 
 # Reasons that name who said something instead of what shows it. Pipeline 9's
@@ -79,6 +86,57 @@ def original_findings_json(agent_results) -> str | None:
                        for r in agent_results if isinstance(r, dict)], indent=2, default=str)
 
 
+# An agent telling you it checked something is the claim, not the evidence for it.
+# Pipeline 9's blueprint kept Malaysia as "English-speaking" because the AI Adoption
+# Indicator Specialist had mentioned "resolved ... English official language data
+# inconsistencies" — while its own search said English is official only in two states.
+_SELF_VOUCHING = re.compile(
+    r"\b(?:agent|specialist|researcher|analyst|lead|it)\b[^.]{0,60}?"
+    r"\b(?:mention(?:s|ed)?|statement|claim(?:s|ed)?|assert(?:s|ed|ion)?|says?|said|notes?|noted|"
+    r"reports? that|confirm(?:s|ed)?|resolved|verified|checked|thorough)\b",
+    re.IGNORECASE,
+)
+
+# Tool names an agent's sources are written with: "web_search: <query>".
+_SOURCE_PREFIXES = ("web_search", "inspect_website", "arxiv_search", "read_file", "google_search")
+
+
+def known_sources(*groups) -> list[str]:
+    """Every source string the agents and the blueprint list, as written."""
+    found = []
+    for group in groups:
+        for item in (group if isinstance(group, list) else [group]):
+            if isinstance(item, dict):
+                for source in item.get("sources") or []:
+                    text = " ".join(str(source).split())
+                    if text and text not in found:
+                        found.append(text)
+    return found
+
+
+def points_at_evidence(text: str, evidence: Evidence | None, sources: list[str] | None) -> bool:
+    """True when a reason names something a tool really returned, not just an agent's word."""
+    lowered = " ".join((text or "").lower().split())
+    if not lowered:
+        return False
+    if evidence:
+        for url in URL_RE.findall(text or ""):
+            if evidence.has(url):
+                return True
+        for url in evidence.urls:
+            host = (urlsplit(url).hostname or "").lower()
+            host = host[4:] if host.startswith("www.") else host
+            if len(host) >= 5 and host in lowered:
+                return True
+    for source in sources or []:
+        written = " ".join(str(source).lower().split())
+        head, _, rest = written.partition(":")
+        core = rest.strip() if head in _SOURCE_PREFIXES and rest.strip() else written
+        if len(core) >= 8 and core in lowered:
+            return True
+    return False
+
+
 def evidence_of(*groups) -> Evidence:
     """The links agents' tools really returned: their sources and their evidence links.
 
@@ -94,14 +152,18 @@ def evidence_of(*groups) -> Evidence:
     return Evidence(texts)
 
 
-def audit_disagreements(blueprint) -> int:
-    """Mark disagreements settled by who said it, or by nothing at all, as unresolved.
+def audit_disagreements(blueprint, evidence: Evidence | None = None,
+                        sources: list[str] | None = None) -> int:
+    """Mark disagreements nothing outside an agent's own word settled as unresolved.
 
-    Returns how many disagreements are unresolved, so the gate can say so.
+    Settled means pointing at something a tool returned. Who said it is not a reason,
+    and neither is an agent's report of its own diligence. Returns how many are
+    unresolved, so the gate can say so.
     """
     items = blueprint.get("disagreements") if isinstance(blueprint, dict) else None
     if not isinstance(items, list):
         return 0
+    sources = list(sources or []) + known_sources(blueprint)
     unresolved = 0
     for d in items:
         if not isinstance(d, dict):
@@ -110,11 +172,16 @@ def audit_disagreements(blueprint) -> int:
             unresolved += 1
             continue
         reason = " ".join(str(d.get(k) or "") for k in ("decided_by", "resolution_note")).strip()
+        cited = " ".join(str(d.get(k) or "") for k in ("decided_by_source", "decided_by", "resolution_note")).strip()
         problem = None
         if not reason:
             problem = "No evidence was given for how this was settled."
         elif _SETTLED_BY_AUTHOR.search(reason):
             problem = "It was settled by who said it, not by evidence."
+        elif not points_at_evidence(cited, evidence, sources):
+            problem = ("It rests on what an agent said about its own work, which is not evidence."
+                       if _SELF_VOUCHING.search(cited)
+                       else "It names no source any tool returned.")
         if problem:
             d["resolution"] = "unresolved"
             d["flag"] = f"{problem} Decide this one at the gate."
@@ -122,14 +189,15 @@ def audit_disagreements(blueprint) -> int:
     return unresolved
 
 
-def _finish_blueprint(blueprint, evidence: Evidence) -> tuple[dict, int]:
+def _finish_blueprint(blueprint, evidence: Evidence,
+                      sources: list[str] | None = None) -> tuple[dict, int]:
     """Take out links no agent's tool returned, and flag disagreements nobody really settled."""
     if not isinstance(blueprint, dict):
         return blueprint, 0
     blueprint, removed = strip_unevidenced_links(blueprint, evidence)
     if removed:
         blueprint["invented_links_removed"] = len(removed)
-    return blueprint, audit_disagreements(blueprint)
+    return blueprint, audit_disagreements(blueprint, evidence, sources)
 
 
 async def run_synthesis_agent(authoritative_output: dict | list, event_logger=None,
@@ -149,6 +217,7 @@ async def run_synthesis_agent(authoritative_output: dict | list, event_logger=No
     findings_json = json.dumps(authoritative_output, indent=2)
     originals_json = original_findings_json(agent_results)
     evidence = evidence_of(authoritative_output, agent_results or [])
+    cited_sources = known_sources(authoritative_output, agent_results or [])
 
     # Disagreements the findings can settle themselves. They go into the blueprint
     # with both sides shown instead of sending the whole cycle back to research.
@@ -275,7 +344,7 @@ async def run_synthesis_agent(authoritative_output: dict | list, event_logger=No
                 }
             })
 
-        blueprint, unresolved = _finish_blueprint(json.loads(response.text), evidence)
+        blueprint, unresolved = _finish_blueprint(json.loads(response.text), evidence, cited_sources)
         return {
             "status": "ok",
             "has_conflicts": False,
@@ -292,7 +361,7 @@ async def run_synthesis_agent(authoritative_output: dict | list, event_logger=No
                 fallback_blueprint.update(item.get("findings", item))
         else:
             fallback_blueprint = authoritative_output.get("findings", authoritative_output)
-        fallback_blueprint, unresolved = _finish_blueprint(fallback_blueprint, evidence)
+        fallback_blueprint, unresolved = _finish_blueprint(fallback_blueprint, evidence, cited_sources)
         return {
             "status": "ok",
             "has_conflicts": False,

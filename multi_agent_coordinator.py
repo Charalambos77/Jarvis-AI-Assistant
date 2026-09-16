@@ -15,6 +15,7 @@ from agents.execution_agent import run_execution_agent
 from agents.synthesis import (run_synthesis_agent, run_master_synthesis, MERGE_FACT_RULES,
                               DISAGREEMENT_RULES, DISAGREEMENT_SHAPE)
 from agents.links import URL_RE, Evidence, strip_unevidenced_links, cap_for_invented_links
+from agents.brief_changes import record_gate_change
 
 # What a clarified brief means for the agents: it fixes WHAT the user wants, not
 # HOW they are allowed to work. Kept here so every planning call says the same thing.
@@ -1298,6 +1299,9 @@ async def run_full_pipeline(
                     rejected_steps = gate_result.get("rejected_steps")
                     print(f"[Pipeline] Cycle {cycle_id} gate rejected. Re-planning. Note: {redirect_note}")
                     retry_history.append(f"Cycle {cycle_id} rejection retry {retry_count + 1}. Feedback: {redirect_note}")
+                    # What the user said here is now part of what they asked for, so every
+                    # agent, the brief check and the later cycles see it — not just the Brain.
+                    user_brief = await record_gate_change(brief_path, user_brief, f"cycle {cycle_id} research", redirect_note)
                     if event_logger:
                         event_logger({"event_type": "gate_resolved", "source": f"cycle_{cycle_id}_research", "data": gate_result})
                     # Re-plan only this cycle
@@ -1424,6 +1428,7 @@ async def run_full_pipeline(
                 rejected_steps = gate2.get("rejected_steps")
                 print(f"[Pipeline] Execution Blueprint gate rejected. Re-planning. Note: {redirect_note}")
                 retry_history.append(f"Execution Blueprint rejection retry {exec_retry + 1}. Feedback: {redirect_note}")
+                user_brief = await record_gate_change(brief_path, user_brief, "execution blueprint", redirect_note)
                 if event_logger:
                     event_logger({"event_type": "gate_resolved", "source": "execution_blueprint", "data": gate2})
                 # Re-plan execution only. This used to rebuild the whole plan, replacing
@@ -1627,6 +1632,7 @@ async def run_full_pipeline(
                 rejected_steps = gate3.get("rejected_steps")
                 print(f"[Pipeline] Final QA gate rejected. Re-running target agents. Note: {redirect_note}")
                 retry_history.append(f"Final QA rejection retry {final_retry + 1}. Feedback: {redirect_note}")
+                user_brief = await record_gate_change(brief_path, user_brief, "final QA", redirect_note)
                 if event_logger:
                     event_logger({"event_type": "gate_resolved", "source": "final_qa", "data": gate3})
                 if rejected_steps:

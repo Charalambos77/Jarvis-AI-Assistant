@@ -35,4 +35,9 @@ def user_brief_block(user_brief: str | None) -> str:
         "exactly as written. Never swap in a broader, easier or more familiar reading of the "
         "user's words. If you cannot meet one of these constraints, say so plainly instead of "
         "quietly relaxing it.\n"
+        "If the brief ends with changes the user asked for at a review gate, read each one as a "
+        "change TO the brief, not as a replacement FOR it: it alters only what it names, and every "
+        "other requirement above still applies. Where a change replaces a requirement, follow the "
+        "new version and say so. Where it says something is unclear, ask rather than pick a "
+        "reading that suits you.\n"
     )

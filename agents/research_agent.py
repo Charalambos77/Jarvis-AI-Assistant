@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from agents.tool_executor import get_tools_for_execution_agent, run_tool
 from agents.user_brief import user_brief_block
 from agents.links import URL_RE, Evidence, strip_unevidenced_links, cap_for_invented_links
-from agents import tool_review, tool_requests
+from agents import tool_review, tool_requests, agent_questions
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -92,6 +92,62 @@ def verify_sources(claimed, calls: list[dict], tool_texts: list[str],
     return sources, unverified, invented
 
 
+_ESCAPE_RE = re.compile(r"\\(.)", re.DOTALL)
+
+
+def _repair_escapes(text: str) -> str:
+    r"""Make the escapes in a model's "JSON" legal, without changing what it wrote.
+
+    Models write Python, not JSON: \' for an apostrophe, a lone \ inside a path or
+    a title. Neither is valid JSON.
+
+    A sequence JSON already defines is left alone, so a path like C:\notes stays a
+    newline followed by "otes" — nothing can tell those two apart after the fact.
+    """
+    def fix(match):
+        char = match.group(1)
+        if char in '"\\/bfnrtu':
+            return match.group(0)      # already a real JSON escape
+        if char == "'":
+            return "'"                 # \' is Python's, and JSON just wants '
+        return "\\\\" + char           # a lone backslash in the text itself
+    return _ESCAPE_RE.sub(fix, text)
+
+
+def parse_agent_json(text: str) -> dict:
+    r"""An agent's final answer as a dict, tolerating what models actually write.
+
+    Pipeline 9's Cycle 1 lead lost about twenty searches to a single \' inside a
+    link title. One character is not a reason to throw an agent's work away, so
+    the escapes are repaired and the outermost object retried before giving up.
+    """
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        parts = cleaned.split("```")
+        cleaned = parts[1] if len(parts) > 1 else ""
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    if not cleaned:
+        raise ValueError("the agent returned nothing")
+
+    attempts = [cleaned, _repair_escapes(cleaned)]
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end > start:
+        attempts.append(_repair_escapes(cleaned[start:end + 1]))
+    last_error = None
+    for attempt in attempts:
+        try:
+            parsed = json.loads(attempt)
+        except json.JSONDecodeError as e:
+            last_error = e
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+        last_error = ValueError("the agent's answer was not a JSON object")
+    raise last_error
+
+
 async def run_research_agent(
     agent_config: dict,
     memory_context: str | None = None,
@@ -116,7 +172,7 @@ async def run_research_agent(
     declarations, handlers, unavailable = get_tools_for_execution_agent(
         tools_needed, project_name, context=f"{role}: {brief}"[:400]
     )
-    declarations = list(declarations) + [tool_requests.DECLARATION]
+    declarations = list(declarations) + [tool_requests.DECLARATION, agent_questions.DECLARATION]
 
     unavailable_note = ""
     if unavailable:
@@ -164,6 +220,7 @@ CRITICAL RULES:
 11. Approved research from prior cycles is context, not proof. If your own tool evidence contradicts it (e.g. a button, font or client it names is not on the page you inspected), report what you found and list the contradiction under "contradicts_prior_research". Never repeat a prior claim your own evidence disproves.
 12. Never say something is not publicly available unless searches you actually ran failed to find it. List those searches under "searches_tried". Many things that look private have public sources — look for them before giving up.
 13. LINKS: only write a link that one of your tools returned — a URL from web_search's "sources", a page you inspected, a link in a tool result. Put it next to the fact it supports. Never invent, guess, shorten or build a URL: no made-up domains, no search-result addresses, no placeholder links. If you have a fact but no link for it, name where it came from in words. Links no tool returned are removed from your answer and lower your confidence.
+14. ASK INSTEAD OF GUESSING: if what the user wants is genuinely unclear — two of their instructions pull against each other, a word in their brief could mean two things, something they changed at a gate leaves a question open, or a choice is theirs to make — call ask_user and wait for their answer. Ask as many questions as you need, one at a time. Never quietly pick the reading that suits your work, and never redefine one of their words to fit what you already found. Use it for what only they can answer, not for anything you could look up.
 
 Output format:
 {{
@@ -291,7 +348,10 @@ Output format:
                             "icon": "🛠️"
                         }
                     })
-                if fc.name == tool_requests.REQUEST_TOOL_NAME:
+                if fc.name == agent_questions.ASK_USER_NAME:
+                    result = await agent_questions.handle(
+                        tool_args, agent_config=agent_config, kind="research", event_logger=event_logger)
+                elif fc.name == tool_requests.REQUEST_TOOL_NAME:
                     result, tools_changed = await tool_requests.handle(
                         tool_args, agent_config=agent_config, kind="research", project_name=project_name,
                         declarations=declarations, handlers=handlers, event_logger=event_logger)
@@ -346,16 +406,18 @@ Output format:
                 "data": {"role": role, "content": final_text}
             })
 
-        cleaned = final_text.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("```")[1]
-            if cleaned.lower().startswith("json"):
-                cleaned = cleaned[4:]
-            cleaned = cleaned.strip()
-        if not cleaned:
-            cleaned = "{}"
-
-        result = json.loads(cleaned)
+        try:
+            result = parse_agent_json(final_text)
+        except (json.JSONDecodeError, ValueError) as e:
+            # Its searches still happened: keep what it wrote for the lead's review and
+            # the findings file, instead of losing the whole run over the answer's shape.
+            return {
+                "agent_id": agent_id, "role": role, "status": "partial", "confidence": 0.3,
+                "findings": {}, "sources": [], "recommendation": "",
+                "blocked_reason": f"Its final answer could not be read as JSON ({e}). "
+                                  "What it wrote is kept under raw_answer.",
+                "raw_answer": final_text, "tool_calls_made": len(calls),
+            }
         result["agent_id"] = agent_id  # ensure it's always set
         result.setdefault("status", "ok")
 

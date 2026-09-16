@@ -36,7 +36,7 @@ import webview
 import db
 import sections as section_store
 import command_gate
-from agents import tool_review, tool_requests
+from agents import tool_review, tool_requests, agent_questions
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -1570,6 +1570,7 @@ coordinator.register_state_provider("change_settings", change_settings_local)
 coordinator.register_state_provider("start_pipeline", start_pipeline_local)
 tool_review.set_notifier(lambda text: push_message("system", text))
 tool_requests.set_notifier(lambda text: push_message("system", text))
+agent_questions.set_notifier(lambda text: push_message("system", text))
 coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
 coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
 coordinator.register_state_provider("get_pipelines", get_pipelines_local)
@@ -1793,6 +1794,11 @@ def sections_ui_script():
 @app.route("/nav_ui.js")
 def nav_ui_script():
     return send_from_directory(BASE_DIR, "nav_ui.js")
+
+
+@app.route("/questions_ui.js")
+def questions_ui_script():
+    return send_from_directory(BASE_DIR, "questions_ui.js")
 
 
 @app.route("/mic_ui.js")
@@ -2177,6 +2183,32 @@ def tool_requests_decide():
         return jsonify({"error": "request_id is required — without it the wrong request could be "
                                  "answered when more than one is waiting."}), 400
     result = tool_requests.decide(request_id, data.get("decision") or "", reason=data.get("reason") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/questions/pending", methods=["GET"])
+def questions_pending():
+    """Questions agents are waiting on. The pop-up on every page polls this."""
+    return jsonify({"pending": agent_questions.pending(), "wait_seconds": agent_questions.WAIT_SECONDS})
+
+
+@app.route("/questions/log", methods=["GET"])
+def questions_log():
+    """Questions already answered, skipped, or given up on, newest first."""
+    return jsonify({"log": agent_questions.log()})
+
+
+@app.route("/questions/answer", methods=["POST"])
+def questions_answer():
+    """Answer one agent's question, or skip it and leave the decision to the agent."""
+    data = request.get_json(force=True) or {}
+    request_id = (data.get("request_id") or "").strip()
+    if not request_id:
+        return jsonify({"error": "request_id is required — without it the wrong question could be "
+                                 "answered when more than one is waiting."}), 400
+    result = agent_questions.answer(request_id, data.get("answer") or "", skipped=bool(data.get("skipped")))
     if "error" in result:
         return jsonify(result), 400
     return jsonify(result)

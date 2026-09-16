@@ -183,7 +183,14 @@ redefined = {"description": "Is Ireland just starting with AI",
 evidenced = {"description": "Pakistan's policy date", "resolution": "adv_2",
              "decided_by": f"Dawn's report of the cabinet approval ({REAL})"}
 bare = {"description": "New Zealand business adoption", "resolution": "lead"}
-blueprint = {"summary": "s", "disagreements": [circular, redefined, evidenced, bare],
+# How Malaysia got into pipeline 9's five: the agent said it had checked, and that counted.
+self_vouching = {"description": "Malaysia counts as English-speaking", "resolution": "adv_2",
+                 "decided_by": "The AI Adoption Indicator Specialist's explicit mention that it resolved "
+                               "the GDP and English official language data inconsistencies"}
+by_search = {"description": "Pakistan's AI policy year", "resolution": "adv_2",
+             "decided_by": "the approval reported for 2025",
+             "decided_by_source": "web_search: Pakistan AI policy"}
+blueprint = {"summary": "s", "disagreements": [circular, redefined, evidenced, bare, self_vouching, by_search],
              "sources": [REAL, FAKE], "note": f"see {FAKE}"}
 models = use_models(json.dumps({"has_conflicts": False, "conflicts": []}), json.dumps(blueprint))
 result = asyncio.run(synthesis.run_synthesis_agent(lead_out, agent_results=agent_results))
@@ -208,9 +215,15 @@ bp = result["blueprint"]["disagreements"]
 check("a disagreement settled by who said it is marked unresolved",
       bp[0]["resolution"] == "unresolved" and "who said it" in bp[0]["flag"])
 check("so is one settled by redefining the brief's words for the lead's pick", bp[1]["resolution"] == "unresolved")
-check("one settled by evidence stands", bp[2]["resolution"] == "adv_2" and "flag" not in bp[2])
+check("one settled by a link the tools returned stands", bp[2]["resolution"] == "adv_2" and "flag" not in bp[2])
 check("one settled with no evidence given is unresolved", bp[3]["resolution"] == "unresolved" and "No evidence" in bp[3]["flag"])
-check("the gate is told how many are unresolved", result["unresolved_disagreements"] == 3)
+check("an agent vouching for its own diligence does not settle anything",
+      bp[4]["resolution"] == "unresolved" and "its own work" in bp[4]["flag"])
+check("one that names the search it came from stands", bp[5]["resolution"] == "adv_2" and "flag" not in bp[5])
+check("the gate is told how many are unresolved", result["unresolved_disagreements"] == 4)
+check("agents are told to name the source, and that their own word is not evidence",
+      "decided_by_source" in synthesis.DISAGREEMENT_SHAPE
+      and "vouching for itself" in synthesis.DISAGREEMENT_RULES)
 check("the blueprint keeps real links and loses made-up ones",
       result["blueprint"]["sources"] == [REAL] and FAKE not in json.dumps(result["blueprint"])
       and result["blueprint"]["invented_links_removed"] == 1)

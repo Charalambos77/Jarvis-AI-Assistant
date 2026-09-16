@@ -1,0 +1,15 @@
+{
+  "countries_assessed_and_reasons_for_exclusion_inclusion": {
+    "Ireland": "Too mature AI ecosystem (high adoption, extensive government initiatives).",
+    "New Zealand": "Too mature AI ecosystem (high adoption, advanced strategies, 'second wave' of adoption).",
+    "Singapore": "Too mature AI ecosystem (high adoption, substantial investment, sophisticated governance frameworks, leading in Asia).",
+    "Hong Kong": "Too mature AI ecosystem (high adoption across all sectors, significant investment, advanced infrastructure and governance).",
+    "Bangladesh": "English not an official language.",
+    "Kenya": "GDP below $200B.",
+    "Ghana": "GDP below $200B.",
+    "Uganda": "GDP below $200B.",
+    "Cameroon": "GDP below $200B.",
+    "Egypt": "English not an official language."
+  },
+  "evaluation_process": "Systematically evaluated English-speaking countries with GDP between $200B and $1T USD nominal (2023-2024) against criteria for 'just starting to incorporate AI'. Prioritized direct outputs from advisory agents and detailed web search findings for AI adoption status. Re-evaluated countries with nuanced adoption profiles to ensure strict adherence to 'just starting' criterion. Resolved GDP and English official language data inconsistencies to ensure reliable selection."
+}
