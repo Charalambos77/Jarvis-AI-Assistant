@@ -25,6 +25,7 @@ of returning a refusal loudly rather than letting a build claim success.
 The policy lives here; the log and the standing rules live in the database, and
 the HTTP surface lives in jarvis.py.
 """
+import ntpath
 import os
 import re
 import threading
@@ -199,7 +200,8 @@ def signature(segment: str) -> str:
     if not tokens:
         return ""
 
-    program = os.path.basename(tokens[0].strip("\"'")).lower()
+    # ntpath splits on both / and \, so a Windows path reads the same on any OS.
+    program = ntpath.basename(tokens[0].strip("\"'")).lower()
     if program.endswith(".exe"):
         program = program[:-4]
     parts = [program]

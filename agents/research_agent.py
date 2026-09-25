@@ -183,6 +183,11 @@ async def run_research_agent(
               "findings/recommendation that this part is blocked and why.\n"
         )
 
+    # Built outside the f-string: a backslash inside {} is a SyntaxError before Python 3.12.
+    memory_block = ("RELEVANT PAST PATTERNS FROM MEMORY:\n" + memory_context) if memory_context else ""
+    prior_block = ("APPROVED RESEARCH FROM PRIOR CYCLES (use as established context):\n"
+                   + prior_context) if prior_context else ""
+
     system_prompt = f"""
 You are a highly specialized {role} agent in the Jarvis multi-agent system.
 
@@ -190,9 +195,9 @@ YOUR BRIEF:
 {brief}
 
 {user_brief_block(user_brief)}
-{"RELEVANT PAST PATTERNS FROM MEMORY:\n" + memory_context if memory_context else ""}
+{memory_block}
 
-{"APPROVED RESEARCH FROM PRIOR CYCLES (use as established context):\n" + prior_context if prior_context else ""}
+{prior_block}
 
 TOOLS: You have real tools available (write_file, read_file, list_deliverables, and any research
 connectors listed below such as arxiv_search / web_search). USE them to gather real information —
