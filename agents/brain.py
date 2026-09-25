@@ -97,8 +97,8 @@ Enforce the following rules:
 """
 
 # Appended to the Brain's system prompt ONLY when the optional coding agent is
-# actually enabled (agents/code_agent.py — the Claude Agent SDK installed and
-# ANTHROPIC_API_KEY set). Enabled, the Brain should plan software work around a
+# actually enabled (agents/code_agent.py — the Claude Agent SDK installed with
+# ANTHROPIC_API_KEY set, or the Claude CLI on PATH). Enabled, the Brain should plan software work around a
 # tool that genuinely builds and runs code. Not enabled, none of this is added
 # and the Brain plans exactly as it always has.
 CODE_AGENT_CAPABILITY_NOTE = """

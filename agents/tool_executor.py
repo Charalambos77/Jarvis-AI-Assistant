@@ -15,8 +15,9 @@ Three tiers:
                           "the agent wrote prose describing a file" into an
                           actual file landing on disk.
   1b. CODE_TOOLS       — the `code_project` tool, bound only when the optional
-                          Claude Agent SDK is installed AND ANTHROPIC_API_KEY is
-                          set (see agents/code_agent.py). Writing a file and
+                          coding agent has a usable backend — the Claude Agent
+                          SDK with ANTHROPIC_API_KEY, or the Claude CLI on PATH
+                          (see agents/code_agent.py). Writing a file and
                           building working software are different jobs; this
                           tier is the second one. Entirely optional — when it's
                           missing the agent is simply told so and falls back to

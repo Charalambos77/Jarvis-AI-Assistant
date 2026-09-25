@@ -18,6 +18,7 @@ onnxruntime
 # Jarvis runs fine without this. Install it, and set ANTHROPIC_API_KEY in .env,
 # only if you want pipeline execution agents to build and run real software via
 # the `code_project` tool. Without it nothing breaks — the Brain plans as before
-# and execution agents fall back to write_file.
+# and execution agents fall back to write_file. Not needed at all if you use the
+# Claude CLI backend instead (JARVIS_CODE_AGENT_BACKEND=cli; see README).
 #   pip install claude-agent-sdk
 # claude-agent-sdk

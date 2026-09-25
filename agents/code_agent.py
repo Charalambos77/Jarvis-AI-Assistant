@@ -1,5 +1,5 @@
 """
-Code Agent — delegates real software work to the Claude Agent SDK.
+Code Agent — delegates real software work to Claude, via the Agent SDK or the Claude CLI.
 
 Why this exists: execution agents can already write files (agents/tool_executor.py),
 but writing a file is not the same as building working software. Producing code that
@@ -8,22 +8,33 @@ and Gemini function-calling inside execution_agent.py caps out long before that 
 finishes. The Claude Agent SDK is that loop, packaged as a library, so this module
 hands a coding task to it and reports back what actually landed on disk.
 
-ENTIRELY OPTIONAL. Jarvis runs exactly as before without it. The SDK is not in the
-base requirements and no key is assumed:
+Two interchangeable backends run the same task:
 
-  - `claude-agent-sdk` not installed  -> is_available() is False
-  - ANTHROPIC_API_KEY not set         -> is_available() is False
+  - "sdk": the `claude-agent-sdk` Python package. Needs ANTHROPIC_API_KEY.
+  - "cli": the `claude` command-line tool (Claude Code), run headless with
+           `claude -p`. Uses whatever that CLI is logged in with, so a Claude
+           subscription works and no API key is needed.
 
-In either case nothing raises, nothing is bound, and the pipeline continues on the
-same path it took before this module existed. When it IS available, the Brain is told
-so (agents/brain.py) and execution agents get a real `code_project` tool.
+JARVIS_CODE_AGENT_BACKEND picks which one is preferred: "auto" (default — SDK when
+it is usable, otherwise the CLI), "sdk" or "cli". A preferred backend that is not
+usable falls back to the other one rather than switching the coding agent off.
+
+ENTIRELY OPTIONAL. Jarvis runs exactly as before without either. Neither the SDK
+nor the CLI is in the base requirements and no key is assumed; when neither backend
+is usable, is_available() is False, nothing raises, nothing is bound, and the
+pipeline continues on the same path it took before this module existed. When one IS
+available, the Brain is told so (agents/brain.py) and execution agents get a real
+`code_project` tool.
 
 Scope is deliberately narrow: this is wired into the multi-agent PIPELINE only.
 The voice/chat path in coordinator.py never touches it.
 """
 import asyncio
 import concurrent.futures
+import json
 import os
+import shutil
+import subprocess
 import time
 
 from dotenv import load_dotenv
@@ -43,6 +54,20 @@ CODE_AGENT_MODEL = os.getenv("JARVIS_CODE_AGENT_MODEL") or None
 
 _TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 
+BACKENDS = ("sdk", "cli")
+
+# Only the environment is read here, not cached at import, so tests (and a user
+# editing .env before a refresh) can change it without reloading the module.
+def _backend_preference() -> str:
+    pref = (os.getenv("JARVIS_CODE_AGENT_BACKEND") or "auto").strip().lower()
+    return pref if pref in BACKENDS + ("auto",) else "auto"
+
+
+def _cli_command() -> str:
+    """The Claude CLI to run: JARVIS_CLAUDE_CLI when set (a name on PATH or a full
+    path), else `claude`."""
+    return (os.getenv("JARVIS_CLAUDE_CLI") or "claude").strip() or "claude"
+
 # The full transcript of a coding run is long, and it is fed straight back to the
 # calling execution agent as a function response. Cap it so one coding task can't
 # blow that agent's context window. The tail is what's kept — the agent's own
@@ -57,38 +82,83 @@ _availability_cache: dict | None = None
 # Availability — never raises, never required
 # ---------------------------------------------------------------------------
 
+def _sdk_status() -> tuple[bool, str]:
+    try:
+        import claude_agent_sdk  # noqa: F401
+    except ImportError:
+        return False, "the claude-agent-sdk package is not installed"
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return False, "claude-agent-sdk is installed but ANTHROPIC_API_KEY is not set in .env"
+    return True, "claude-agent-sdk installed and ANTHROPIC_API_KEY present"
+
+
+def _find_cli() -> str | None:
+    """Full path to the Claude CLI, or None. shutil.which also resolves the
+    `claude.cmd` shim npm installs on Windows."""
+    return shutil.which(_cli_command())
+
+
+def _cli_status() -> tuple[bool, str]:
+    path = _find_cli()
+    if not path:
+        return False, f"the Claude CLI (`{_cli_command()}`) was not found on PATH"
+    return True, f"Claude CLI found at {path}"
+
+
+_STATUS_CHECKS = {"sdk": _sdk_status, "cli": _cli_status}
+
+
+def _backend_order() -> list[str]:
+    pref = _backend_preference()
+    if pref == "cli":
+        return ["cli", "sdk"]
+    return ["sdk", "cli"]
+
+
 def describe_availability(refresh: bool = False) -> tuple[bool, str]:
     """
     (available, human_readable_reason).
 
     Cached, because this is consulted on every plan and every execution agent's
     tool binding, and the answer only changes when the user installs the SDK or
-    edits .env — both of which mean an app restart anyway. Pass refresh=True to
-    re-check within a single run.
+    the CLI, or edits .env — all of which mean an app restart anyway. Pass
+    refresh=True to re-check within a single run.
     """
+    return _resolve(refresh)[1:]
+
+
+def selected_backend(refresh: bool = False) -> str | None:
+    """"sdk" or "cli" — the backend a coding task will run on — or None when
+    neither is usable."""
+    return _resolve(refresh)[0]
+
+
+def _resolve(refresh: bool = False) -> tuple[str | None, bool, str]:
     global _availability_cache
     if _availability_cache is not None and not refresh:
-        return _availability_cache["available"], _availability_cache["reason"]
+        c = _availability_cache
+        return c["backend"], c["available"], c["reason"]
 
-    available, reason = False, ""
-    try:
-        import claude_agent_sdk  # noqa: F401
-    except ImportError:
+    order = _backend_order()
+    statuses = {name: _STATUS_CHECKS[name]() for name in order}
+    backend = next((name for name in order if statuses[name][0]), None)
+
+    if backend is None:
         reason = (
-            "the claude-agent-sdk package is not installed "
-            "(optional — `pip install claude-agent-sdk` to enable real coding tasks)"
+            f"no coding backend is usable — {statuses['sdk'][1]}, and {statuses['cli'][1]} "
+            "(optional — `pip install claude-agent-sdk` plus ANTHROPIC_API_KEY, or install "
+            "and log in to the Claude CLI, to enable real coding tasks)"
+        )
+    elif backend != order[0]:
+        reason = (
+            f"using the {backend} backend: {statuses[backend][1]} "
+            f"(preferred {order[0]} backend unavailable: {statuses[order[0]][1]})"
         )
     else:
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            reason = (
-                "claude-agent-sdk is installed but ANTHROPIC_API_KEY is not set in .env "
-                "(optional — add a key from the Anthropic Console to enable real coding tasks)"
-            )
-        else:
-            available, reason = True, "claude-agent-sdk installed and ANTHROPIC_API_KEY present"
+        reason = f"using the {backend} backend: {statuses[backend][1]}"
 
-    _availability_cache = {"available": available, "reason": reason}
-    return available, reason
+    _availability_cache = {"backend": backend, "available": backend is not None, "reason": reason}
+    return backend, backend is not None, reason
 
 
 def is_available(refresh: bool = False) -> bool:
@@ -216,6 +286,70 @@ async def _run_query(task: str, workspace: str, event_logger, agent_id: str) -> 
     return "\n".join(transcript).strip()
 
 
+def _run_cli(task: str, workspace: str, timeout: int) -> str:
+    """
+    Run the task through `claude -p` in the workspace and return its final text.
+
+    The prompt goes in on stdin rather than as an argument: on Windows an npm
+    install runs `claude.cmd`, and cmd.exe cuts a multi-line argument off at the
+    first newline. For the same reason the system prompt is folded into that
+    stdin text instead of passed with --append-system-prompt.
+
+    `--output-format json` prints one JSON object when the run ends, so there is
+    no live progress to stream — the caller's start and finish narratives are what
+    the UI sees. Raises subprocess.TimeoutExpired on timeout (the child is killed
+    by subprocess.run) and RuntimeError when the CLI reports a failure.
+    """
+    path = _find_cli()
+    if not path:
+        raise RuntimeError(f"the Claude CLI (`{_cli_command()}`) was not found on PATH")
+
+    cmd = [
+        path, "-p",
+        "--allowedTools", ",".join(_TOOLS),
+        "--permission-mode", "acceptEdits",
+        "--output-format", "json",
+    ]
+    if CODE_AGENT_MODEL:
+        cmd += ["--model", CODE_AGENT_MODEL]
+
+    proc = subprocess.run(
+        cmd,
+        cwd=workspace,
+        input=f"{SYSTEM_PROMPT}\nYOUR TASK:\n{task}",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+
+    payload = None
+    stdout = (proc.stdout or "").strip()
+    if stdout:
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError:
+            # Some CLI versions print a warning line before the JSON; the result
+            # object is always the last line.
+            try:
+                payload = json.loads(stdout.splitlines()[-1])
+            except (json.JSONDecodeError, IndexError):
+                payload = None
+
+    if isinstance(payload, dict):
+        text = payload.get("result") if isinstance(payload.get("result"), str) else ""
+        if payload.get("is_error") or proc.returncode != 0:
+            detail = text or payload.get("subtype") or (proc.stderr or "").strip()
+            raise RuntimeError(f"Claude CLI reported an error: {detail[:1000]}")
+        return text.strip()
+
+    detail = (proc.stderr or "").strip() or stdout or f"exit code {proc.returncode}"
+    if proc.returncode != 0:
+        raise RuntimeError(f"Claude CLI exited with code {proc.returncode}: {detail[:1000]}")
+    raise RuntimeError(f"Claude CLI returned output that was not JSON: {detail[:1000]}")
+
+
 def run_coding_task(
     project_name: str,
     agent_id: str,
@@ -235,7 +369,7 @@ def run_coding_task(
     coding agent all come back as {"status": "error", ...} and leave the calling
     pipeline free to carry on.
     """
-    available, reason = describe_availability()
+    backend, available, reason = _resolve()
     if not available:
         return {"status": "error", "action": "code_project", "error": f"Coding agent unavailable: {reason}"}
 
@@ -256,24 +390,29 @@ def run_coding_task(
             "source": agent_id,
             "data": {
                 "phase": "execution",
-                "message": f"Handing a coding task to the Claude coding agent in {os.path.relpath(workspace, BASE_DIR)}...",
+                "message": f"Handing a coding task to the Claude coding agent ({backend}) in {os.path.relpath(workspace, BASE_DIR)}...",
                 "icon": "💻",
             },
         })
+
+    limit = timeout or DEFAULT_TIMEOUT
 
     def _worker() -> str:
         return asyncio.run(
             asyncio.wait_for(
                 _run_query(task, workspace, event_logger, agent_id),
-                timeout=timeout or DEFAULT_TIMEOUT,
+                timeout=limit,
             )
         )
 
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            summary = pool.submit(_worker).result()
+        if backend == "cli":
+            summary = _run_cli(task, workspace, limit)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                summary = pool.submit(_worker).result()
         status, error = "ok", None
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, subprocess.TimeoutExpired):
         summary, status = "", "error"
         error = f"Coding agent exceeded its {timeout or DEFAULT_TIMEOUT}s time limit."
     except Exception as e:
@@ -293,6 +432,7 @@ def run_coding_task(
     result = {
         "status": status,
         "action": "code_project",
+        "backend": backend,
         "path": rel_workspace,
         "files_changed": files,
         "duration_seconds": round(time.time() - started, 1),
