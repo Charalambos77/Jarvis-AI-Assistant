@@ -36,8 +36,8 @@ To go back to your old version at any time: `git checkout main`.
 | 5 | Jarvis understands every task and researches it first | Plan page, Human Gate card |
 | 6 | Suggestions: other ways to do each part of a plan | **Suggestions** button in the top nav |
 | 7 | Sections plan a whole project | Plan page, a finished pipeline's "make a section" button, then the section's dashboard |
-| 8 | Start a section from a folder | The IDE (see 9), or `JarvisSections.createFromFolder` |
-| 9 | The in-app IDE (Workbench) | See section 9 |
+| 8 | Start a section from a folder | **IDE** page, "◆ Make a section from this folder" |
+| 9 | The in-app IDE (Workbench) | **IDE** button in the top nav |
 | 10 | The coding agent can run on the Claude CLI | `.env` settings |
 
 The branch also carries earlier work that was already waiting on other branches and is not in `main` yet: the pipeline details and clarification window, the pipeline review fixes, the website inspector, the Antigravity CLI connection, your own "Logic Changes" and "Finished sections" commits, and your 6 September install script update from `main`.
@@ -57,7 +57,7 @@ The branch also carries earlier work that was already waiting on other branches 
 
 **How to test**
 1. Open the **Control room**. You should see sections for waiting calls, new risky tools, tools to review, spending limits, rules and connected services.
-2. Under connected services, switch on an MCP server. Within a minute or two its tools appear under "new tools to review", with risk badges. Approve all, approve read only, or tick some.
+2. Under connected services, switch on an MCP server. After Jarvis has researched them, its tools appear under "new tools to review", with risk badges. Approve all, approve read only, or tick some.
 3. If the server has a delete or pay tool, it appears under new risky tools. Leave it: it should still be waiting after 10 minutes.
 4. Connect an API (for example YouTube). Jarvis finds its description and it gets tools. For a service with no description, paste its spec link and check the tools appear.
 5. Set a spending limit on a service, then run a pipeline that would use a paid tool. The call should wait in "waiting calls". Try **Deny** and check the agent says the action did not happen.
@@ -129,13 +129,49 @@ The branch also carries earlier work that was already waiting on other branches 
 - A section can now start from a folder on your PC instead of a finished pipeline. Jarvis reads the folder (he never writes to it) and plans the section from what is there.
 - This is what the IDE's "make a section from a folder" button uses.
 
+- The section's own files go in a new folder beside the one you picked, such as "Hello App (2)".
+
 **How to test**
-1. See section 9 for the button in the IDE.
-2. Pick a project folder. The "Make this a section" window opens and says Jarvis is reading the folder, then continues like section 7.
+1. Open the **IDE**, pick a project, and click "◆ Make a section from this folder" at the top of the file list (or the ◆ next to any subfolder).
+2. The "Make this a section" window opens and says Jarvis is reading the folder. Go through it like section 7, up to **Create section**.
+3. You land in the new section. Check the folder you picked is unchanged.
 
 ## 9. The in-app IDE (Workbench)
 
-_IDE_NOTES_PLACEHOLDER_
+**What changed**
+- **New IDE page.** It has an **IDE** button in the nav on every page (`ide.html`, backend `ide.py`). It opens any project folder under `Let Jarvis Handle It/` and has three panes:
+  - **Files** on the left. You can add a file or folder, and rename or delete anything.
+  - **Code editor** in the middle, with tabs. `Ctrl+S` saves. If Jarvis or a CLI changed the file on disk since you opened it, saving asks you first instead of overwriting.
+  - **Terminal** underneath, toggled with `Ctrl+backtick`. It runs in the project folder. It still refuses the hard-denylist commands from the Commands page.
+- **Missions** (the right-hand panel). Tell Jarvis what to build, fix or explain.
+  - **Review** mode: he shows what he understood and his plan first. You approve it, optionally with notes, and then accept or reject each change as a side-by-side diff.
+  - **Autopilot**: he applies his changes, and each one can be reverted.
+  - **Commands**: the ones he suggests are never run by him. Each has a "Run in terminal" button.
+  - **Other controls**: reply on the same mission to keep going, and use Stop while he's working. The **Missions** switch at the top makes this panel fill the whole screen.
+- **Who does the work** (the dropdown in the Missions panel):
+  - **Jarvis:** his own model, either a Gemini model or a local Ollama model, so the IDE works with no CLI connected.
+  - **Antigravity CLI:** its edits arrive already applied, still with diffs and Revert.
+  - **Claude:** the coding agent from section 10. It needs the Claude CLI or the SDK set up, and shows "not set up" otherwise.
+- **Make a section from a folder.** The "◆ Make a section from this folder" button sits at the top of the file list, and every subfolder has a ◆ that does the same. Both open the same window as making a section from a pipeline: brief, questions, the written brief, research and the whole-project plan, the requirements to tick, then Create section.
+  - The picked folder is only read. The section's own files go in a new folder beside it, such as "Hello App (2)", and that folder also shows up in the IDE's project list.
+  - A folder that's already a section shows its name at the top instead, and clicking it opens the section.
+- **Safety:** the IDE only answers requests from this PC. Jarvis's server otherwise listens on your whole network. Set `JARVIS_IDE_ALLOW_REMOTE=1` if you really want other machines to reach it.
+- **Offline:** the code editor loads from the internet (cdnjs). Without it, you get a plain text box and everything else still works.
+
+**How to test**
+1. Offline checks: `python scripts/test_ide.py` should give 61 passed. It spends no tokens.
+2. Start Jarvis and click **IDE** in the nav. Pick a project from the dropdown at the top, or make one with ＋.
+3. Open a file, type something and press `Ctrl+S`. The dot on the tab goes away, and the file on disk changes.
+4. Pick the Jarvis engine and a model at the top of the Missions panel. Leave the mode on **Review**, and ask something like "add a function that adds two numbers and a test for it". Then:
+   - You'll see what he understood and his plan. Click **Approve plan**.
+   - Click a changed file to see the diff, then **Accept** it.
+   - Click **Run in terminal** on the command he suggests.
+   - Try **Revert** on one change.
+5. Switch to **Autopilot** and ask for another small change. It's applied straight away, and each change has **Revert**.
+6. Ask a question with no edits, such as "what does this file do?". He answers and changes nothing.
+7. In the terminal, run something long (`ping -t localhost` on Windows) and press **stop**.
+8. Click **◆ Make a section from this folder** and go through the window all the way to **Create section**. You land in the new section. Back in the IDE, the top of the file list now shows the section's name.
+9. If Antigravity (`agy`) is installed, choose "Antigravity CLI" as the engine and give it a small task. Its changes show as applied, with diffs.
 
 ## 10. The coding agent can run on the Claude CLI
 
@@ -159,13 +195,20 @@ _IDE_NOTES_PLACEHOLDER_
 
 From the Jarvis folder:
 
+In **Command Prompt** (not PowerShell):
+
 ```
 for %f in (scripts\test_*.py) do venv\Scripts\python %f
 ```
 
 Each script ends with "All ... checks passed" when it passes.
 
-_TEST_RESULTS_PLACEHOLDER_
+Before pushing, all 35 test scripts passed on Linux with Python 3.12 (the desktop-only modules stood in, `GEMINI_API_KEY=fake`, `mcp<2`, Playwright 1.62). Every page (Control room, Suggestions, IDE, Plan, Library, Section) also loaded in the merged app.
+
+Fixes made while merging, so you know they're there:
+- A coding agent's built folder shows up as a clickable result again.
+- Two test scripts were adjusted to the coding agent's extra setting and prompt note.
+- Pause/stop, the "research first?" question and Suggestions were joined in the same part of the pipeline code, keeping all three.
 
 ## 12. Known limits
 
