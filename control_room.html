@@ -699,12 +699,10 @@ function decideTool(service, tool, decision) {
 
 async function refresh() {
     try {
-        const [p, t, r] = await Promise.all([
+        const [p, t] = await Promise.all([
             fetch('/control/pending').then(x => x.json()),
-            fetch('/control/tools').then(x => x.json()),
-            fetch('/control/runs').then(x => x.json())
+            fetch('/control/tools').then(x => x.json())
         ]);
-        renderRuns(r.runs || []);
         renderCalls(p.calls || []);
         renderHeld(p.tools || []);
         renderRules(t.tools || []);
@@ -712,6 +710,11 @@ async function refresh() {
     } catch (e) { /* Jarvis restarting; the next tick picks it up. */ }
 
     // Kept apart, so one failing route can't blank the rest of the page.
+    try {
+        const r = await fetch('/control/runs').then(x => x.json());
+        renderRuns(r.runs || []);
+    } catch (e) { /* Not available yet; the next tick tries again. */ }
+
     try {
         const ob = await fetch('/tool_onboarding/pending').then(x => x.json());
         renderOnboarding(ob.pending || [], ob.log || [], ob.wait_seconds || 600, ob.researching || []);
