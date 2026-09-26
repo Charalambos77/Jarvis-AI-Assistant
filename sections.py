@@ -1188,12 +1188,29 @@ def close_coverage_gaps(plan: dict, crew: dict) -> tuple[dict, dict, list[str]]:
         what = "requirement" if asks[aid].get("origin") == "research" else "ask"
         title = slugify(text, "Ask")[:60].strip()
         pid = part_id_for(title)
-        if any(p["id"] == pid for p in plan["parts"]):
-            pid = part_id_for(f"{title} {aid}")
         role = f"{title} Owner"
         if _norm(role) in roles:
             role = f"{title} Owner ({aid})"
         roles.add(_norm(role))
+        agent = {
+            "role": role, "is_lead": True, "origin": "brief", "covers": [aid],
+            "brief": f"Owns this {what} until it is planned properly: {text}",
+            "why": f"Added so this {what} is not forgotten. Nothing else in the plan covered it.",
+        }
+        # A part already named like this ask takes the agent, because a second
+        # department with the same name would be merged away, and the ask with it.
+        same = next((d for d in crew.get("departments", [])
+                     if _norm(d.get("domain")) == _norm(title) or d.get("id") == pid), None)
+        if same:
+            agent["is_lead"] = False
+            same.setdefault("agents", []).append(agent)
+            part = next((p for p in plan["parts"] if p["id"] == same.get("id")), None)
+            if part is not None and aid not in part.setdefault("covers", []):
+                part["covers"].append(aid)
+            added.append(aid)
+            continue
+        if any(p["id"] == pid for p in plan["parts"]):
+            pid = part_id_for(f"{title} {aid}")
         order += 1
         plan["parts"].append({
             "id": pid, "title": title, "goal": text, "order": order, "status": "todo",
@@ -1201,12 +1218,7 @@ def close_coverage_gaps(plan: dict, crew: dict) -> tuple[dict, dict, list[str]]:
             "gap": True,
         })
         crew.setdefault("departments", []).append({
-            "id": pid, "domain": title, "goal": text, "origin": "brief",
-            "agents": [{
-                "role": role, "is_lead": True, "origin": "brief", "covers": [aid],
-                "brief": f"Owns this {what} until it is planned properly: {text}",
-                "why": f"Added so this {what} is not forgotten. Nothing else in the plan covered it.",
-            }],
+            "id": pid, "domain": title, "goal": text, "origin": "brief", "agents": [agent],
         })
         added.append(aid)
     return plan, crew, added

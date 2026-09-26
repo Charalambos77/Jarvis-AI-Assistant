@@ -372,7 +372,16 @@ check("dropping a part on the dashboard drops it from the plan",
 check("and shows the ask it leaves uncovered", r["coverage"]["uncovered"] == ["ask_3"])
 
 # ---- 5. re-planning keeps hand edits, and closes the gap again --------------
+app.post(f"/sections/{SID}/needs", json={"skipped": ["need_2"]})
+MODEL["needs"] = [{"requirements": [
+    {"text": "Rental car operator licence"}, {"text": "Commercial vehicle insurance"}]}]
 r = app.post(f"/sections/{SID}/plan").get_json()
+skipped_after = [a["text"] for a in r["plan"]["asks"] if a.get("skipped")]
+check("a requirement left out stays out after a re-plan",
+      skipped_after == ["Commercial vehicle insurance"])
+check("and no agent is added back for it",
+      not any("Commercial vehicle insurance" in a["role"]
+              for d in r["crew"]["departments"] for a in d["agents"]))
 check("re-planning an existing section runs", r["state"] == "done")
 roles = {a["role"] for d in r["crew"]["departments"] for a in d["agents"]}
 check("the standing agents are kept", "Competitor Analyst" in roles and "Company Registrar" in roles)
@@ -418,6 +427,21 @@ SID2 = r.get_json()["section"]["id"]
 detail = app.get(f"/sections/{SID2}").get_json()
 check("and the section ends up with a whole plan", len(detail["plan"]["parts"]) >= 10)
 check("with every ask covered", detail["coverage"]["uncovered"] == [])
+
+# ---- 8. edge cases the real model produces ----------------------------------
+# An ask worded exactly like an existing part must still end up covered, not
+# merged away with a duplicate department.
+plan_e = {"asks": [{"id": "ask_1", "text": "Finance", "origin": "owner"}],
+          "parts": [{"id": "dept_finance", "title": "Finance", "order": 1, "covers": []}]}
+crew_e = {"departments": [{"id": "dept_finance", "domain": "Finance",
+                           "agents": [{"role": "Bookkeeper", "brief": "Own the books."}]}]}
+plan_e, crew_e, _ = section_store.close_coverage_gaps(plan_e, crew_e)
+crew_e = section_store.normalise_crew(crew_e)
+check("an ask named like an existing part is still covered",
+      section_store.plan_coverage(plan_e, crew_e)["uncovered"] == [])
+check("research questions given as objects are still searched",
+      jarvis._section_question_list([{"question": "A?"}, "B?", "B?", {"query": "C?"}], 10)
+      == ["A?", "B?", "C?"])
 
 cleanup()
 print()

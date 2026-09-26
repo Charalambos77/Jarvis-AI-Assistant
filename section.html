@@ -601,9 +601,13 @@
         const cov = sectionData.coverage || { covered: {}, uncovered: [] };
         const listHtml = (label, items, choosable) => {
             if (!items.length) return "";
+            const skipped = items.filter(a => a.skipped).length;
+            const counted = items.length - skipped;
             const missing = items.filter(a => !a.skipped && !(cov.covered[a.id] || []).length).length;
-            let out = '<details class="plan-asks"' + (missing ? ' open' : '') + '><summary>' +
-                label + ': ' + (items.length - missing) + ' of ' + items.length + ' covered' +
+            // The requirements stay open: that is where you choose which to add.
+            let out = '<details class="plan-asks"' + (missing || choosable ? ' open' : '') + '><summary>' +
+                label + ': ' + (counted - missing) + ' of ' + counted + ' covered' +
+                (skipped ? ' · ' + skipped + ' not added' : '') +
                 (missing ? ' · ' + missing + ' need an agent' : '') + '</summary><ul>';
             items.forEach(a => {
                 const who = cov.covered[a.id] || [];

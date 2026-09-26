@@ -686,4 +686,4 @@ to in progress when the pipeline starts and to done when it completes.
 agents, hand edits and finished parts are kept. A section made with *Create
 section without questions* is planned right after creation.
 
-Tests: `scripts/test_section_plan.py` (77 checks).
+Tests: `scripts/test_section_plan.py` (81 checks).

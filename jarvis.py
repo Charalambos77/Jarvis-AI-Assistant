@@ -4274,6 +4274,18 @@ def _section_requirements(inputs: dict, understanding: dict, asks: list[dict],
     return data if isinstance(data, dict) else {}
 
 
+def _section_question_list(raw, limit: int) -> list[str]:
+    """Search questions from a model reply: strings, or objects with a question."""
+    out = []
+    for q in raw if isinstance(raw, list) else []:
+        if isinstance(q, dict):
+            q = q.get("question") or q.get("query") or ""
+        q = str(q or "").strip()
+        if q and q not in out:
+            out.append(q)
+    return out[:limit]
+
+
 def _section_add_needs(asks: list[dict], raw) -> int:
     """Add research requirements to the list every part must cover. Returns how many."""
     known = {section_store._norm(a["text"]) for a in asks}
@@ -4343,8 +4355,8 @@ def _run_section_plan(inputs: dict, job: dict) -> dict:
     _plan_job_step(job, step, "done", f"{len(asks)} asks")
 
     # ---- 2. research everything the section needs ----
-    questions = [str(q).strip() for q in (understanding.get("research_questions") or [])
-                 if str(q).strip()][:SECTION_RESEARCH_MAX_QUESTIONS]
+    questions = _section_question_list(understanding.get("research_questions"),
+                                       SECTION_RESEARCH_MAX_QUESTIONS)
     research = []
 
     def _one(question, prefix="Researching what it takes"):
@@ -4383,8 +4395,8 @@ def _run_section_plan(inputs: dict, job: dict) -> dict:
         added = _section_add_needs(asks, needs.get("requirements"))
         _plan_job_step(job, step, "done", f"{added} requirements")
 
-        dive = [str(q).strip() for q in (needs.get("deep_dive_questions") or [])
-                if str(q).strip() and str(q).strip() not in questions][:SECTION_DEEP_DIVE_MAX]
+        dive = [q for q in _section_question_list(needs.get("deep_dive_questions"), 50)
+                if q not in questions][:SECTION_DEEP_DIVE_MAX]
         if dive:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=4) as pool:
@@ -4618,6 +4630,14 @@ def _apply_plan_to_section(section: dict, result: dict) -> dict:
             if old.get("status") in ("done", "in_progress") and part.get("status") != "done":
                 part["status"] = old["status"]
     plan = section_store.sync_part_statuses(plan, _section_pipelines(section["id"]))
+    # A requirement the owner chose not to add stays out after a re-plan.
+    was_skipped = {section_store._norm(a["text"]) for a in section_store.read_plan(folder).get("asks", [])
+                   if a.get("skipped")}
+    if was_skipped:
+        plan["asks"] = [dict(a) for a in plan.get("asks", [])]
+        plan, crew = section_store.choose_needs(
+            plan, crew, [a["id"] for a in plan["asks"] if a.get("origin") == "research"
+                         and section_store._norm(a["text"]) in was_skipped])
     # Standing departments the plan did not mention are the founding work.
     planned = {p["id"] for p in plan.get("parts", [])}
     for d in crew["departments"]:
