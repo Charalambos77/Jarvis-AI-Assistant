@@ -151,6 +151,9 @@ r = ps.apply("p1", "Proj", whole["id"])
 st = r["state"]
 check("the whole plan is replaced by the suggestion's parts",
       [p["name"] for p in st["parts"]] == ["Pull the market data", "Write it up"])
+check("swapped-in parts get ids no old part suggestion points at",
+      all(p["part_id"].startswith(whole["id"] + "_part_") for p in st["parts"])
+      and not any(s["scope"] == p["part_id"] for s in st["suggestions"] for p in st["parts"]))
 check("part suggestions no longer fit and say so",
       all(s["status"] == "outdated" for s in st["suggestions"] if s["scope"] != "plan"))
 check("an outdated suggestion can't be applied", "error" in ps.apply("p1", "Proj", best["id"]))
@@ -203,6 +206,10 @@ check("a re-planned roster gets new suggestions", gate.count("write_plan_suggest
 check("execution locks the plan on a resume too",
       "take_chosen_plan(plan_id, project_name, agent_plan, event_logger, lock=True)" in
       src[src.index("if not skip_execution:"):src.index("run_execution_phase(agent_plan")])
+phase4 = src[src.index("# Phase 4: Plan the execution agents"):src.index("# Phase 5: Gate")]
+check("a restart while the gate is open keeps the owner's plan instead of planning again",
+      phase4.index("plan_suggestions.load") < phase4.index("take_chosen_plan") < phase4.index("plan_execution_agents(")
+      and 'not kept.get("locked")' in phase4)
 brain = open("agents/brain.py", encoding="utf-8").read()
 check("the Brain is told to research the ways to do the work", "RESEARCH THE WAYS TO DO THE WORK" in brain)
 

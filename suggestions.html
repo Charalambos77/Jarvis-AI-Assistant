@@ -372,9 +372,13 @@ function render() {
         ${whole.length ? `<div class="alts" style="margin-top:0">${whole.map(s => suggestionCard(s, canChange)).join("")}</div>`
                        : `<div class="empty">No different way to do the whole plan. The ideas are per part, below.</div>`}`;
 
+    // Ideas for parts the plan no longer has (after a whole-plan swap) are hidden, not shown under new parts.
+    const hidden = all.filter(s => s.scope !== "plan" && s.status === "outdated").length;
     const partsHtml = `<div class="section-title">The plan, part by part <span class="count-pill">${parts.length}</span></div>` +
+        (hidden ? `<div class="goal" style="margin:-4px 0 14px">${hidden} idea(s) for the old parts are hidden while
+            the whole plan is swapped. Undo or go back to Jarvis's plan to see them again.</div>` : "") +
         parts.map((p, i) => {
-            const mine = sortByKind(all.filter(s => s.scope === p.part_id));
+            const mine = sortByKind(all.filter(s => s.scope === p.part_id && s.status !== "outdated"));
             const swapped = String(p.source || "").startsWith("suggestion:");
             const k = "p:" + p.part_id;
             return `<div class="card part ${swapped ? "swapped" : ""}">

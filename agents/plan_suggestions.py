@@ -439,7 +439,11 @@ def apply(plan_id: str, project_name: str, suggestion_id: str) -> dict:
         })
 
         if s["scope"] == "plan":
-            state["parts"] = [dict(copy.deepcopy(p), source=f"suggestion:{suggestion_id}") for p in s["parts"]]
+            # The swapped-in parts get ids of their own, so the suggestions written for
+            # the old parts can't land on a new part that happens to share its number.
+            state["parts"] = [dict(copy.deepcopy(p), part_id=f"{suggestion_id}_part_{i}",
+                                   source=f"suggestion:{suggestion_id}")
+                              for i, p in enumerate(s["parts"], start=1)]
             for x in state["suggestions"]:
                 if x["scope"] == "plan":
                     x["status"] = "applied" if x["id"] == suggestion_id else "open"

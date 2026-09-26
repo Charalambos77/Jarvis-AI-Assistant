@@ -1493,20 +1493,33 @@ async def run_full_pipeline(
             # roster was only a draft written before any research existed. Only runs once
             # (guarded the same way the gate below is) — a resume after this gate was
             # already approved should never silently rewrite an already-reviewed plan.
-            print("[Pipeline] Phase 4: Planning execution agents from completed research...")
-            agent_plan["execution_agents"] = plan_execution_agents(
-                planning_task, agent_plan.get("execution_agents", []), master_blueprint,
-                user_brief=user_brief, event_logger=event_logger
-            )
-            agent_plan["execution_plan_final"] = True
-            save_agent_plan_file(plan_id, agent_plan, project_name)
-            if event_logger:
-                event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
+            # A restart while this gate was open keeps the plan the owner was looking at,
+            # with the ways they swapped in on the Suggestions page, instead of planning
+            # a new roster and throwing their choices away.
+            kept = plan_suggestions.load(plan_id, project_name) if existing_plan and plan_id else None
+            if kept and not kept.get("locked") and kept.get("status") == "ready" \
+                    and plan_suggestions.execution_agents(kept):
+                print("[Pipeline] Phase 4: Resuming with the plan and suggestions from before the restart.")
+                take_chosen_plan(plan_id, project_name, agent_plan, event_logger)
+                agent_plan["execution_plan_final"] = True
+                save_agent_plan_file(plan_id, agent_plan, project_name)
+                if event_logger:
+                    event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
+            else:
+                print("[Pipeline] Phase 4: Planning execution agents from completed research...")
+                agent_plan["execution_agents"] = plan_execution_agents(
+                    planning_task, agent_plan.get("execution_agents", []), master_blueprint,
+                    user_brief=user_brief, event_logger=event_logger
+                )
+                agent_plan["execution_plan_final"] = True
+                save_agent_plan_file(plan_id, agent_plan, project_name)
+                if event_logger:
+                    event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
 
-            # Phase 4b: The plan split into parts, with the other ways to do each part
-            # (best, cheapest, best result). The owner can swap them in on the
-            # Suggestions page while the gate below is open.
-            write_plan_suggestions(plan_id, project_name, user_brief, agent_plan, master_blueprint, event_logger)
+                # Phase 4b: The plan split into parts, with the other ways to do each part
+                # (best, cheapest, best result). The owner can swap them in on the
+                # Suggestions page while the gate below is open.
+                write_plan_suggestions(plan_id, project_name, user_brief, agent_plan, master_blueprint, event_logger)
 
             # Phase 5: Gate — Review Execution Blueprint
             print("[Pipeline] Phase 5: Waiting for human approval of execution blueprint...")
