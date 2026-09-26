@@ -549,6 +549,8 @@ async def wait_for_tool_reviews(connectable_keys, event_logger=None) -> list[str
     services = [k.split(":", 1)[1] if k.startswith(("mcp:", "api:")) else k for k in (connectable_keys or [])]
     waited, announced = [], None
     while True:
+        if run_control.stop_requested():
+            raise run_control.PipelineStopped("Stopped while waiting for tool reviews")
         waiting = await asyncio.to_thread(tool_onboarding.waiting_on_review, services)
         if not waiting:
             break
@@ -974,6 +976,8 @@ async def run_full_pipeline(
             original_event_logger(event)
 
     event_logger = local_logger
+    # Every agent task started from here knows which run it belongs to.
+    run_control.bind(plan_id)
 
     try:
         # Check if we are resuming an existing plan

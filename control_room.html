@@ -315,8 +315,8 @@ const RUN_STATE = {
 function runWhere(r) {
     if (r.state === "stopped") return "Stopped with its progress saved. Resume picks it up where it left off.";
     if (r.gate) return `Waiting for your approval at ${esc(r.gate)}.`;
-    if (r.state === "paused") return r.at ? `Paused before ${esc(r.at)}.` : "Pauses when its current step finishes.";
-    if (r.state === "stopping") return "Stops when its current step finishes.";
+    if (r.state === "paused") return r.at ? `Paused before ${esc(r.at)}.` : "Pauses when its current model call finishes.";
+    if (r.state === "stopping") return "Stops when its current model call finishes.";
     return r.at ? `Working on ${esc(r.at)}.` : "Starting.";
 }
 
@@ -337,7 +337,7 @@ function renderRuns(items) {
     pill('run-count', items.filter(r => r.state !== "stopped").length);
     const host = document.getElementById('runs');
     if (!items.length) {
-        host.innerHTML = `<div class="empty">No pipeline is running. Pause and stop take effect between agent steps: the step an agent is on always finishes first.</div>`;
+        host.innerHTML = `<div class="empty">No pipeline is running. Pause and stop take effect between agent steps and between an agent's tool calls: a model call already under way always finishes first.</div>`;
         return;
     }
     host.innerHTML = items.map(r => {

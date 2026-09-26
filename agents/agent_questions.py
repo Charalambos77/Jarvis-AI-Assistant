@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+import run_control
 
 ASK_USER_NAME = "ask_user"
 
@@ -132,6 +133,9 @@ async def ask(agent_id: str, role: str, kind: str, brief: str, question: str, wh
             if given is None and time.time() >= item["deadline"]:
                 _PENDING.pop(request_id, None)
                 given = {"answer": "", "skipped": False, "timed_out": True}
+            elif given is None and run_control.stop_requested(item["plan_id"] or None):
+                _PENDING.pop(request_id, None)
+                given = {"answer": "", "skipped": True, "timed_out": False}
         if given is not None:
             break
         await asyncio.sleep(POLL_SECONDS)

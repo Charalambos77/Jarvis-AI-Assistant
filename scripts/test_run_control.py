@@ -11,6 +11,7 @@ What has to hold:
 Runs against a throwaway database, with a stand-in pipeline and no model calls.
 """
 import asyncio
+import json
 import os
 import shutil
 import sys
@@ -191,6 +192,66 @@ check("stopping a run that isn't running is refused", r.status_code == 400)
 
 check("voice and chat can pause and stop too",
       {"pause_pipeline", "stop_pipeline"} <= {t["name"] for t in coordinator.TOOLS})
+
+
+# ---- waits inside an agent step end when their run is stopped ---------------
+import control_room
+from agents import agent_questions, tool_review
+
+
+async def stop_soon(pid):
+    await asyncio.sleep(0.3)
+    run_control.stop(pid)
+
+
+async def held_call():
+    run_control.register("held-1")
+    run_control.bind("held-1")
+    control_room.POLL_SECONDS = 0.05
+    real_find = control_room.tool_catalog.find_by_fn_name
+    control_room.tool_catalog.find_by_fn_name = lambda fn: (
+        "shop", "buy", {"risk": "destructive", "status": "enabled", "rule": "always_ask"})
+    try:
+        stopper = asyncio.ensure_future(stop_soon("held-1"))
+        result = await asyncio.wait_for(control_room.check_call("shop__buy", {}), 3)
+        await stopper
+    finally:
+        control_room.tool_catalog.find_by_fn_name = real_find
+    check("a call held in the Control room is denied when its run is stopped",
+          isinstance(result, dict) and "stopped this pipeline" in json.dumps(result))
+    check("and it leaves the Control room's waiting list",
+          not [c for c in control_room.pending_calls() if c.get("tool") == "buy"])
+    run_control.forget("held-1")
+
+    run_control.register("held-2")
+    run_control.bind("held-2")
+    agent_questions.POLL_SECONDS = 0.05
+    stopper = asyncio.ensure_future(stop_soon("held-2"))
+    given = await asyncio.wait_for(agent_questions.ask("a1", "Role", "research", "brief", "Which one?", "why", []), 3)
+    await stopper
+    check("an agent's question stops waiting when its run is stopped", given.get("skipped") is True)
+    run_control.forget("held-2")
+
+    run_control.register("held-3")
+    run_control.bind("held-3")
+    tool_review.POLL_SECONDS = 0.05
+    stopper = asyncio.ensure_future(stop_soon("held-3"))
+    review = await asyncio.wait_for(tool_review.checkpoint("a1", "Role", "research", "brief", []), 3)
+    await stopper
+    check("a tool review stops the agent when its run is stopped", review["decision"] == "stop")
+    run_control.forget("held-3")
+
+    run_control.register("held-4")
+    run_control.bind("held-4")
+    run_control.pause("held-4")
+    stopper = asyncio.ensure_future(stop_soon("held-4"))
+    stopped_in_loop = await asyncio.wait_for(run_control.hold("next tool call"), 3)
+    await stopper
+    check("an agent's tool loop waits while paused and learns it was stopped", stopped_in_loop is True)
+    run_control.forget("held-4")
+    run_control.bind(None)
+
+asyncio.run(held_call())
 
 
 # ---- the real pipeline checks in before the Brain starts --------------------

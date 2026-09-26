@@ -6,13 +6,17 @@ A paused run waits at its next checkpoint until it is resumed; a stopped run
 raises `PipelineStopped` there, which ends the run cleanly with its progress
 saved, so /pipeline/resume can pick it up later from where it stopped.
 
-An agent step that is already running is never cut off: pause and stop take
-effect when that step finishes. A run waiting at an approval gate stops at once.
+Inside a step, agents check in between their tool rounds too (`hold()`), so a
+pause or stop lands after the model call an agent is making, not at the end of
+its whole step. A model call already in flight is never cut off. A run waiting
+at an approval gate, a Control room call, an agent's question or a tool review
+stops at once.
 
 State lives in memory, keyed by plan id: a run that is paused when the app
 closes is simply not running after a restart, and resumes like any other.
 """
 import asyncio
+import contextvars
 import threading
 
 RUNNING = "running"
@@ -24,6 +28,10 @@ POLL_SECONDS = 1.0
 _LOCK = threading.Lock()
 _STATES: dict[str, dict] = {}
 _notify = None
+# The plan a pipeline's coroutines belong to. Set once when the run starts, and
+# inherited by every agent task it spawns, so an agent's tool loop and the waits
+# inside it can tell whether their run was paused or stopped.
+_CURRENT = contextvars.ContextVar("jarvis_run_plan_id", default=None)
 
 
 class PipelineStopped(Exception):
@@ -46,6 +54,15 @@ def _say(text: str):
 def _entry(plan_id: str) -> dict:
     """Must be called while holding _LOCK."""
     return _STATES.setdefault(str(plan_id), {"state": RUNNING, "at": None})
+
+
+def bind(plan_id: str | None):
+    """Mark the running coroutine, and every task it starts, as part of this plan."""
+    _CURRENT.set(str(plan_id) if plan_id else None)
+
+
+def current() -> str | None:
+    return _CURRENT.get()
 
 
 def register(plan_id: str):
@@ -104,7 +121,9 @@ def stop(plan_id: str) -> dict:
     return {"status": STOPPING, "plan_id": str(plan_id)}
 
 
-def stop_requested(plan_id: str | None) -> bool:
+def stop_requested(plan_id: str | None = None) -> bool:
+    """Whether this plan (by default, the run the caller belongs to) was stopped."""
+    plan_id = plan_id or _CURRENT.get()
     if not plan_id:
         return False
     with _LOCK:
@@ -143,3 +162,14 @@ async def checkpoint(plan_id: str | None, label: str, event_logger=None):
                 event_logger({"event_type": "narrative", "data": {
                     "phase": "control", "message": f"Paused before {label}.", "icon": "⏸️"}})
         await asyncio.sleep(POLL_SECONDS)
+
+
+async def hold(label: str, event_logger=None) -> bool:
+    """For code inside an agent step, such as an agent's tool loop: wait here while
+    the run is paused, and return True if it was stopped, so the step can wrap up
+    early instead of running on to its end."""
+    try:
+        await checkpoint(_CURRENT.get(), label, event_logger)
+        return False
+    except PipelineStopped:
+        return True

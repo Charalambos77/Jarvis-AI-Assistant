@@ -29,6 +29,7 @@ import uuid
 from datetime import datetime, timezone
 
 from google.genai import types
+import run_control
 
 # Rounds of tool calls, the same unit as the old six-turn cap.
 REVIEW_EVERY = max(1, int(os.getenv("JARVIS_TOOL_REVIEW_EVERY", "6")))
@@ -146,6 +147,9 @@ async def checkpoint(agent_id: str, role: str, kind: str, brief: str, calls: lis
             if review is None and time.time() >= item["deadline"]:
                 _PENDING.pop(request_id, None)
                 review = {"decision": "timeout", "reason": ""}
+            elif review is None and run_control.stop_requested(item["plan_id"] or None):
+                _PENDING.pop(request_id, None)
+                review = {"decision": "stop", "reason": "The user stopped this pipeline."}
         if review is not None:
             break
         await asyncio.sleep(POLL_SECONDS)

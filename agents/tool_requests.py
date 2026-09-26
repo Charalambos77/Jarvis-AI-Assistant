@@ -27,6 +27,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+import run_control
 
 REQUEST_TOOL_NAME = "request_tool"
 
@@ -167,6 +168,9 @@ async def ask(agent_id: str, role: str, kind: str, brief: str, tool: str, why: s
             if decided is None and time.time() >= item["deadline"]:
                 _PENDING.pop(request_id, None)
                 decided = {"decision": "timeout", "reason": ""}
+            elif decided is None and run_control.stop_requested(item["plan_id"] or None):
+                _PENDING.pop(request_id, None)
+                decided = {"decision": "rejected", "reason": "The user stopped this pipeline."}
         if decided is not None:
             break
         await asyncio.sleep(POLL_SECONDS)
