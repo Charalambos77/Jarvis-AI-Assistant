@@ -201,6 +201,9 @@ def record_inventory(service: str, kind: str, tools: list[dict], fn_name) -> tup
             new_tools[name] = {
                 "fn_name": fn_name(service, name),
                 "description": tool.get("description") or name,
+                # What the server itself said. "description" is replaced by the
+                # research card's text once the research phase has run.
+                "server_description": tool.get("description") or "",
                 "parameters": tool.get("input_schema") or {"type": "object", "properties": {}},
                 "risk": risk,
                 "status": "held" if risk in RISKY else "pending",

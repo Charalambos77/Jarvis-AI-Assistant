@@ -2202,8 +2202,8 @@ def tool_requests_decide():
 @app.route("/tool_onboarding/pending", methods=["GET"])
 def tool_onboarding_pending():
     """Newly connected services whose tools wait for a review on the Commands page."""
-    return jsonify({"pending": tool_onboarding.pending(), "log": tool_onboarding.log(),
-                    "wait_seconds": tool_onboarding.WAIT_SECONDS})
+    return jsonify({"pending": tool_onboarding.pending(), "researching": tool_onboarding.researching(),
+                    "log": tool_onboarding.log(), "wait_seconds": tool_onboarding.WAIT_SECONDS})
 
 
 @app.route("/tool_onboarding/decide", methods=["POST"])

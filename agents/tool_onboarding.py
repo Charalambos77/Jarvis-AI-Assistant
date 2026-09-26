@@ -7,7 +7,11 @@ at once — the ones that read beside the ones that delete. Now, the moment a
 server's tool list is seen (switched on at the Connected panel, or started for
 an agent), it is written into the tool catalogue and:
 
-  * tools that cost money or are destructive go straight to the Control room,
+  * a Tool Researcher first reads up on the service and writes a card for each
+    new tool — what it does, when to use it, example arguments, limits, and a
+    risk label it may raise but never lower (see tool_researcher.py). If the
+    research fails, the review opens anyway with the server's own descriptions;
+  * tools that cost money or are destructive go to the Control room,
     where they wait for the user with no time limit (see control_room.py);
   * every other new tool waits for a review on the Commands page. The user can
     approve them all, approve only the read-only ones, pick some, or reject the
@@ -30,6 +34,13 @@ from connectors import tool_catalog
 WAIT_SECONDS = int(os.getenv("JARVIS_COMMAND_WAIT", "600"))
 SWEEP_SECONDS = 5.0
 DECISIONS = ("approve", "approve_read", "pick", "reject")
+
+# Research runs on its own thread so connecting a server, or an agent that
+# starts one, never waits for it. Tests turn this off to run it inline.
+RESEARCH_IN_BACKGROUND = True
+_researching: set[str] = set()      # services with a research thread running now
+_rerun: set[str] = set()            # tool list changed again mid-research
+_research_lock = threading.Lock()
 
 _notifier = None
 _sweeper_started = False
@@ -64,9 +75,89 @@ def observe_mcp(server: str, tools: list[dict]) -> dict:
 
     entry, changed = tool_catalog.record_inventory(server, "mcp", tools, _mcp_function_name)
     if changed:
-        _open_review(server)
+        start_research(server)
     sweep()
     return tool_catalog.get(server) or entry
+
+
+def start_research(server: str) -> None:
+    """Research a service's new tools, then open their review."""
+    with _research_lock:
+        if server in _researching:
+            _rerun.add(server)      # the running research picks up the new list when it ends
+            return
+        _researching.add(server)
+
+    def _mark(catalog):
+        entry = catalog.get(server)
+        if entry:
+            entry["state"] = "researching"
+            entry["review"] = None
+            entry["research"] = {"status": "running", "started_at": tool_catalog.now_iso()}
+
+    tool_catalog.update(_mark)
+    if RESEARCH_IN_BACKGROUND:
+        threading.Thread(target=_research_loop, args=(server,), name=f"tool-research-{server}",
+                         daemon=True).start()
+    else:
+        _research_loop(server)
+
+
+def _research_loop(server: str) -> None:
+    try:
+        while True:
+            _research_then_review(server)
+            with _research_lock:
+                if server not in _rerun:
+                    break
+                _rerun.discard(server)
+    finally:
+        with _research_lock:
+            _researching.discard(server)
+
+
+def _research_then_review(server: str) -> None:
+    from agents import tool_researcher
+
+    entry = tool_catalog.get(server) or {}
+    # Only tools nobody has decided on and nobody has researched: an unchanged
+    # tool keeps its card, like it keeps its decision.
+    todo = {n: t for n, t in (entry.get("tools") or {}).items()
+            if t.get("status") in ("pending", "held") and not t.get("card")}
+    try:
+        found = tool_researcher.research(server, entry.get("kind", "mcp"), todo)
+        error = None
+    except Exception as e:
+        found, error = None, str(e)
+        print(f"[Tool onboarding] Research of {server} failed: {e}")
+
+    def _apply(catalog):
+        current = catalog.get(server)
+        if not current:
+            return
+        if found is None:
+            current["research"] = {"status": "failed", "error": error, "at": tool_catalog.now_iso()}
+            return
+        for name, card in found["cards"].items():
+            tool = current["tools"].get(name)
+            if not tool or tool.get("status") not in ("pending", "held"):
+                continue
+            tool["card"] = card
+            tool["description"] = tool_researcher.card_description(
+                card, tool.get("server_description") or tool.get("description") or name)
+            if card["risk"] != tool.get("risk"):
+                tool["risk"] = card["risk"]
+                if card["risk"] in tool_catalog.RISKY and tool.get("status") == "pending":
+                    tool["status"] = "held"     # found to cost money or destroy: Control room
+        if found["summary"]:
+            current["summary"] = found["summary"]
+        if found["use_for"]:
+            current["use_for"] = found["use_for"]
+        current["research"] = {"status": "done", "at": tool_catalog.now_iso(),
+                               "researched": sorted(found["cards"]), "sources": found["sources"]}
+
+    tool_catalog.update(_apply)
+    _open_review(server)
 
 
 def _open_review(server: str) -> None:
@@ -93,6 +184,7 @@ def _open_review(server: str) -> None:
         opened["held"] = _count(entry, "held")
 
     tool_catalog.update(_apply)
+    research = (tool_catalog.get(server) or {}).get("research") or {}
     parts = []
     if opened.get("pending"):
         parts.append(f"{opened['pending']} new tool(s) to review on the Commands page "
@@ -100,7 +192,10 @@ def _open_review(server: str) -> None:
     if opened.get("held"):
         parts.append(f"{opened['held']} that cost money or are destructive, waiting in the Control room")
     if parts:
-        _notify(f"{server} is connected: " + "; ".join(parts) + ".")
+        note = ""
+        if research.get("status") == "failed":
+            note = f" Jarvis could not research it ({research.get('error')}), so the tools carry the server's own descriptions."
+        _notify(f"{server} is connected: " + "; ".join(parts) + "." + note)
 
 
 def decide(server: str, decision: str, tools: list[str] | None = None, reason: str = "",
@@ -155,7 +250,17 @@ def decide(server: str, decision: str, tools: list[str] | None = None, reason: s
 
 
 def sweep() -> list[str]:
-    """Approve every review whose wait has run out. Returns the services approved."""
+    """Approve every review whose wait has run out. Returns the services approved.
+
+    Also restarts research that a restart of Jarvis cut off, so a service can't
+    sit in "researching" forever with no review ever opening.
+    """
+    for name, entry in tool_catalog.load().items():
+        if entry.get("state") == "researching":
+            with _research_lock:
+                running = name in _researching
+            if not running:
+                start_research(name)
     now = time.time()
     due = [name for name, entry in tool_catalog.load().items()
            if entry.get("review") and now >= float(entry["review"].get("deadline") or 0)]
@@ -206,13 +311,24 @@ def pending() -> list[dict]:
             "waited": int(now - float(review.get("asked_ts") or now)),
             "expires_in": max(0, int(float(review.get("deadline") or now) - now)),
             "held_in_control_room": _count(entry, "held"),
+            "summary": entry.get("summary", ""),
+            "use_for": entry.get("use_for", []),
+            "research": entry.get("research") or {},
             "tools": [
-                {"name": n, "risk": t.get("risk"), "description": (t.get("description") or "")[:400]}
+                {"name": n, "risk": t.get("risk"), "description": (t.get("description") or "")[:900],
+                 "researched": bool(t.get("card"))}
                 for n, t in entry["tools"].items() if t.get("status") == "pending"
             ],
         })
     items.sort(key=lambda i: i.get("asked_ts") or 0)
     return items
+
+
+def researching() -> list[dict]:
+    """Services whose new tools are being researched, before their review opens."""
+    return [{"service": name, "started_at": (entry.get("research") or {}).get("started_at"),
+             "tools": sum(1 for t in entry["tools"].values() if t.get("status") in ("pending", "held"))}
+            for name, entry in tool_catalog.load().items() if entry.get("state") == "researching"]
 
 
 def log(limit: int = 20) -> list[dict]:

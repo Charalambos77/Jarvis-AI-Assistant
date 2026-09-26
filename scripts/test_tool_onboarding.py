@@ -33,6 +33,9 @@ with open(mcp_client.REGISTRY_PATH, "w", encoding="utf-8") as f:
     json.dump({"jarvis_test": {"enabled": True, "command": sys.executable,
                                "args": [os.path.join(ROOT, "scripts", "mcp_test_server.py")]}}, f)
 control_room.POLL_SECONDS = 0.01
+# Research runs inline here, and with no Gemini key it fails at once, so the review
+# opens with the server's own descriptions (test_tool_research.py covers research).
+tool_onboarding.RESEARCH_IN_BACKGROUND = False
 notes = []
 tool_onboarding.set_notifier(notes.append)
 control_room.set_notifier(notes.append)
