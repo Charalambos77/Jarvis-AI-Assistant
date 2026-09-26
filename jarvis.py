@@ -37,6 +37,7 @@ import db
 import sections as section_store
 import command_gate
 import control_room
+import ide
 from agents import tool_review, tool_requests, agent_questions, tool_onboarding
 
 # ---------------------------------------------------------------------------
@@ -1854,6 +1855,15 @@ def control_room_page():
 @app.route("/library.html")
 def library_page():
     return send_from_directory(BASE_DIR, "library.html")
+
+
+@app.route("/ide.html")
+def ide_page():
+    return send_from_directory(BASE_DIR, "ide.html")
+
+
+# The Workbench's files, missions and terminal (ide.py).
+app.register_blueprint(ide.blueprint)
 
 
 @app.route("/api/console_logs", methods=["GET"])
