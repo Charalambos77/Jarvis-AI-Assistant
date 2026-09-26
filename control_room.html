@@ -172,7 +172,7 @@
             <div class="eyebrow">Jarvis · Control room</div>
             <h1>Control room</h1>
             <div class="sub">
-                Your connected APIs and MCP servers, the new tools they bring, and anything that can
+                Pause, resume or stop any running pipeline. Manage your connected APIs and MCP servers, the new tools they bring, and anything that can
                 <em>spend money</em> or <em>do something destructive</em> (delete, send, publish). New tools that
                 only read or change things approve themselves after ten minutes if you don't answer. Money and
                 destructive tools and calls have no time limit: they wait until you answer, and the rest of the
@@ -184,6 +184,11 @@
     </header>
 
     <div class="body">
+        <div class="section-title">
+            Running pipelines <span class="count-pill" id="run-count">0</span>
+        </div>
+        <div id="runs"></div>
+
         <div class="section-title">
             Calls waiting for you <span class="count-pill" id="call-count">0</span>
         </div>
@@ -298,6 +303,61 @@ function renderCalls(items) {
                 <button class="btn no" onclick="decideCall('${c.request_id}','deny')">Deny</button>
             </div>
         </div>`).join("");
+}
+
+const RUN_STATE = {
+    running: ["go", "running"],
+    paused: ["warn", "paused"],
+    stopping: ["no", "stopping"],
+    stopped: ["", "stopped"],
+};
+
+function runWhere(r) {
+    if (r.state === "stopped") return "Stopped with its progress saved. Resume picks it up where it left off.";
+    if (r.gate) return `Waiting for your approval at ${esc(r.gate)}.`;
+    if (r.state === "paused") return r.at ? `Paused before ${esc(r.at)}.` : "Pauses when its current step finishes.";
+    if (r.state === "stopping") return "Stops when its current step finishes.";
+    return r.at ? `Working on ${esc(r.at)}.` : "Starting.";
+}
+
+function runButtons(r) {
+    const id = esc(r.plan_id);
+    if (r.state === "running") return `
+        <button class="btn" onclick="runAction('pause','${id}')">Pause</button>
+        <button class="btn no" onclick="runAction('stop','${id}')">Stop</button>`;
+    if (r.state === "paused") return `
+        <button class="btn go" onclick="runAction('resume','${id}')">Resume</button>
+        <button class="btn no" onclick="runAction('stop','${id}')">Stop</button>`;
+    if (r.state === "stopped") return `
+        <button class="btn go" onclick="runAction('resume','${id}')">Resume</button>`;
+    return "";
+}
+
+function renderRuns(items) {
+    pill('run-count', items.filter(r => r.state !== "stopped").length);
+    const host = document.getElementById('runs');
+    if (!items.length) {
+        host.innerHTML = `<div class="empty">No pipeline is running. Pause and stop take effect between agent steps: the step an agent is on always finishes first.</div>`;
+        return;
+    }
+    host.innerHTML = items.map(r => {
+        const [tone, label] = RUN_STATE[r.state] || ["", r.state];
+        return `
+        <div class="card ${r.state === "paused" ? "waiting" : ""}">
+            <div class="badges">
+                <span class="badge link" onclick="openPipeline('${esc(r.plan_id)}')">Pipeline ${esc(r.plan_id)} →</span>
+                <span class="badge ${tone}">${esc(label)}</span>
+                ${r.phase ? `<span class="badge">${esc(r.phase)}</span>` : ""}
+            </div>
+            <div class="breakdown"><b>${esc(r.task.length > 160 ? r.task.slice(0, 160) + "…" : r.task)}</b></div>
+            <div class="breakdown">${runWhere(r)}</div>
+            <div class="decide">${runButtons(r)}</div>
+        </div>`;
+    }).join("");
+}
+
+function runAction(action, planId) {
+    post('/pipeline/' + action, { plan_id: planId });
 }
 
 function ruleButtons(t) {
@@ -639,10 +699,12 @@ function decideTool(service, tool, decision) {
 
 async function refresh() {
     try {
-        const [p, t] = await Promise.all([
+        const [p, t, r] = await Promise.all([
             fetch('/control/pending').then(x => x.json()),
-            fetch('/control/tools').then(x => x.json())
+            fetch('/control/tools').then(x => x.json()),
+            fetch('/control/runs').then(x => x.json())
         ]);
+        renderRuns(r.runs || []);
         renderCalls(p.calls || []);
         renderHeld(p.tools || []);
         renderRules(t.tools || []);

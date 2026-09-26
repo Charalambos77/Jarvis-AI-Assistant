@@ -9,6 +9,7 @@ import os
 from google import genai
 from google.genai import types
 import db
+import run_control
 from agents.brain import build_agent_plan, plan_execution_agents, refresh_cycle_briefs
 from agents.research_agent import run_research_agent
 from agents.execution_agent import run_execution_agent
@@ -1066,6 +1067,7 @@ async def run_full_pipeline(
         if not agent_plan:
             # Phase 1: Brain builds cycle plan
             print("[Pipeline] Phase 1: Central Brain generating multi-cycle agent plan...")
+            await run_control.checkpoint(plan_id, "the Brain plans the work", event_logger)
             agent_plan = build_agent_plan(planning_task, event_logger=event_logger)
             if "error" in agent_plan:
                 return agent_plan
@@ -1151,6 +1153,7 @@ async def run_full_pipeline(
                 # 2a: Spawn Lead + Advisory agents in parallel (Pass 1)
                 all_agents = [cycle["lead_specialist"]] + cycle.get("advisory_agents", [])
                 agents_to_run = [a for a in all_agents if a.get("agent_id") not in kept_results]
+                await run_control.checkpoint(plan_id, f"Cycle {cycle_id} research", event_logger)
                 research_output = await run_research_phase_for_cycle(
                     agents_to_run, conn, agent_plan.get("task_type", "research"),
                     approved_blueprints=approved_blueprints, event_logger=event_logger,
@@ -1196,6 +1199,7 @@ async def run_full_pipeline(
                 lead_result = next(r for r in research_output["agent_results"]
                                    if r["agent_id"] == lead_config["agent_id"])
 
+                await run_control.checkpoint(plan_id, f"Cycle {cycle_id} lead review", event_logger)
                 authoritative_output = await run_lead_review(
                     lead_config, lead_result, advisory_results, approved_blueprints, event_logger=event_logger,
                     user_brief=user_brief
@@ -1233,6 +1237,7 @@ async def run_full_pipeline(
 
                 # Every agent's own findings go in beside the lead's review, so what the review
                 # dropped or overrode can be seen — not only what it chose to keep.
+                await run_control.checkpoint(plan_id, f"Cycle {cycle_id} synthesis", event_logger)
                 synthesis_result = await run_synthesis_agent(
                     authoritative_output, event_logger=event_logger,
                     agent_results=research_output.get("agent_results", []),
@@ -1284,6 +1289,7 @@ async def run_full_pipeline(
                 # Check the research against the user's own brief before asking for
                 # approval, so problems are in front of the user when they decide.
                 # Advisory only: it informs the gate, it never blocks or re-runs.
+                await run_control.checkpoint(plan_id, f"the Cycle {cycle_id} brief check", event_logger)
                 brief_check = await check_research_against_brief(
                     user_brief, cycle, synthesis_result.get("blueprint", {}),
                     research_output.get("agent_results", []),
@@ -1419,6 +1425,7 @@ async def run_full_pipeline(
 
         if not master_blueprint or not master_blueprint.get("tool_recommendations"):
             print("[Pipeline] Phase 3: Compiling Master Blueprint from all cycles...")
+            await run_control.checkpoint(plan_id, "the master blueprint", event_logger)
             master_blueprint = await run_master_synthesis(approved_blueprints, event_logger=event_logger)
             tools_data = load_apis_mcps_file(plan_id, project_name)
             combined = tools_data.get("brain", []) + tools_data.get("agents", [])
@@ -1600,6 +1607,7 @@ async def run_full_pipeline(
             if event_logger:
                 event_logger({"event_type": "narrative", "data": {"phase": "execution", "message": "Execution agents producing deliverables...", "icon": "⚡"}})
 
+            await run_control.checkpoint(plan_id, "execution", event_logger)
             exec_output = await run_execution_phase(agent_plan, master_blueprint, event_logger=event_logger, project_name=project_name, user_brief=user_brief)
             exec_results = exec_output.get("agent_results", [])
             for r in exec_results:
@@ -1609,6 +1617,7 @@ async def run_full_pipeline(
             if event_logger:
                 event_logger({"event_type": "narrative", "data": {"phase": "qa", "message": "Quality checker validating agent outputs...", "icon": "✅"}})
 
+            await run_control.checkpoint(plan_id, "quality check", event_logger)
             qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint, user_brief=user_brief)
 
             qa_retry = 0
@@ -1620,6 +1629,7 @@ async def run_full_pipeline(
                         print(f"  - Agent {res['agent_id']} issues: {res['issues']}")
                 
                 retry_history.append(f"QA verification failure retry {qa_retry + 1} for agents {failed_ids}.")
+                await run_control.checkpoint(plan_id, "the QA retry", event_logger)
                 exec_output = await run_execution_phase(
                     agent_plan, master_blueprint, agent_ids_to_run=failed_ids, event_logger=event_logger, project_name=project_name,
                     user_brief=user_brief
@@ -1629,6 +1639,7 @@ async def run_full_pipeline(
                 for r in exec_results:
                     if r.get("status") == "ok":
                         save_execution_output_file(plan_id, r.get("agent_id"), r, project_name)
+                await run_control.checkpoint(plan_id, "the QA recheck", event_logger)
                 qa_result = await run_quality_checker(exec_results, agent_plan, master_blueprint, user_brief=user_brief)
                 qa_retry += 1
 
@@ -1683,6 +1694,7 @@ async def run_full_pipeline(
                     rejected_ids = rejected_steps
                 else:
                     rejected_ids = await identify_rejected_agents(redirect_note, agent_plan)
+                await run_control.checkpoint(plan_id, "re-running rejected steps", event_logger)
                 exec_output = await run_execution_phase(
                     agent_plan, master_blueprint,
                     agent_ids_to_run=rejected_ids, gate_redirect_note=redirect_note, event_logger=event_logger,
@@ -1710,6 +1722,7 @@ async def run_full_pipeline(
             print("[Pipeline] Phase 8: Calling deployment agent...")
             if event_logger:
                 event_logger({"event_type": "running", "source": "DeploymentAgent"})
+            await run_control.checkpoint(plan_id, "deployment", event_logger)
             deploy_result = await run_deployment_agent(exec_results, master_blueprint)
             if event_logger:
                 event_logger({"event_type": "completed", "source": "DeploymentAgent", "data": deploy_result})
