@@ -5036,8 +5036,17 @@ def section_intake_crew_set_route():
     crew = section_store.mark_retired(
         crew, section_store.crew_from_agent_plans(draft["folder"]))
     with SECTION_DRAFTS_LOCK:
-        draft["crew"] = crew
         plan = draft.get("plan")
+    if plan and isinstance(data.get("skipped_needs"), list):
+        # The owner's choice of which research requirements to add: the ones
+        # left out stay listed as skipped, and agents there only for them go.
+        import copy
+        plan, crew = section_store.choose_needs(copy.deepcopy(plan), crew, data["skipped_needs"])
+        crew = section_store.normalise_crew(crew)
+    with SECTION_DRAFTS_LOCK:
+        draft["crew"] = crew
+        if plan:
+            draft["plan"] = plan
     out = {"crew": crew, "counts": section_store.crew_counts(crew)}
     if plan:
         # An edit can leave an ask with nobody on it; the window says so.
@@ -5250,6 +5259,36 @@ def section_plan_route(section_id):
         "section:" + section_id, _section_plan_inputs_from_section(section),
         lambda result: _apply_plan_to_section(section, result))
     return jsonify(_section_plan_job_view(job))
+
+
+@app.route("/sections/<section_id>/needs", methods=["POST"])
+def section_needs_route(section_id):
+    """Change which of the research's requirements this section adds.
+
+    `skipped` lists the requirement ids to leave out. Agents there only for a
+    skipped requirement are dropped; a requirement added back that nobody
+    covers gets a part and an agent of its own.
+    """
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+    data = request.get_json(force=True) or {}
+    folder = section["folder"]
+    plan = section_store.read_plan(folder)
+    if not plan.get("parts"):
+        return jsonify({"error": "this section has no plan yet"}), 409
+    plan, crew = section_store.choose_needs(plan, section_store.read_crew(folder),
+                                            data.get("skipped") or [])
+    plan, crew, gaps = section_store.close_coverage_gaps(plan, crew)
+    crew = section_store.normalise_crew(crew)
+    section_store.write_crew(folder, crew, section.get("name", ""))
+    section_store.write_plan(folder, plan, section.get("name", ""), crew)
+    coordinator.clear_section_chat(section_id)
+    plan = section_store.read_plan(folder)
+    plan = section_store.sync_part_statuses(plan, _section_pipelines(section_id))
+    return jsonify({"plan": plan, "crew": crew, "gaps_closed": gaps,
+                    "coverage": section_store.plan_coverage(plan, crew),
+                    "next_parts": [p["id"] for p in section_store.next_parts(plan)]})
 
 
 @app.route("/sections/<section_id>/plan/status", methods=["GET"])

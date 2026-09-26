@@ -1040,6 +1040,24 @@
         return by;
     }
 
+    // Requirements the research found are the owner's to choose: an unticked
+    // one is left out, along with any agent that was there only for it.
+    function isSkipped(id) { return !!(draft.skipped && draft.skipped[id]); }
+
+    function agentLeftOut(agent) {
+        var c = agent.covers || [];
+        return c.length > 0 && c.every(isSkipped);
+    }
+
+    function deptLeftOut(dept) {
+        var agents = dept.agents || [];
+        return agents.length > 0 && agents.every(agentLeftOut);
+    }
+
+    function skippedIds() {
+        return Object.keys(draft.skipped || {}).filter(isSkipped);
+    }
+
     function planPart(dept) {
         var parts = (draft.plan && draft.plan.parts) || [];
         for (var i = 0; i < parts.length; i++) if (parts[i].id === dept.id) return parts[i];
@@ -1064,15 +1082,29 @@
 
         var by = coverage();
         var all = plan.asks || [];
-        function listHtml(title, items, sub) {
+        function listHtml(title, items, sub, choosable) {
             if (!items.length) return "";
-            var missing = items.filter(function (a) { return !by[a.id].length; }).length;
+            var missing = items.filter(function (a) {
+                return !isSkipped(a.id) && !by[a.id].length;
+            }).length;
             var out = '<div class="jsec-plan-box"><h4>' + title + " (" + items.length + ")" +
                 (missing ? ' · <span style="color:#F87171">' + missing + " not covered</span>" : "") +
                 "</h4>" + (sub ? '<div class="who" style="margin-bottom:8px">' + sub + "</div>" : "") +
                 '<ul class="jsec-asks">';
             items.forEach(function (a) {
-                var who = by[a.id];
+                var who = by[a.id] || [];
+                if (choosable) {
+                    var skip = isSkipped(a.id);
+                    out += '<li' + (skip ? ' style="opacity:.45"' : "") + '>' +
+                        '<input type="checkbox" class="jsec-need" data-need="' + esc(a.id) + '"' +
+                        (skip ? "" : " checked") + ' title="Add this to the section">' +
+                        "<div>" + esc(a.text) +
+                        (a.why ? '<div class="who">Why: ' + esc(a.why) + "</div>" : "") +
+                        '<div class="who">' + (skip ? "Not added" : who.length
+                            ? "Covered by " + esc(who.join(", ")) : "Nobody covers this now") +
+                        "</div></div></li>";
+                    return;
+                }
                 out += "<li>" + (who.length ? '<span class="ok">✓</span>' : '<span class="miss">✕</span>') +
                     "<div>" + esc(a.text) +
                     (a.why ? '<div class="who">Why: ' + esc(a.why) + "</div>" : "") +
@@ -1086,8 +1118,9 @@
                          all.filter(function (a) { return a.origin !== "research"; }), "");
         html += listHtml("What it needs that you did not mention",
                          all.filter(function (a) { return a.origin === "research"; }),
-                         "Found by the research. Each one is planned like your own asks, so the " +
-                         "section is built fully and correctly.");
+                         "Found by the research, so the section is built fully and correctly. " +
+                         "Untick any you do not want; the parts and agents there only for it " +
+                         "are left out with it.", true);
 
         var research = plan.research || [];
         if (research.length) {
@@ -1127,7 +1160,10 @@
     function crewCounts() {
         var depts = (draft.crew && draft.crew.departments) || [];
         var agents = 0;
-        depts.forEach(function (d) { agents += (d.agents || []).length; });
+        depts = depts.filter(function (d) { return !deptLeftOut(d); });
+        depts.forEach(function (d) {
+            agents += (d.agents || []).filter(function (a) { return !agentLeftOut(a); }).length;
+        });
         return depts.length + (depts.length === 1 ? " part · " : " parts · ") +
                agents + (agents === 1 ? " agent" : " agents");
     }
@@ -1161,7 +1197,7 @@
 
         depts.forEach(function (dept, di) {
             var color = CREW_COLORS[di % CREW_COLORS.length];
-            html += '<div class="jsec-dept">' +
+            html += '<div class="jsec-dept"' + (deptLeftOut(dept) ? ' style="opacity:.4"' : "") + '>' +
                 '<div class="jsec-dept-head">' +
                     '<span class="jsec-dot" style="background:' + color +
                         ';box-shadow:0 0 12px ' + color + '"></span>' +
@@ -1176,7 +1212,7 @@
                 "</div>";
 
             (dept.agents || []).forEach(function (agent, ai) {
-                html += '<div class="jsec-ag">' +
+                html += '<div class="jsec-ag"' + (agentLeftOut(agent) ? ' style="opacity:.4" title="Left out with the requirement it was for"' : "") + '>' +
                     '<span class="jsec-tag ' + (agent.is_lead ? "lead" : "adv") + '">' +
                         (agent.is_lead ? "Lead" : "Adv") + "</span>" +
                     '<div class="jsec-grow">' + agentHtml(agent, di, ai) + "</div>" +
@@ -1194,8 +1230,17 @@
                 '">+ Add an agent here</button></div></div>';
         });
 
+        var scroll = panelBody().scrollTop;
         panelBody().innerHTML = '<div class="jsec-fade">' + html + "</div>";
+        panelBody().scrollTop = scroll;
         wireCrewButtons();
+        Array.prototype.forEach.call(panelBody().querySelectorAll(".jsec-need"), function (box) {
+            box.addEventListener("change", function () {
+                draft.skipped = draft.skipped || {};
+                draft.skipped[box.getAttribute("data-need")] = !box.checked;
+                renderCrewStage();
+            });
+        });
 
         setFooter([
             footButton("Cancel", "danger", cancelDraft),
@@ -1357,7 +1402,8 @@
         // creation reads, and this is the last moment it can be corrected.
         var ready = (draft.draftId && draft.crew)
             ? post("/sections/intake/crew/set",
-                   { draft_id: draft.draftId, crew: draft.crew }).catch(function () {})
+                   { draft_id: draft.draftId, crew: draft.crew,
+                     skipped_needs: skippedIds() }).catch(function () {})
             : Promise.resolve();
 
         ready
@@ -1426,6 +1472,7 @@
             crew: null,
             plan: null,
             planSteps: [],
+            skipped: {},
             crewDegraded: "",
             filesUploaded: false,
             busy: false

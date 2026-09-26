@@ -286,6 +286,23 @@ check("dropping an agent shows the ask it leaves uncovered",
       r.get_json()["coverage"]["uncovered"] == ["ask_3"])
 app.post("/sections/intake/crew/set", json={"draft_id": draft_id, "crew": crew})
 
+# The owner chooses which research requirements to add. Leaving one out drops
+# the agent that was there only for it, but never one that also covers an ask.
+r = app.post("/sections/intake/crew/set", json={
+    "draft_id": draft_id, "crew": crew, "skipped_needs": ["need_2", "need_1"]}).get_json()
+roles_left = {a["role"] for d in r["crew"]["departments"] for a in d["agents"]}
+check("an unticked requirement is not counted as missing",
+      "need_2" not in r["coverage"]["uncovered"] and "need_2" not in r["coverage"]["covered"])
+check("the agent there only for it is left out",
+      not any("Commercial vehicle insurance" in role for role in roles_left))
+check("an agent that also covers an ask stays", "Company Registrar" in roles_left)
+check("the owner's own asks cannot be unticked",
+      app.post("/sections/intake/crew/set", json={
+          "draft_id": draft_id, "crew": crew, "skipped_needs": ["ask_1"]}
+      ).get_json()["coverage"]["covered"]["ask_1"] != [])
+app.post("/sections/intake/crew/set",
+         json={"draft_id": draft_id, "crew": crew, "skipped_needs": ["need_1"]})
+
 # ---- 2. Create section stands the plan up -----------------------------------
 r = app.post("/sections/create", json={"draft_id": draft_id})
 check("the section is created", r.status_code == 200)
@@ -305,6 +322,21 @@ check("the dashboard gets the plan", len(detail["plan"]["parts"]) == len(plan["p
 check("the dashboard gets the coverage", detail["coverage"]["uncovered"] == [])
 check("the dashboard knows which parts can start now", "dept_company_setup" in detail["next_parts"])
 check("a part waiting on another cannot start yet", "dept_finance" not in detail["next_parts"])
+
+plan_on_disk = section_store.read_plan(FOLDER)
+check("the choice is kept when the section is created",
+      [a["id"] for a in plan_on_disk["asks"] if a.get("skipped")] == ["need_1"])
+check("an unticked requirement is left out of the readable plan",
+      "Rental car operator licence" not in note)
+
+# On the dashboard: leave commercial insurance out, then add it back.
+r = app.post(f"/sections/{SID}/needs", json={"skipped": ["need_1", "need_2"]}).get_json()
+check("a requirement can be left out later",
+      all(p.get("gap") is not True or "need_2" not in p["covers"] for p in r["plan"]["parts"]))
+r = app.post(f"/sections/{SID}/needs", json={"skipped": []}).get_json()
+check("adding requirements back covers every one of them", r["coverage"]["uncovered"] == [])
+check("one nobody covered gets a part of its own again", "need_2" in r["gaps_closed"])
+check("one an agent still covered needs no new part", "need_1" not in r["gaps_closed"])
 
 # ---- 3. a pipeline started for one part knows it is one part ---------------
 r = app.post("/pipeline/intake/start", json={

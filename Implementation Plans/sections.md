@@ -645,6 +645,12 @@ runs `_run_section_plan` in the background and the window shows each step:
    pieces, money, people, risks), asks for up to 8 deep-dive searches where the
    research was thin, runs them, and checks again. Each requirement becomes a
    `need_*` item that a part must cover exactly like an owner's `ask_*`.
+   The owner **chooses which requirements to add**: each has a checkbox in the
+   create window and on the dashboard's plan card. An unticked one stays listed
+   as `skipped`, is not counted as missing, and the agents there only for it
+   are left out (`choose_needs`); an agent that also covers an ask stays.
+   Ticking it again on the dashboard gives it a part of its own if nobody still
+   covers it (`/sections/<id>/needs`). The owner's own asks cannot be unticked.
 4. **Audit** — the owner's words are re-read for asks the first pass missed, and
    every uncovered ask is given an agent (up to two rounds).
 5. **Close the gaps** — any ask still without an agent gets a part and an agent
@@ -680,4 +686,4 @@ to in progress when the pipeline starts and to done when it completes.
 agents, hand edits and finished parts are kept. A section made with *Create
 section without questions* is planned right after creation.
 
-Tests: `scripts/test_section_plan.py` (67 checks).
+Tests: `scripts/test_section_plan.py` (77 checks).

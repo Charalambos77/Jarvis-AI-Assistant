@@ -1055,6 +1055,9 @@ def normalise_asks(raw) -> list[dict]:
             # section needs it to be done fully and correctly. Both must be covered.
             "origin": "research" if item.get("origin") == "research" else "owner",
             "why": str(item.get("why") or "").strip(),
+            # A requirement the owner chose not to add. Only research requirements
+            # can be skipped: what the owner asked for is always planned.
+            "skipped": bool(item.get("skipped")) and item.get("origin") == "research",
         })
     # Ids must be unique even when a model repeats one.
     used = set()
@@ -1155,7 +1158,8 @@ def plan_coverage(plan: dict, crew: dict) -> dict:
     An ask counts as covered only when a standing agent lists it: a part that
     mentions an ask without anyone to do the work has not covered it.
     """
-    by_ask: dict[str, list[str]] = {a["id"]: [] for a in (plan or {}).get("asks", [])}
+    by_ask: dict[str, list[str]] = {a["id"]: [] for a in (plan or {}).get("asks", [])
+                                     if not a.get("skipped")}
     for dept in (crew or {}).get("departments", []):
         for agent in dept.get("agents", []):
             for aid in agent.get("covers") or []:
@@ -1348,6 +1352,8 @@ def _write_plan_note(folder: str, plan: dict, crew: dict, section_name: str = ""
         coverage = plan_coverage(plan, crew)["covered"]
         out += ["## Every ask and requirement, and who covers it", ""]
         for aid, ask in asks.items():
+            if ask.get("skipped"):
+                continue
             if ask.get("origin") == "research":
                 ask = dict(ask, text="(needed) " + ask["text"])
             who = ", ".join(coverage.get(aid) or []) or "NOBODY YET"
@@ -1429,7 +1435,7 @@ def plan_seed_text(section: dict, part_id: str | None = None, max_chars: int = 5
         return ""
     crew = read_crew(folder)
     agents_by_part = {d["id"]: d.get("agents", []) for d in crew.get("departments", [])}
-    asks = {a["id"]: a["text"] for a in plan.get("asks", [])}
+    asks = {a["id"]: a["text"] for a in plan.get("asks", []) if not a.get("skipped")}
     name = section.get("name") or folder
     out = [f"## The plan of section — {name}", ""]
     goal = (plan.get("understanding") or {}).get("goal")
@@ -1456,3 +1462,23 @@ def plan_seed_text(section: dict, part_id: str | None = None, max_chars: int = 5
     out += ["", "Do not redo work a part marked done already produced; its findings are in "
             "the section's knowledge. Stay inside this pipeline's part.", ""]
     return "\n".join(out)[:max_chars]
+
+
+def choose_needs(plan: dict, crew: dict, skipped_ids) -> tuple[dict, dict]:
+    """Apply the owner's choice of which research requirements to add.
+
+    A requirement left out is kept on the list, marked skipped, so it can be
+    added back later. Agents that exist only for skipped requirements go, and
+    so does a part left with nobody in it. A requirement added back that
+    nobody covers any more gets a part of its own when the gaps are closed.
+    """
+    skipped = {str(i) for i in (skipped_ids or [])}
+    for ask in plan.get("asks", []):
+        if ask.get("origin") == "research":
+            ask["skipped"] = ask["id"] in skipped
+    gone = {a["id"] for a in plan.get("asks", []) if a.get("skipped")}
+    for dept in crew.get("departments", []):
+        dept["agents"] = [a for a in dept.get("agents", [])
+                          if not (a.get("covers") and set(a["covers"]) <= gone)]
+    crew["departments"] = [d for d in crew.get("departments", []) if d.get("agents")]
+    return plan, crew
