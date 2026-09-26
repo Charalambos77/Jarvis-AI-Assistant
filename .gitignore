@@ -36,3 +36,6 @@ data/tts_cache/
 data/tool_catalog.json
 data/tool_catalog.json.tmp
 data/spending.json
+
+# The Workbench (ide.html) keeps its missions here; they belong to this PC.
+data/ide/

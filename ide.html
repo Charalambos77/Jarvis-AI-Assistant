@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Workbench</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /*
+         * The Workbench. Agent-first like Antigravity — you hand Jarvis a
+         * mission and review what comes back — but laid out as one cockpit
+         * instead of a separate agent manager: files on the left, the editor
+         * in the middle, Jarvis's mission deck on the right, a terminal dock
+         * underneath. "Missions" focus turns the deck into the whole screen.
+         */
+        :root {
+            --bg: #05070A;
+            --bg2: #080B10;
+            --panel: rgba(255,255,255,0.025);
+            --line: rgba(255,255,255,0.07);
+            --line2: rgba(255,255,255,0.12);
+            --text: #E2E8F0;
+            --muted: #9CA3AF;
+            --dim: #4B5563;
+            --arc: #38BDF8;            /* Jarvis: arc-reactor cyan */
+            --arc-soft: rgba(56,189,248,0.12);
+            --go: #34D399;
+            --no: #F87171;
+            --warn: #FBBF24;
+            --mono: 'JetBrains Mono', ui-monospace, monospace;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-size: 13px;
+        }
+        button { font-family: inherit; }
+        ::-webkit-scrollbar { width: 9px; height: 9px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.09); border-radius: 6px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+        .shell { display: flex; flex-direction: column; height: 100vh; }
+
+        /* ---------- header ---------- */
+        header {
+            flex: 0 0 auto; display: flex; align-items: center; gap: 18px;
+            padding: 10px 18px; border-bottom: 1px solid var(--line);
+            background: rgba(8,10,14,0.92);
+        }
+        .brand { display: flex; align-items: center; gap: 11px; flex: 0 0 auto; }
+        .reactor {
+            width: 22px; height: 22px; border-radius: 50%;
+            border: 2px solid var(--arc); position: relative;
+            box-shadow: 0 0 14px rgba(56,189,248,0.45), inset 0 0 6px rgba(56,189,248,0.5);
+        }
+        .reactor::after {
+            content: ""; position: absolute; inset: 5px; border-radius: 50%;
+            background: var(--arc); box-shadow: 0 0 8px var(--arc);
+        }
+        .brand .eyebrow { font-size: 9.5px; letter-spacing: 2.4px; text-transform: uppercase; color: var(--dim); }
+        .brand h1 { margin: 1px 0 0; font-size: 15px; font-weight: 700; color: #FFF; letter-spacing: .3px; }
+
+        .project-picker { display: flex; align-items: center; gap: 6px; }
+        select, input[type=text], textarea {
+            background: rgba(0,0,0,0.35); border: 1px solid var(--line2); border-radius: 7px;
+            color: var(--text); font-family: inherit; font-size: 12px;
+        }
+        select { padding: 7px 10px; max-width: 230px; }
+        select:focus, input:focus, textarea:focus { outline: none; border-color: rgba(56,189,248,0.5); }
+
+        .focus-switch {
+            display: flex; background: rgba(255,255,255,0.03); border: 1px solid var(--line);
+            border-radius: 8px; padding: 3px; margin-left: 8px;
+        }
+        .focus-switch button {
+            background: none; border: 0; color: var(--muted); padding: 6px 13px; border-radius: 6px;
+            font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; cursor: pointer;
+        }
+        .focus-switch button.on { background: var(--arc-soft); color: var(--arc); }
+
+        .spacer { flex: 1 1 auto; }
+        .top-right-nav { display: flex; gap: 8px; flex: 0 1 auto; }
+        /* nav_ui.js caps the bar for taller headers; this one has room for more per row. */
+        header .top-right-nav.jarvis-nav-row { max-width: 900px; }
+        .nav-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+            color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: 1.3px;
+            text-transform: uppercase; padding: 8px 13px; border-radius: 7px; cursor: pointer;
+            transition: all .2s ease;
+        }
+        .nav-btn:hover { background: rgba(255,255,255,0.07); color: #FFF; border-color: rgba(255,255,255,0.25); }
+        .nav-btn.active { background: #FFF; color: #000; border-color: #FFF; }
+
+        /* ---------- workspace grid ---------- */
+        .workspace {
+            flex: 1 1 auto; min-height: 0; display: grid;
+            grid-template-columns: 250px minmax(0, 1fr) 400px;
+        }
+        body.missions-focus .workspace { grid-template-columns: minmax(0, 1fr); }
+        body.missions-focus .deck { border-left: 0; }
+        body.missions-focus .explorer, body.missions-focus .center { display: none; }
+
+        .pane-title {
+            display: flex; align-items: center; gap: 8px; padding: 11px 14px 9px;
+            font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim);
+        }
+        .pane-title .grow { flex: 1; }
+        .icon-btn {
+            background: none; border: 1px solid transparent; color: var(--muted); cursor: pointer;
+            border-radius: 5px; padding: 3px 7px; font-size: 12px; line-height: 1;
+        }
+        .icon-btn:hover { border-color: var(--line2); color: #FFF; background: rgba(255,255,255,0.04); }
+
+        /* ---------- explorer ---------- */
+        .explorer { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--bg2); }
+        .tree { flex: 1; overflow: auto; padding: 0 6px 20px; font-size: 12.5px; }
+        .node {
+            display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 5px;
+            cursor: pointer; color: #CBD5E1; white-space: nowrap; user-select: none;
+        }
+        .node:hover { background: rgba(255,255,255,0.04); }
+        .node.open-file { background: var(--arc-soft); color: #FFF; }
+        .node .caret { width: 10px; color: var(--dim); font-size: 9px; }
+        .node .ico { width: 14px; text-align: center; font-size: 11px; color: var(--dim); }
+        .node .name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+        .node .touched { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+        .node .acts { display: none; gap: 2px; }
+        .node:hover .acts { display: flex; }
+        .node .acts button { padding: 1px 5px; font-size: 11px; }
+        .tree-empty { padding: 18px 14px; color: var(--dim); line-height: 1.7; font-size: 12px; }
+
+        /* ---------- center: tabs, editor, terminal ---------- */
+        .center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+        .tabs {
+            flex: 0 0 auto; display: flex; overflow-x: auto; border-bottom: 1px solid var(--line);
+            background: var(--bg2); min-height: 36px;
+        }
+        .tab {
+            display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 36px;
+            border-right: 1px solid var(--line); color: var(--muted); cursor: pointer;
+            font-size: 12px; white-space: nowrap; flex: 0 0 auto;
+        }
+        .tab.on { color: #FFF; background: var(--bg); box-shadow: inset 0 2px 0 var(--arc); }
+        .tab.diff { color: var(--warn); }
+        .tab.diff.on { box-shadow: inset 0 2px 0 var(--warn); }
+        .tab .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text); }
+        .tab .x { color: var(--dim); padding: 0 2px; border-radius: 3px; }
+        .tab .x:hover { color: #FFF; background: rgba(255,255,255,0.1); }
+
+        .diffbar {
+            display: none; align-items: center; gap: 10px; padding: 8px 14px;
+            background: rgba(251,191,36,0.06); border-bottom: 1px solid rgba(251,191,36,0.25);
+            font-size: 12px; color: var(--muted);
+        }
+        .diffbar.show { display: flex; }
+        .diffbar b { color: #FFF; font-weight: 600; font-family: var(--mono); font-size: 12px; }
+
+        .editor-wrap { flex: 1 1 auto; min-height: 0; position: relative; }
+        #editor, #diffEditor, #fallback { position: absolute; inset: 0; }
+        #fallback {
+            display: none; width: 100%; height: 100%; resize: none; border: 0; border-radius: 0;
+            padding: 14px 18px; font-family: var(--mono); font-size: 13px; line-height: 1.6;
+            background: var(--bg); color: var(--text);
+        }
+        .welcome {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            pointer-events: none;
+        }
+        .welcome .card-w { max-width: 460px; text-align: center; color: var(--muted); line-height: 1.8; }
+        .welcome h2 { color: #FFF; font-size: 18px; margin: 18px 0 6px; }
+        .welcome .big-reactor {
+            width: 64px; height: 64px; margin: 0 auto; border-radius: 50%;
+            border: 3px solid var(--arc); position: relative;
+            box-shadow: 0 0 40px rgba(56,189,248,0.35), inset 0 0 18px rgba(56,189,248,0.4);
+        }
+        .welcome .big-reactor::after {
+            content: ""; position: absolute; inset: 17px; border-radius: 50%;
+            background: var(--arc); box-shadow: 0 0 22px var(--arc);
+        }
+        kbd {
+            font-family: var(--mono); font-size: 10.5px; padding: 1px 6px; border-radius: 4px;
+            border: 1px solid var(--line2); color: var(--text); background: rgba(255,255,255,0.03);
+        }
+
+        .dock { flex: 0 0 auto; border-top: 1px solid var(--line); display: flex; flex-direction: column; background: #030406; }
+        .dock.closed .term { display: none; }
+        .dock-resize { height: 4px; cursor: ns-resize; margin-top: -2px; }
+        .dock-resize:hover { background: rgba(56,189,248,0.4); }
+        .term { height: 210px; display: flex; flex-direction: column; min-height: 80px; }
+        .term-out {
+            flex: 1; overflow: auto; margin: 0; padding: 8px 14px; font-family: var(--mono);
+            font-size: 12px; line-height: 1.55; color: #CBD5E1; white-space: pre-wrap; word-break: break-word;
+        }
+        .term-out .cmd { color: var(--arc); }
+        .term-out .err { color: var(--no); }
+        .term-out .ok { color: var(--go); }
+        .term-in { display: flex; align-items: center; gap: 8px; padding: 6px 14px 9px; border-top: 1px solid var(--line); }
+        .term-in .prompt { font-family: var(--mono); font-size: 12px; color: var(--arc); white-space: nowrap; }
+        .term-in input {
+            flex: 1; background: transparent; border: 0; font-family: var(--mono); font-size: 12.5px; padding: 4px 0;
+        }
+
+        /* ---------- mission deck ---------- */
+        .deck { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--bg2); }
+        .deck-controls { padding: 0 14px 10px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .deck-controls select { flex: 1 1 140px; }
+        .mode {
+            display: flex; border: 1px solid var(--line2); border-radius: 7px; overflow: hidden;
+        }
+        .mode button {
+            background: none; border: 0; color: var(--muted); font-size: 11px; padding: 7px 10px; cursor: pointer;
+        }
+        .mode button.on { background: var(--arc-soft); color: var(--arc); }
+        .engine-note { flex-basis: 100%; font-size: 11px; color: var(--dim); line-height: 1.5; }
+        .engine-note.bad { color: var(--no); }
+
+        .deck-body { flex: 1 1 auto; min-height: 0; display: flex; }
+        .mission-list { flex: 1; overflow: auto; padding: 0 10px 10px; }
+        .mission-detail { display: none; flex: 1; overflow: auto; padding: 4px 14px 16px; }
+        .deck.detail .mission-list { display: none; }
+        .deck.detail .mission-detail { display: block; }
+        body.missions-focus .deck-body { gap: 0; }
+        body.missions-focus .deck .mission-list { display: block; flex: 0 0 380px; border-right: 1px solid var(--line); }
+        body.missions-focus .deck .mission-detail { display: block; padding: 4px 28px 20px; }
+        body.missions-focus .deck .mission-detail > * { max-width: 980px; }
+        body.missions-focus .back-btn { display: none; }
+
+        .m-item {
+            display: flex; gap: 11px; align-items: flex-start; padding: 11px 11px; border-radius: 9px;
+            border: 1px solid transparent; cursor: pointer; margin-bottom: 4px;
+        }
+        .m-item:hover { background: rgba(255,255,255,0.03); border-color: var(--line); }
+        .m-item.on { background: var(--arc-soft); border-color: rgba(56,189,248,0.3); }
+        .m-item .t { color: #FFF; font-size: 12.5px; line-height: 1.45; }
+        .m-item .s { font-size: 11px; color: var(--dim); margin-top: 3px; }
+
+        /* The status ring: a small reactor that spins while Jarvis works. */
+        .ring {
+            flex: 0 0 auto; width: 14px; height: 14px; border-radius: 50%; margin-top: 2px;
+            border: 2px solid var(--dim);
+        }
+        .ring.planning, .ring.working {
+            border-color: var(--arc); border-right-color: transparent; animation: spin 0.9s linear infinite;
+        }
+        .ring.awaiting_plan, .ring.review { border-color: var(--warn); box-shadow: 0 0 8px rgba(251,191,36,0.5); }
+        .ring.done { border-color: var(--go); background: rgba(52,211,153,0.25); }
+        .ring.failed { border-color: var(--no); background: rgba(248,113,113,0.2); }
+        .ring.stopped { border-color: var(--dim); background: rgba(255,255,255,0.05); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .empty-deck { padding: 18px 12px; color: var(--dim); line-height: 1.75; font-size: 12px; }
+
+        .d-head { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; }
+        .d-head h3 { margin: 0; font-size: 14px; color: #FFF; font-weight: 600; flex: 1; line-height: 1.4; }
+        .back-btn { font-size: 11px; }
+        .badge {
+            font-size: 10px; letter-spacing: .6px; padding: 3px 8px; border-radius: 5px;
+            background: rgba(255,255,255,0.05); color: var(--muted); border: 1px solid var(--line);
+            white-space: nowrap;
+        }
+        .badge.arc { color: var(--arc); border-color: rgba(56,189,248,0.3); background: var(--arc-soft); }
+        .badge.warn { color: var(--warn); border-color: rgba(251,191,36,0.3); background: rgba(251,191,36,0.08); }
+        .badge.go { color: var(--go); border-color: rgba(52,211,153,0.3); background: rgba(52,211,153,0.08); }
+        .badge.no { color: var(--no); border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); }
+
+        /* The mission reads top to bottom as a timeline down a thin rail. */
+        .timeline { position: relative; padding-left: 18px; }
+        .timeline::before {
+            content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 1px;
+            background: linear-gradient(var(--arc), rgba(56,189,248,0.05));
+        }
+        .step { position: relative; margin-bottom: 14px; }
+        .step::before {
+            content: ""; position: absolute; left: -18px; top: 6px; width: 9px; height: 9px;
+            border-radius: 50%; background: var(--bg2); border: 2px solid var(--arc);
+        }
+        .step.owner::before { border-color: var(--muted); }
+        .step.waiting::before { border-color: var(--warn); }
+        .step-label { font-size: 9.5px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+        .bubble {
+            background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            padding: 11px 13px; line-height: 1.65; color: #D6DEE8; font-size: 12.5px;
+            white-space: pre-wrap; word-break: break-word;
+        }
+        .step.owner .bubble { background: rgba(255,255,255,0.045); }
+        .step.waiting .bubble { border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.035); }
+        .bubble code, .bubble .code { font-family: var(--mono); font-size: 11.5px; color: var(--arc); }
+        .plan-steps { margin: 8px 0 0; padding-left: 18px; }
+        .plan-steps li { margin: 4px 0; }
+        .files-line { margin-top: 8px; font-size: 11px; color: var(--dim); }
+        .files-line span { font-family: var(--mono); color: var(--muted); }
+
+        .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+        .row-actions input { flex: 1 1 160px; padding: 8px 10px; }
+        .btn {
+            border: 1px solid var(--line2); background: rgba(255,255,255,0.03); color: var(--text);
+            font-size: 11px; font-weight: 600; letter-spacing: .5px; padding: 7px 12px;
+            border-radius: 7px; cursor: pointer; white-space: nowrap; transition: all .15s ease;
+        }
+        .btn:hover { background: rgba(255,255,255,0.08); }
+        .btn:disabled { opacity: .4; cursor: default; }
+        .btn.arc { border-color: rgba(56,189,248,0.5); color: var(--arc); }
+        .btn.arc:hover { background: var(--arc-soft); }
+        .btn.go { border-color: rgba(52,211,153,0.45); color: var(--go); }
+        .btn.go:hover { background: rgba(52,211,153,0.12); }
+        .btn.no { border-color: rgba(248,113,113,0.45); color: var(--no); }
+        .btn.no:hover { background: rgba(248,113,113,0.12); }
+        .btn.tiny { padding: 4px 8px; font-size: 10.5px; }
+
+        .change {
+            display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 7px;
+            border: 1px solid var(--line); margin-top: 6px; background: rgba(0,0,0,0.2);
+        }
+        .change .p { font-family: var(--mono); font-size: 11.5px; color: #FFF; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+        .change .p:hover { color: var(--arc); }
+        .plus { color: var(--go); font-family: var(--mono); font-size: 11px; }
+        .minus { color: var(--no); font-family: var(--mono); font-size: 11px; }
+        .cmdline {
+            font-family: var(--mono); font-size: 12px; color: #FFF; background: rgba(0,0,0,0.45);
+            border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; margin-top: 6px; word-break: break-all;
+        }
+        .why { font-size: 11.5px; color: var(--dim); margin-top: 4px; }
+        .log { margin-top: 18px; font-size: 11px; color: var(--dim); line-height: 1.8; }
+        .log summary { cursor: pointer; letter-spacing: 1.5px; text-transform: uppercase; font-size: 9.5px; }
+
+        /* ---------- composer ---------- */
+        .composer { flex: 0 0 auto; border-top: 1px solid var(--line); padding: 10px 12px 12px; }
+        .ctx { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; min-height: 0; }
+        .ctx .pill {
+            font-size: 10.5px; font-family: var(--mono); color: var(--muted); padding: 2px 8px;
+            border: 1px solid var(--line2); border-radius: 12px; display: flex; gap: 6px; align-items: center;
+        }
+        .ctx .pill .x { cursor: pointer; color: var(--dim); }
+        .ctx .pill .x:hover { color: #FFF; }
+        .composer textarea {
+            width: 100%; min-height: 64px; max-height: 220px; resize: vertical; padding: 10px 12px;
+            line-height: 1.55; font-size: 12.5px;
+        }
+        .composer-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+        .composer-foot .hint { flex: 1; font-size: 10.5px; color: var(--dim); }
+
+        .toast {
+            position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: #111827; border: 1px solid var(--line2); color: var(--text);
+            padding: 10px 16px; border-radius: 9px; font-size: 12.5px; opacity: 0;
+            transition: all .25s ease; pointer-events: none; z-index: 50; max-width: 70vw;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.bad { border-color: rgba(248,113,113,0.5); color: #FECACA; }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div class="brand">
+            <div class="reactor"></div>
+            <div>
+                <div class="eyebrow">Jarvis · IDE</div>
+                <h1>Workbench</h1>
+            </div>
+        </div>
+        <div class="project-picker">
+            <select id="projectSelect" title="Project folder"></select>
+            <button class="icon-btn" id="newProjectBtn" title="New project">＋</button>
+        </div>
+        <div class="focus-switch" id="focusSwitch">
+            <button data-focus="code" class="on">Code</button>
+            <button data-focus="missions">Missions</button>
+        </div>
+        <div class="spacer"></div>
+        <div class="top-right-nav">
+            <button class="nav-btn" onclick="window.location.href='command_center.html'">Brain</button>
+        </div>
+    </header>
+
+    <div class="workspace">
+        <!-- Files -->
+        <aside class="explorer">
+            <div class="pane-title">
+                <span class="grow">Files</span>
+                <button class="icon-btn" id="newFileBtn" title="New file">＋ file</button>
+                <button class="icon-btn" id="newDirBtn" title="New folder">＋ dir</button>
+                <button class="icon-btn" id="refreshBtn" title="Refresh">↻</button>
+            </div>
+            <div class="tree" id="tree"></div>
+        </aside>
+
+        <!-- Editor + terminal -->
+        <main class="center">
+            <div class="tabs" id="tabs"></div>
+            <div class="diffbar" id="diffbar">
+                <span>Jarvis's change to</span> <b id="diffPath"></b>
+                <span id="diffStats"></span>
+                <span class="spacer"></span>
+                <span id="diffButtons"></span>
+            </div>
+            <div class="editor-wrap">
+                <div id="editor"></div>
+                <div id="diffEditor" style="display:none"></div>
+                <textarea id="fallback" spellcheck="false"></textarea>
+                <div class="welcome" id="welcome">
+                    <div class="card-w">
+                        <div class="big-reactor"></div>
+                        <h2>Work with Jarvis</h2>
+                        Open a file on the left, or tell Jarvis what to build in the mission deck.
+                        He writes down what he understood and his plan first, then proposes the
+                        changes for you to accept.<br><br>
+                        <kbd>Ctrl</kbd> <kbd>S</kbd> save &nbsp; <kbd>Ctrl</kbd> <kbd>I</kbd> ask about the selection
+                        &nbsp; <kbd>Ctrl</kbd> <kbd>`</kbd> terminal
+                    </div>
+                </div>
+            </div>
+            <div class="dock closed" id="dock">
+                <div class="dock-resize" id="dockResize"></div>
+                <div class="pane-title">
+                    <span class="grow">Terminal</span>
+                    <button class="icon-btn" id="termStop" title="Stop the running command" style="display:none">■ stop</button>
+                    <button class="icon-btn" id="termClear" title="Clear">clear</button>
+                    <button class="icon-btn" id="termToggle" title="Show or hide (Ctrl+`)">▴</button>
+                </div>
+                <div class="term">
+                    <pre class="term-out" id="termOut"></pre>
+                    <div class="term-in">
+                        <span class="prompt" id="termPrompt">›</span>
+                        <input type="text" id="termInput" placeholder="Run a command in the project folder" autocomplete="off" spellcheck="false">
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Mission deck -->
+        <aside class="deck" id="deck">
+            <div class="pane-title"><span class="grow">Missions</span></div>
+            <div class="deck-controls">
+                <select id="engineSelect" title="Who does the work"></select>
+                <select id="modelSelect" title="Jarvis's model"></select>
+                <div class="mode" id="modeSwitch" title="Review: approve the plan and each change. Autopilot: Jarvis applies his changes; you can still revert them.">
+                    <button data-mode="review" class="on">Review</button>
+                    <button data-mode="autopilot">Autopilot</button>
+                </div>
+                <div class="engine-note" id="engineNote"></div>
+            </div>
+            <div class="deck-body">
+                <div class="mission-list" id="missionList"></div>
+                <div class="mission-detail" id="missionDetail"></div>
+            </div>
+            <div class="composer">
+                <div class="ctx" id="ctx"></div>
+                <textarea id="prompt" placeholder="Tell Jarvis what to build, fix or explain…"></textarea>
+                <div class="composer-foot">
+                    <span class="hint" id="composerHint">Ctrl+Enter to send · starts a new mission</span>
+                    <button class="btn" id="newMissionBtn" style="display:none">New mission</button>
+                    <button class="btn arc" id="sendBtn">Send</button>
+                </div>
+            </div>
+        </aside>
+    </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.js"></script>
+<script>
+(function () {
+    "use strict";
+
+    // ------------------------------------------------------------------ state
+    var S = {
+        project: "",
+        entries: [],
+        collapsed: {},
+        tabs: [],            // {key, path, kind:"file"|"diff", model, hash, dirty, mission, change}
+        active: null,
+        engine: "jarvis",
+        model: "",
+        mode: "review",
+        engines: [],
+        missions: [],
+        selected: null,      // mission id
+        mission: null,       // full selected mission
+        includeFile: true,
+        includeSelection: true,
+        job: null, jobOffset: 0,
+        history: [], histPos: -1
+    };
+    var monacoReady = false, editor = null, diffEditor = null;
+
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+    }
+    function toast(msg, bad) {
+        var t = $("toast");
+        t.textContent = msg;
+        t.className = "toast show" + (bad ? " bad" : "");
+        clearTimeout(toast._t);
+        toast._t = setTimeout(function () { t.className = "toast"; }, 3600);
+    }
+    function api(method, url, body) {
+        return fetch(url, {
+            method: method,
+            headers: body ? { "Content-Type": "application/json" } : {},
+            body: body ? JSON.stringify(body) : undefined
+        }).then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (data) {
+                if (!r.ok) throw new Error(data.error || ("Request failed (" + r.status + ")"));
+                return data;
+            });
+        });
+    }
+    function q(params) {
+        return Object.keys(params).map(function (k) {
+            return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]);
+        }).join("&");
+    }
+    function store(key, value) { try { localStorage.setItem("wb." + key, value); } catch (e) {} }
+    function recall(key) { try { return localStorage.getItem("wb." + key) || ""; } catch (e) { return ""; } }
+
+    function languageFor(path) {
+        var ext = (path.split(".").pop() || "").toLowerCase();
+        return {
+            js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript",
+            ts: "typescript", tsx: "typescript", py: "python", json: "json", md: "markdown",
+            html: "html", htm: "html", css: "css", scss: "scss", less: "less", yml: "yaml",
+            yaml: "yaml", sh: "shell", bat: "bat", ps1: "powershell", sql: "sql", xml: "xml",
+            java: "java", c: "c", h: "c", cpp: "cpp", cs: "csharp", go: "go", rs: "rust",
+            rb: "ruby", php: "php", kt: "kotlin", swift: "swift", toml: "ini", ini: "ini"
+        }[ext] || "plaintext";
+    }
+
+    // --------------------------------------------------------------- monaco
+    function bootMonaco() {
+        if (!window.require || !window.require.config) return fallbackEditor();
+        var VS = "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs";
+        window.require.config({ paths: { vs: VS } });
+        // Workers cannot be started straight from another origin; a tiny
+        // same-origin stub that imports the real one is the standard way round.
+        window.MonacoEnvironment = {
+            getWorkerUrl: function () {
+                return "data:text/javascript;charset=utf-8," + encodeURIComponent(
+                    "self.MonacoEnvironment={baseUrl:'" + VS.replace(/vs$/, "") + "'};" +
+                    "importScripts('" + VS + "/base/worker/workerMain.js');");
+            }
+        };
+        window.require(["vs/editor/editor.main"], function () {
+            try { createEditors(); } catch (err) {
+                console.error("Editor failed to start:", err);
+                return fallbackEditor();
+            }
+            monacoReady = true;
+            showActive();
+        }, fallbackEditor);
+    }
+
+    function createEditors() {
+            monaco.editor.defineTheme("jarvis", {
+                base: "vs-dark", inherit: true,
+                rules: [
+                    { token: "comment", foreground: "5B6B7F", fontStyle: "italic" },
+                    { token: "keyword", foreground: "7DD3FC" },
+                    { token: "string", foreground: "86EFAC" },
+                    { token: "number", foreground: "FCD34D" }
+                ],
+                colors: {
+                    "editor.background": "#05070A",
+                    "editor.lineHighlightBackground": "#0B1118",
+                    "editorLineNumber.foreground": "#2B3642",
+                    "editorLineNumber.activeForeground": "#38BDF8",
+                    "editorCursor.foreground": "#38BDF8",
+                    "editor.selectionBackground": "#38BDF833",
+                    "editorIndentGuide.background1": "#111820",
+                    "diffEditor.insertedTextBackground": "#34D39922",
+                    "diffEditor.removedTextBackground": "#F8717122"
+                }
+            });
+            var common = {
+                theme: "jarvis", automaticLayout: true, fontFamily: "JetBrains Mono, monospace",
+                fontSize: 13, lineHeight: 21, minimap: { enabled: false },
+                scrollBeyondLastLine: false, smoothScrolling: true, padding: { top: 12 }
+            };
+            editor = monaco.editor.create($("editor"), Object.assign({ model: null }, common));
+            diffEditor = monaco.editor.createDiffEditor($("diffEditor"),
+                Object.assign({ readOnly: true, renderSideBySide: true, originalEditable: false }, common));
+            editor.onDidChangeModelContent(function () {
+                var tab = activeTab();
+                if (tab && tab.kind === "file" && !tab.loading) {
+                    var dirty = tab.model.getAlternativeVersionId() !== tab.savedVersion;
+                    if (dirty !== tab.dirty) { tab.dirty = dirty; renderTabs(); }
+                }
+            });
+            editor.onDidChangeCursorSelection(renderContext);
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, save);
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, askAboutSelection);
+    }
+
+    /* Offline, the CDN is out of reach — a plain text area keeps the page usable. */
+    function fallbackEditor() {
+        monacoReady = false;
+        $("editor").style.display = "none";
+        $("fallback").addEventListener("input", function () {
+            var tab = activeTab();
+            if (tab && tab.kind === "file") { tab.text = $("fallback").value; tab.dirty = true; renderTabs(); }
+        });
+        showActive();
+    }
+
+    // ------------------------------------------------------------- projects
+    function loadProjects() {
+        return api("GET", "/ide/projects").then(function (data) {
+            var sel = $("projectSelect");
+            var names = (data.projects || []).map(function (p) { return p.name; });
+            var params = new URLSearchParams(window.location.search);
+            var want = params.get("project") || recall("project");
+            sel.innerHTML = names.length
+                ? names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("")
+                : '<option value="">No projects yet</option>';
+            S.project = names.indexOf(want) !== -1 ? want : (names[0] || "");
+            sel.value = S.project;
+            return openProject();
+        });
+    }
+
+    function openProject() {
+        store("project", S.project);
+        // Reloading the same project (the project list can arrive after the
+        // owner already opened a file) must not throw their open tabs away.
+        if (S.opened !== S.project) {
+            S.tabs.slice().forEach(function (t) { closeTab(t.key, true); });
+            S.active = null; S.selected = null; S.mission = null;
+            $("deck").classList.remove("detail");
+            S.opened = S.project;
+            updateComposer();
+        }
+        renderTabs(); showActive();
+        $("termPrompt").textContent = (S.project || "no project") + " ›";
+        return Promise.all([loadTree(), loadMissions(true)]);
+    }
+
+    $("projectSelect").addEventListener("change", function () {
+        if (S.tabs.some(function (t) { return t.dirty; }) &&
+            !confirm("You have unsaved files. Switch project and lose those edits?")) {
+            this.value = S.project; return;
+        }
+        S.project = this.value;
+        openProject();
+    });
+
+    $("newProjectBtn").addEventListener("click", function () {
+        var name = prompt("Name for the new project folder:");
+        if (!name) return;
+        api("POST", "/ide/projects", { name: name }).then(function (p) {
+            store("project", p.name);
+            return loadProjects();
+        }).catch(function (e) { toast(e.message, true); });
+    });
+
+    // ----------------------------------------------------------------- tree
+    function loadTree() {
+        if (!S.project) { S.entries = []; renderTree(); return Promise.resolve(); }
+        return api("GET", "/ide/tree?" + q({ project: S.project })).then(function (data) {
+            S.entries = data.entries || [];
+            S.treeTruncated = data.truncated;
+            renderTree();
+        }).catch(function (e) { toast(e.message, true); });
+    }
+
+    function touchedPaths() {
+        var set = {};
+        S.missions.forEach(function (m) {
+            (m.changes || []).forEach(function (c) { if (c.status === "pending") set[c.path] = true; });
+        });
+        return set;
+    }
+
+    function renderTree() {
+        var el = $("tree");
+        if (!S.project) {
+            el.innerHTML = '<div class="tree-empty">Create a project with ＋ to start, or run a pipeline — its folder shows up here.</div>';
+            return;
+        }
+        if (!S.entries.length) {
+            el.innerHTML = '<div class="tree-empty">This project is empty. Add a file, or ask Jarvis to build something.</div>';
+            return;
+        }
+        var touched = touchedPaths();
+        var open = activeTab() && activeTab().path;
+        var html = [];
+        S.entries.forEach(function (e) {
+            var parts = e.path.split("/");
+            // Hidden when any parent folder is collapsed.
+            for (var i = 1; i < parts.length; i++) {
+                if (S.collapsed[parts.slice(0, i).join("/")]) return;
+            }
+            var depth = parts.length - 1;
+            var isDir = e.type === "dir";
+            var name = parts[parts.length - 1];
+            html.push(
+                '<div class="node' + (!isDir && e.path === open ? " open-file" : "") + '" data-path="' + esc(e.path) +
+                '" data-type="' + e.type + '" style="padding-left:' + (8 + depth * 14) + 'px">' +
+                '<span class="caret">' + (isDir ? (S.collapsed[e.path] ? "▸" : "▾") : "") + "</span>" +
+                '<span class="ico">' + (isDir ? "▣" : "·") + "</span>" +
+                '<span class="name">' + esc(name) + "</span>" +
+                (touched[e.path] ? '<span class="touched" title="Jarvis has a change waiting for this file"></span>' : "") +
+                '<span class="acts"><button class="icon-btn" data-act="rename" title="Rename">✎</button>' +
+                '<button class="icon-btn" data-act="delete" title="Delete">✕</button></span></div>'
+            );
+        });
+        if (S.treeTruncated) html.push('<div class="tree-empty">Only the first few thousand entries are shown.</div>');
+        el.innerHTML = html.join("");
+    }
+
+    $("tree").addEventListener("click", function (ev) {
+        var node = ev.target.closest(".node");
+        if (!node) return;
+        var path = node.getAttribute("data-path");
+        var act = ev.target.getAttribute("data-act");
+        if (act === "rename") {
+            var to = prompt("Rename to:", path);
+            if (to && to !== path) {
+                api("POST", "/ide/entry", { op: "rename", project: S.project, path: path, new_path: to })
+                    .then(function () {
+                        S.tabs.forEach(function (t) { if (t.path === path) { t.path = to; t.key = "f:" + to; } });
+                        renderTabs(); loadTree();
+                    })
+                    .catch(function (e) { toast(e.message, true); });
+            }
+            return;
+        }
+        if (act === "delete") {
+            if (!confirm("Delete " + path + "? This cannot be undone.")) return;
+            api("POST", "/ide/entry", { op: "delete", project: S.project, path: path })
+                .then(function () {
+                    S.tabs.filter(function (t) { return t.kind === "file" && (t.path === path || t.path.indexOf(path + "/") === 0); })
+                        .forEach(function (t) { closeTab(t.key, true); });
+                    loadTree();
+                })
+                .catch(function (e) { toast(e.message, true); });
+            return;
+        }
+        if (node.getAttribute("data-type") === "dir") {
+            S.collapsed[path] = !S.collapsed[path];
+            renderTree();
+        } else {
+            openFile(path);
+        }
+    });
+
+    function selectedDir() {
+        var tab = activeTab();
+        if (tab && tab.kind === "file" && tab.path.indexOf("/") !== -1) {
+            return tab.path.slice(0, tab.path.lastIndexOf("/") + 1);
+        }
+        return "";
+    }
+
+    function newEntry(kind) {
+        if (!S.project) return toast("Pick or create a project first.", true);
+        var path = prompt(kind === "dir" ? "New folder path:" : "New file path:", selectedDir());
+        if (!path) return;
+        api("POST", "/ide/entry", { op: "create", project: S.project, path: path, kind: kind })
+            .then(function (r) { return loadTree().then(function () { if (kind === "file") openFile(r.path); }); })
+            .catch(function (e) { toast(e.message, true); });
+    }
+    $("newFileBtn").addEventListener("click", function () { newEntry("file"); });
+    $("newDirBtn").addEventListener("click", function () { newEntry("dir"); });
+    $("refreshBtn").addEventListener("click", function () { loadTree(); reloadCleanTabs(); });
+
+    // ----------------------------------------------------------------- tabs
+    function activeTab() {
+        for (var i = 0; i < S.tabs.length; i++) if (S.tabs[i].key === S.active) return S.tabs[i];
+        return null;
+    }
+
+    function openFile(path) {
+        var key = "f:" + path;
+        if (S.tabs.some(function (t) { return t.key === key; })) { S.active = key; renderTabs(); showActive(); return; }
+        api("GET", "/ide/file?" + q({ project: S.project, path: path })).then(function (f) {
+            if (f.binary) return toast(path + " is a binary file and can't be edited here.", true);
+            if (f.too_large) return toast(path + " is too large to open here.", true);
+            var tab = { key: key, path: path, kind: "file", hash: f.hash, dirty: false, text: f.content };
+            if (monacoReady) {
+                tab.loading = true;
+                tab.model = monaco.editor.createModel(f.content, languageFor(path));
+                tab.savedVersion = tab.model.getAlternativeVersionId();
+                tab.loading = false;
+            }
+            S.tabs.push(tab);
+            S.active = key;
+            renderTabs(); showActive(); renderTree();
+        }).catch(function (e) { toast(e.message, true); });
+    }
+
+    function closeTab(key, force) {
+        var i = S.tabs.findIndex(function (t) { return t.key === key; });
+        if (i === -1) return;
+        var tab = S.tabs[i];
+        if (!force && tab.dirty && !confirm(tab.path + " has unsaved changes. Close it anyway?")) return;
+        if (monacoReady) {
+            if (editor.getModel() === tab.model) editor.setModel(null);
+            var shown = diffEditor.getModel();
+            if (shown && shown.modified === tab.model) diffEditor.setModel(null);
+        }
+        if (tab.model) tab.model.dispose();
+        if (tab.original) tab.original.dispose();
+        S.tabs.splice(i, 1);
+        if (S.active === key) S.active = S.tabs.length ? S.tabs[Math.max(0, i - 1)].key : null;
+        renderTabs(); showActive(); renderTree();
+    }
+
+    function renderTabs() {
+        $("tabs").innerHTML = S.tabs.map(function (t) {
+            var name = t.path.split("/").pop();
+            return '<div class="tab' + (t.key === S.active ? " on" : "") + (t.kind === "diff" ? " diff" : "") +
+                '" data-key="' + esc(t.key) + '" title="' + esc(t.path) + '">' +
+                (t.kind === "diff" ? "Δ " : "") + esc(name) +
+                (t.dirty ? '<span class="dot"></span>' : "") +
+                '<span class="x" data-close="1">✕</span></div>';
+        }).join("");
+        renderContext();
+    }
+
+    $("tabs").addEventListener("click", function (ev) {
+        var tabEl = ev.target.closest(".tab");
+        if (!tabEl) return;
+        var key = tabEl.getAttribute("data-key");
+        if (ev.target.getAttribute("data-close")) return closeTab(key);
+        S.active = key; renderTabs(); showActive(); renderTree();
+    });
+
+    function showActive() {
+        var tab = activeTab();
+        $("welcome").style.display = tab ? "none" : "flex";
+        var isDiff = tab && tab.kind === "diff";
+        $("diffbar").classList.toggle("show", !!isDiff);
+        if (monacoReady) {
+            $("editor").style.display = isDiff ? "none" : "block";
+            $("diffEditor").style.display = isDiff ? "block" : "none";
+            if (!tab) { editor.setModel(null); return; }
+            if (isDiff) {
+                diffEditor.setModel({ original: tab.original, modified: tab.model });
+            } else {
+                editor.setModel(tab.model);
+                editor.focus();
+            }
+        } else {
+            var fb = $("fallback");
+            fb.style.display = tab ? "block" : "none";
+            fb.readOnly = !!isDiff;
+            if (tab) fb.value = isDiff ? diffText(tab) : tab.text;
+        }
+        if (isDiff) renderDiffBar(tab);
+    }
+
+    /* Without Monaco, a diff is shown as a plain unified-looking listing. */
+    function diffText(tab) {
+        return "--- before\n" + (tab.beforeText || "(new file)") + "\n\n+++ after\n" + (tab.afterText || "(deleted)");
+    }
+
+    function currentText(tab) {
+        return tab.model ? tab.model.getValue() : tab.text;
+    }
+
+    function save() {
+        var tab = activeTab();
+        if (!tab || tab.kind !== "file") return;
+        api("POST", "/ide/file", { project: S.project, path: tab.path, content: currentText(tab), hash: tab.hash })
+            .then(function (r) {
+                if (r.status === "conflict") {
+                    if (confirm(tab.path + " changed on disk since you opened it (Jarvis or a CLI may have edited it).\n\nOK: load the version on disk (your edits are lost).\nCancel: keep your version; save again to overwrite.")) {
+                        setTabText(tab, r.content); tab.hash = r.hash; markSaved(tab);
+                    } else {
+                        tab.hash = r.hash;
+                    }
+                    renderTabs();
+                    return;
+                }
+                tab.hash = r.hash; markSaved(tab); renderTabs();
+                toast("Saved " + tab.path);
+                loadTree();
+            })
+            .catch(function (e) { toast(e.message, true); });
+    }
+
+    function markSaved(tab) {
+        tab.dirty = false;
+        if (tab.model) tab.savedVersion = tab.model.getAlternativeVersionId();
+    }
+
+    function setTabText(tab, text) {
+        tab.text = text;
+        if (tab.model) { tab.loading = true; tab.model.setValue(text); tab.loading = false; }
+        if (tab.key === S.active && !monacoReady) $("fallback").value = text;
+    }
+
+    /* After Jarvis or a CLI touches files, open tabs with no local edits follow the disk. */
+    function reloadCleanTabs() {
+        S.tabs.filter(function (t) { return t.kind === "file" && !t.dirty; }).forEach(function (t) {
+            api("GET", "/ide/file?" + q({ project: S.project, path: t.path })).then(function (f) {
+                if (f.hash && f.hash !== t.hash) { setTabText(t, f.content); t.hash = f.hash; markSaved(t); renderTabs(); }
+            }).catch(function () {});
+        });
+    }
+
+    document.addEventListener("keydown", function (ev) {
+        var mod = ev.ctrlKey || ev.metaKey;
+        if (mod && ev.key.toLowerCase() === "s") { ev.preventDefault(); save(); }
+        else if (mod && ev.key === "`") { ev.preventDefault(); toggleDock(); }
+        else if (mod && ev.key.toLowerCase() === "i" && !monacoReady) { ev.preventDefault(); askAboutSelection(); }
+    });
+
+    // -------------------------------------------------------------- engines
+    function loadEngines() {
+        return api("GET", "/ide/engines").then(function (data) {
+            S.engines = data.engines || [];
+            S.engine = data.engine; S.model = data.model;
+            $("engineSelect").innerHTML = S.engines.map(function (e) {
+                return '<option value="' + e.id + '"' + (e.available ? "" : " disabled") + ">" +
+                    esc(e.label) + (e.available ? "" : " (not set up)") + "</option>";
+            }).join("");
+            $("engineSelect").value = S.engine;
+            $("modelSelect").innerHTML = (data.models || []).map(function (m) {
+                return '<option value="' + esc(m.id) + '">' + esc(m.label) + "</option>";
+            }).join("") || '<option value="">No model found</option>';
+            $("modelSelect").value = S.model;
+            var mode = recall("mode");
+            if (mode) setMode(mode);
+            renderEngineNote();
+        }).catch(function (e) { toast(e.message, true); });
+    }
+
+    function renderEngineNote() {
+        var e = S.engines.find(function (x) { return x.id === S.engine; }) || {};
+        $("modelSelect").style.display = S.engine === "jarvis" ? "" : "none";
+        var unavailable = S.engines.filter(function (x) { return !x.available; })
+            .map(function (x) { return x.label + ": " + x.reason; });
+        var note = $("engineNote");
+        note.className = "engine-note" + (e.available === false ? " bad" : "");
+        note.innerHTML = esc(e.available === false ? e.reason : e.detail || "") +
+            (unavailable.length ? '<br><span title="' + esc(unavailable.join("\n")) + '">' +
+                unavailable.length + " engine" + (unavailable.length > 1 ? "s" : "") + " not set up (hover for why)</span>" : "");
+        // Autopilot/Review only shapes Jarvis's own engine; the CLIs apply edits themselves.
+        $("modeSwitch").style.display = S.engine === "jarvis" ? "" : "none";
+    }
+
+    $("engineSelect").addEventListener("change", function () { S.engine = this.value; renderEngineNote(); });
+    $("modelSelect").addEventListener("change", function () { S.model = this.value; });
+
+    function setMode(mode) {
+        S.mode = mode === "autopilot" ? "autopilot" : "review";
+        store("mode", S.mode);
+        Array.prototype.forEach.call($("modeSwitch").children, function (b) {
+            b.classList.toggle("on", b.getAttribute("data-mode") === S.mode);
+        });
+    }
+    $("modeSwitch").addEventListener("click", function (ev) {
+        var m = ev.target.getAttribute("data-mode");
+        if (m) setMode(m);
+    });
+
+    // ------------------------------------------------------------- missions
+    var STATUS = {
+        planning: ["Planning", "arc"], working: ["Working", "arc"], awaiting_plan: ["Plan ready", "warn"],
+        review: ["Review changes", "warn"], done: ["Done", "go"], failed: ["Failed", "no"], stopped: ["Stopped", ""]
+    };
+    var ENGINE_LABEL = { jarvis: "Jarvis", antigravity: "Antigravity", claude: "Claude" };
+
+    function loadMissions(force) {
+        if (!S.project) { S.missions = []; renderMissionList(); renderDetail(); return Promise.resolve(); }
+        return api("GET", "/ide/missions?" + q({ project: S.project })).then(function (data) {
+            var before = JSON.stringify(S.missions.map(function (m) { return [m.id, m.status, m.updated_at]; }));
+            S.missions = data.missions || [];
+            var after = JSON.stringify(S.missions.map(function (m) { return [m.id, m.status, m.updated_at]; }));
+            if (force || before !== after) { renderMissionList(); renderTree(); }
+        }).catch(function () {});
+    }
+
+    function ago(iso) {
+        var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+        if (s < 60) return "just now";
+        if (s < 3600) return Math.floor(s / 60) + " min ago";
+        if (s < 86400) return Math.floor(s / 3600) + " h ago";
+        return Math.floor(s / 86400) + " d ago";
+    }
+
+    function renderMissionList() {
+        var el = $("missionList");
+        if (!S.missions.length) {
+            el.innerHTML = '<div class="empty-deck">No missions on this project yet.<br><br>' +
+                "Describe what you want below. In <b>Review</b> mode Jarvis shows you what he understood and his plan before " +
+                "writing anything, then each change as a diff you accept or reject. In <b>Autopilot</b> he applies them " +
+                "and you can revert any of them.</div>";
+            return;
+        }
+        el.innerHTML = S.missions.map(function (m) {
+            var st = STATUS[m.status] || [m.status, ""];
+            var pending = (m.changes || []).filter(function (c) { return c.status === "pending"; }).length;
+            return '<div class="m-item' + (m.id === S.selected ? " on" : "") + '" data-id="' + m.id + '">' +
+                '<span class="ring ' + esc(m.status) + '"></span><div style="min-width:0;flex:1">' +
+                '<div class="t">' + esc(m.title) + "</div>" +
+                '<div class="s">' + esc(st[0]) + (pending ? " · " + pending + " to review" : "") +
+                " · " + esc(ENGINE_LABEL[m.engine] || m.engine) + " · " + ago(m.created_at) + "</div></div></div>";
+        }).join("");
+    }
+
+    $("missionList").addEventListener("click", function (ev) {
+        var item = ev.target.closest(".m-item");
+        if (item) selectMission(item.getAttribute("data-id"));
+    });
+
+    function selectMission(id) {
+        S.selected = id;
+        $("deck").classList.toggle("detail", !!id);
+        renderMissionList();
+        updateComposer();
+        if (!id) { S.mission = null; renderDetail(); return; }
+        refreshMission();
+    }
+
+    function refreshMission() {
+        if (!S.selected) return Promise.resolve();
+        var id = S.selected;
+        return api("GET", "/ide/missions/" + id).then(function (m) {
+            if (S.selected !== id) return;
+            var wasBusy = S.mission && S.mission.id === id && isBusy(S.mission);
+            var changed = !S.mission || S.mission.updated_at !== m.updated_at || S.mission.id !== m.id;
+            S.mission = m;
+            if (changed) { renderDetail(); updateComposer(); }
+            if (wasBusy && !isBusy(m)) { loadTree(); reloadCleanTabs(); }
+        }).catch(function (e) {
+            if (S.selected === id) { S.selected = null; S.mission = null; renderDetail(); toast(e.message, true); }
+        });
+    }
+
+    function isBusy(m) { return m && (m.status === "planning" || m.status === "working"); }
+
+    function statusBadge(m) {
+        var st = STATUS[m.status] || [m.status, ""];
+        return '<span class="badge ' + st[1] + '">' + esc(st[0]) + "</span>";
+    }
+
+    function renderDetail() {
+        var el = $("missionDetail");
+        var m = S.mission;
+        if (!m) {
+            el.innerHTML = document.body.classList.contains("missions-focus")
+                ? '<div class="empty-deck">Pick a mission on the left, or start one below.</div>' : "";
+            return;
+        }
+        var out = [];
+        out.push('<div class="d-head"><button class="btn tiny back-btn" data-act="back">←</button>' +
+            "<h3>" + esc(m.title) + "</h3>" + statusBadge(m) + "</div>");
+        out.push('<div class="row-actions" style="margin:-4px 0 14px">' +
+            '<span class="badge arc">' + esc(ENGINE_LABEL[m.engine] || m.engine) + "</span>" +
+            (m.engine === "jarvis" ? '<span class="badge">' + esc((m.model || "").replace(/^\w+:/, "")) + "</span>" +
+                '<span class="badge">' + (m.mode === "autopilot" ? "Autopilot" : "Review") + "</span>" : "") +
+            '<span class="spacer" style="flex:1"></span>' +
+            (isBusy(m) || m.status === "awaiting_plan" ? '<button class="btn tiny no" data-act="stop">Stop</button>' : "") +
+            (!isBusy(m) ? '<button class="btn tiny" data-act="delete">Remove</button>' : "") + "</div>");
+
+        out.push('<div class="timeline">');
+        // The latest plan (and the "working" line) sits right after the owner's
+        // latest message, since that is what it answers; changes and commands follow.
+        var mid = [];
+        var plan = m.plan;
+        if (plan && plan.kind !== "answer") {
+            var waiting = m.status === "awaiting_plan";
+            var p = '<div class="step' + (waiting ? " waiting" : "") + '"><div class="step-label">What Jarvis understood · plan</div><div class="bubble">' +
+                esc(plan.understanding || "") +
+                (plan.steps && plan.steps.length ? '<ol class="plan-steps">' + plan.steps.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ol>" : "") +
+                (plan.change && plan.change.length ? '<div class="files-line">Files to change: ' + plan.change.map(function (f) { return "<span>" + esc(f) + "</span>"; }).join(", ") + "</div>" : "") +
+                (plan.questions && plan.questions.length ? '<div style="margin-top:10px;color:var(--warn)">Jarvis needs to know:</div><ul class="plan-steps">' + plan.questions.map(function (s) { return "<li>" + esc(s) + "</li>"; }).join("") + "</ul>" : "") +
+                "</div>";
+            if (waiting) {
+                p += '<div class="row-actions"><input type="text" id="planNotes" placeholder="' +
+                    (plan.questions && plan.questions.length ? "Answer Jarvis's questions, or add notes" : "Notes or changes to the plan (optional)") +
+                    '"><button class="btn go" data-act="approve">Approve plan</button></div>';
+            }
+            p += "</div>";
+            mid.push(p);
+        }
+
+        if (isBusy(m)) {
+            mid.push('<div class="step"><div class="step-label">' + (m.status === "planning" ? "Understanding and planning" : "Working") +
+                '</div><div class="bubble" style="color:var(--muted)"><span class="ring working" style="display:inline-block;vertical-align:-2px;margin-right:8px"></span>' +
+                esc((m.log && m.log.length ? m.log[m.log.length - 1].text : "Starting…")) + "</div></div>");
+        }
+
+        var conv = m.conversation || [];
+        var lastOwner = -1;
+        conv.forEach(function (turn, i) { if (turn.role === "owner") lastOwner = i; });
+        conv.forEach(function (turn, i) {
+            out.push('<div class="step ' + (turn.role === "owner" ? "owner" : "") + '">' +
+                '<div class="step-label">' + (turn.role === "owner" ? "You" : "Jarvis") + "</div>" +
+                '<div class="bubble">' + esc(turn.text) + "</div></div>");
+            if (i === lastOwner) out.push.apply(out, mid);
+        });
+        if (lastOwner === -1) out.push.apply(out, mid);
+
+        var changes = m.changes || [];
+        if (changes.length) {
+            var pending = changes.filter(function (c) { return c.status === "pending"; }).length;
+            var c = '<div class="step' + (pending ? " waiting" : "") + '"><div class="step-label">Changes · ' + changes.length + "</div>";
+            if (pending > 1) {
+                c += '<div class="row-actions" style="margin:0 0 4px"><button class="btn tiny go" data-act="accept-all">Accept all ' + pending +
+                    '</button><button class="btn tiny no" data-act="reject-all">Reject all</button></div>';
+            }
+            changes.forEach(function (ch) {
+                var badge = { pending: ["waiting", "warn"], accepted: ["accepted", "go"], applied: ["applied", "go"],
+                    rejected: ["rejected", ""], reverted: ["reverted", ""], failed: ["failed", "no"] }[ch.status] || [ch.status, ""];
+                var btns = "";
+                if (ch.status === "pending") {
+                    btns = '<button class="btn tiny go" data-act="accept" data-change="' + ch.id + '">✓</button>' +
+                        '<button class="btn tiny no" data-act="reject" data-change="' + ch.id + '">✕</button>';
+                } else if (ch.status === "accepted" || ch.status === "applied") {
+                    btns = '<button class="btn tiny" data-act="revert" data-change="' + ch.id + '" title="Put the file back as it was">Revert</button>';
+                }
+                c += '<div class="change"><span class="badge">' + esc(ch.kind || "") + "</span>" +
+                    '<span class="p" data-act="diff" data-change="' + ch.id + '" title="Open the diff">' + esc(ch.path) + "</span>" +
+                    '<span class="plus">+' + ((ch.stats || {}).added || 0) + '</span><span class="minus">−' + ((ch.stats || {}).removed || 0) + "</span>" +
+                    '<span class="badge ' + badge[1] + '">' + badge[0] + "</span>" + btns + "</div>" +
+                    (ch.error ? '<div class="why" style="color:var(--no)">' + esc(ch.error) + "</div>" : "");
+            });
+            out.push(c + "</div>");
+        }
+
+        var cmds = m.commands || [];
+        if (cmds.length) {
+            var k = '<div class="step"><div class="step-label">Commands Jarvis suggests · you run them</div>';
+            cmds.forEach(function (cm) {
+                k += '<div class="cmdline">' + esc(cm.command) + "</div>" +
+                    (cm.why ? '<div class="why">' + esc(cm.why) + "</div>" : "") +
+                    '<div class="row-actions" style="margin-top:6px"><button class="btn tiny arc" data-act="run" data-cmd="' + cm.id + '">' +
+                    (cm.status === "ran" ? "Run again" : "Run in terminal") + "</button></div>";
+            });
+            out.push(k + "</div>");
+        }
+
+        if (m.status === "failed" && m.error) {
+            out.push('<div class="step"><div class="step-label">Problem</div><div class="bubble" style="border-color:rgba(248,113,113,0.4);color:#FECACA">' +
+                esc(m.error) + "</div></div>");
+        }
+        out.push("</div>");
+
+        if (m.log && m.log.length) {
+            out.push('<details class="log"><summary>Activity</summary>' + m.log.map(function (l) {
+                return "<div>" + new Date(l.at).toLocaleTimeString() + " · " + esc(l.text) + "</div>";
+            }).join("") + "</details>");
+        }
+        el.innerHTML = out.join("");
+    }
+
+    $("missionDetail").addEventListener("click", function (ev) {
+        var t = ev.target.closest("[data-act]");
+        if (!t || !S.mission) return;
+        var act = t.getAttribute("data-act"), m = S.mission;
+        var change = t.getAttribute("data-change");
+        if (act === "back") return selectMission(null);
+        if (act === "stop") return api("POST", "/ide/missions/" + m.id + "/stop").then(refreshMission).catch(function (e) { toast(e.message, true); });
+        if (act === "delete") {
+            if (!confirm("Remove this mission from the list? Files it changed stay as they are.")) return;
+            return api("DELETE", "/ide/missions/" + m.id).then(function () { selectMission(null); loadMissions(); });
+        }
+        if (act === "approve") {
+            t.disabled = true;
+            return api("POST", "/ide/missions/" + m.id + "/approve", { feedback: ($("planNotes") || {}).value || "" })
+                .then(refreshMission).catch(function (e) { t.disabled = false; toast(e.message, true); });
+        }
+        if (act === "accept" || act === "reject" || act === "revert" || act === "accept-all" || act === "reject-all") {
+            var decision = act.replace("-all", "");
+            var target = act.indexOf("-all") !== -1 ? "all" : change;
+            t.disabled = true;
+            return api("POST", "/ide/missions/" + m.id + "/changes/" + target, { decision: decision }).then(function (r) {
+                if (r.errors && r.errors.length) toast(r.errors[0], true);
+                closeDiffTabs(m.id, target);
+                loadTree(); reloadCleanTabs(); refreshMission(); loadMissions();
+            }).catch(function (e) { t.disabled = false; toast(e.message, true); });
+        }
+        if (act === "diff") return openDiff(m.id, change);
+        if (act === "run") {
+            var cm = (m.commands || []).find(function (c) { return c.id === t.getAttribute("data-cmd"); });
+            if (cm) runCommand(cm.command, { mission_id: m.id, command_id: cm.id });
+        }
+    });
+
+    // ------------------------------------------------------------------ diffs
+    function openDiff(missionId, changeId) {
+        var key = "d:" + missionId + ":" + changeId;
+        if (S.tabs.some(function (t) { return t.key === key; })) { S.active = key; renderTabs(); showActive(); return; }
+        api("GET", "/ide/missions/" + missionId + "/changes/" + changeId).then(function (c) {
+            var tab = { key: key, path: c.path, kind: "diff", mission: missionId, change: c,
+                        beforeText: c.before == null ? "" : c.before, afterText: c.after == null ? "" : c.after };
+            if (monacoReady) {
+                var lang = languageFor(c.path);
+                tab.original = monaco.editor.createModel(tab.beforeText, lang);
+                tab.model = monaco.editor.createModel(tab.afterText, lang);
+            }
+            S.tabs.push(tab); S.active = key;
+            if (document.body.classList.contains("missions-focus")) setFocus("code");
+            renderTabs(); showActive();
+        }).catch(function (e) { toast(e.message, true); });
+    }
+
+    function renderDiffBar(tab) {
+        var c = tab.change;
+        $("diffPath").textContent = c.path;
+        $("diffStats").innerHTML = '<span class="plus">+' + ((c.stats || {}).added || 0) + '</span> <span class="minus">−' + ((c.stats || {}).removed || 0) + "</span>" +
+            ' <span class="badge">' + esc(c.status) + "</span>";
+        var b = "";
+        if (c.status === "pending") {
+            b = '<button class="btn tiny go" data-dact="accept">Accept</button> <button class="btn tiny no" data-dact="reject">Reject</button>';
+        } else if (c.status === "accepted" || c.status === "applied") {
+            b = '<button class="btn tiny" data-dact="revert">Revert</button>';
+        }
+        $("diffButtons").innerHTML = b;
+    }
+
+    $("diffButtons").addEventListener("click", function (ev) {
+        var d = ev.target.getAttribute("data-dact");
+        var tab = activeTab();
+        if (!d || !tab || tab.kind !== "diff") return;
+        api("POST", "/ide/missions/" + tab.mission + "/changes/" + tab.change.id, { decision: d }).then(function (r) {
+            if (r.errors && r.errors.length) return toast(r.errors[0], true);
+            closeTab(tab.key, true);
+            loadTree(); reloadCleanTabs(); loadMissions();
+            if (S.selected === tab.mission) refreshMission();
+        }).catch(function (e) { toast(e.message, true); });
+    });
+
+    function closeDiffTabs(missionId, changeId) {
+        S.tabs.filter(function (t) {
+            return t.kind === "diff" && t.mission === missionId && (changeId === "all" || t.change.id === changeId);
+        }).forEach(function (t) { closeTab(t.key, true); });
+    }
+
+    // --------------------------------------------------------------- composer
+    function selectionText() {
+        if (!monacoReady) return "";
+        var tab = activeTab();
+        if (!tab || tab.kind !== "file") return "";
+        var sel = editor.getSelection();
+        return sel && !sel.isEmpty() ? tab.model.getValueInRange(sel) : "";
+    }
+
+    function renderContext() {
+        var tab = activeTab();
+        var pills = [];
+        if (tab && tab.kind === "file" && S.includeFile) {
+            pills.push('<span class="pill">' + esc(tab.path) + '<span class="x" data-ctx="file">✕</span></span>');
+        }
+        var sel = selectionText();
+        if (sel && S.includeSelection) {
+            pills.push('<span class="pill">selection · ' + sel.split("\n").length + ' lines<span class="x" data-ctx="sel">✕</span></span>');
+        }
+        $("ctx").innerHTML = pills.join("");
+    }
+    $("ctx").addEventListener("click", function (ev) {
+        var k = ev.target.getAttribute("data-ctx");
+        if (k === "file") S.includeFile = false;
+        if (k === "sel") S.includeSelection = false;
+        renderContext();
+    });
+
+    function context() {
+        var tab = activeTab();
+        var ctx = {};
+        if (tab && tab.kind === "file" && S.includeFile) ctx.open_file = tab.path;
+        var sel = selectionText();
+        if (sel && S.includeSelection) ctx.selection = sel;
+        return ctx;
+    }
+
+    function askAboutSelection() {
+        S.includeFile = true; S.includeSelection = true;
+        renderContext();
+        $("prompt").focus();
+    }
+
+    function updateComposer() {
+        var m = S.mission;
+        var following = !!(S.selected && m && !isBusy(m));
+        $("newMissionBtn").style.display = S.selected ? "" : "none";
+        $("composerHint").textContent = S.selected
+            ? (isBusy(m) ? "Jarvis is working on this mission…" : "Ctrl+Enter to send · continues this mission")
+            : "Ctrl+Enter to send · starts a new mission";
+        $("sendBtn").disabled = !!(S.selected && m && isBusy(m));
+        $("prompt").placeholder = following ? "Reply to Jarvis on this mission…" : "Tell Jarvis what to build, fix or explain…";
+    }
+
+    $("newMissionBtn").addEventListener("click", function () { selectMission(null); $("prompt").focus(); });
+
+    function send() {
+        var text = $("prompt").value.trim();
+        if (!text) return;
+        if (!S.project) return toast("Pick or create a project first.", true);
+        var btn = $("sendBtn");
+        btn.disabled = true;
+        var req;
+        if (S.selected && S.mission && !isBusy(S.mission)) {
+            req = api("POST", "/ide/missions/" + S.selected + "/followup", { message: text, context: context() });
+        } else {
+            req = api("POST", "/ide/missions", {
+                project: S.project, prompt: text, engine: S.engine, model: S.model, mode: S.mode, context: context()
+            });
+        }
+        req.then(function (m) {
+            $("prompt").value = "";
+            S.includeFile = true; S.includeSelection = true;
+            return loadMissions().then(function () { selectMission(m.id); });
+        }).catch(function (e) { toast(e.message, true); })
+          .then(function () { btn.disabled = false; updateComposer(); });
+    }
+    $("sendBtn").addEventListener("click", send);
+    $("prompt").addEventListener("keydown", function (ev) {
+        if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") { ev.preventDefault(); send(); }
+    });
+
+    // ---------------------------------------------------------------- terminal
+    function toggleDock(open) {
+        var dock = $("dock");
+        var willOpen = open === undefined ? dock.classList.contains("closed") : open;
+        dock.classList.toggle("closed", !willOpen);
+        $("termToggle").textContent = willOpen ? "▾" : "▴";
+        if (willOpen) $("termInput").focus();
+    }
+    $("termToggle").addEventListener("click", function () { toggleDock(); });
+    $("termClear").addEventListener("click", function () { $("termOut").innerHTML = ""; });
+
+    function termWrite(html) {
+        var out = $("termOut");
+        out.insertAdjacentHTML("beforeend", html);
+        out.scrollTop = out.scrollHeight;
+    }
+
+    function runCommand(command, extra) {
+        if (!S.project) return toast("Pick or create a project first.", true);
+        if (S.job) return toast("A command is still running. Stop it first.", true);
+        toggleDock(true);
+        termWrite('<span class="cmd">' + esc(S.project) + " › " + esc(command) + "</span>\n");
+        api("POST", "/ide/terminal", Object.assign({ project: S.project, command: command }, extra || {}))
+            .then(function (job) {
+                S.job = job.id; S.jobOffset = 0;
+                $("termStop").style.display = "";
+                pollJob();
+                if (extra && S.selected) refreshMission();
+            })
+            .catch(function (e) { termWrite('<span class="err">' + esc(e.message) + "</span>\n"); });
+    }
+
+    function pollJob() {
+        if (!S.job) return;
+        api("GET", "/ide/terminal/" + S.job + "?since=" + S.jobOffset).then(function (j) {
+            if (j.output) termWrite(esc(j.output));
+            S.jobOffset = j.offset;
+            if (j.running) return setTimeout(pollJob, 400);
+            termWrite('<span class="' + (j.exit_code === 0 ? "ok" : "err") + '">[exit ' + j.exit_code + "]</span>\n\n");
+            S.job = null;
+            $("termStop").style.display = "none";
+            loadTree(); reloadCleanTabs();
+        }).catch(function (e) {
+            termWrite('<span class="err">' + esc(e.message) + "</span>\n");
+            S.job = null; $("termStop").style.display = "none";
+        });
+    }
+
+    $("termStop").addEventListener("click", function () {
+        if (S.job) api("POST", "/ide/terminal/" + S.job + "/stop").catch(function () {});
+    });
+
+    $("termInput").addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") {
+            var cmd = this.value.trim();
+            if (!cmd) return;
+            if (cmd === "clear" || cmd === "cls") { $("termOut").innerHTML = ""; this.value = ""; return; }
+            S.history.push(cmd); S.histPos = S.history.length;
+            this.value = "";
+            runCommand(cmd);
+        } else if (ev.key === "ArrowUp" && S.history.length) {
+            S.histPos = Math.max(0, S.histPos - 1); this.value = S.history[S.histPos]; ev.preventDefault();
+        } else if (ev.key === "ArrowDown" && S.history.length) {
+            S.histPos = Math.min(S.history.length, S.histPos + 1); this.value = S.history[S.histPos] || "";
+        }
+    });
+
+    (function dockResize() {
+        var dragging = false, startY = 0, startH = 0, term = document.querySelector(".term");
+        $("dockResize").addEventListener("mousedown", function (ev) {
+            if ($("dock").classList.contains("closed")) return;
+            dragging = true; startY = ev.clientY; startH = term.offsetHeight; ev.preventDefault();
+        });
+        document.addEventListener("mousemove", function (ev) {
+            if (!dragging) return;
+            term.style.height = Math.max(80, Math.min(window.innerHeight * 0.7, startH + startY - ev.clientY)) + "px";
+        });
+        document.addEventListener("mouseup", function () { dragging = false; });
+    })();
+
+    // ------------------------------------------------------------------ focus
+    function setFocus(which) {
+        document.body.classList.toggle("missions-focus", which === "missions");
+        Array.prototype.forEach.call($("focusSwitch").children, function (b) {
+            b.classList.toggle("on", b.getAttribute("data-focus") === which);
+        });
+        store("focus", which);
+        renderDetail();
+    }
+    $("focusSwitch").addEventListener("click", function (ev) {
+        var f = ev.target.getAttribute("data-focus");
+        if (f) setFocus(f);
+    });
+
+    window.addEventListener("beforeunload", function (ev) {
+        if (S.tabs.some(function (t) { return t.dirty; })) { ev.preventDefault(); ev.returnValue = ""; }
+    });
+
+    // ------------------------------------------------------------------- boot
+    setFocus(recall("focus") === "missions" ? "missions" : "code");
+    bootMonaco();
+    loadEngines();
+    loadProjects();
+    setInterval(function () {
+        if (!S.project) return;
+        loadMissions();
+        if (S.selected) refreshMission();
+    }, 1500);
+
+    // Test hook: lets the page be driven without clicking around.
+    window.__workbench = { state: S, openFile: openFile, selectMission: selectMission, openDiff: openDiff, setFocus: setFocus };
+})();
+</script>
+<script src="nav_ui.js"></script>
+<script src="questions_ui.js"></script>
+<script src="sections_ui.js"></script>
+</body>
+</html>

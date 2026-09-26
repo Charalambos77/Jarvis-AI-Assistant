@@ -30,6 +30,7 @@
         // Other ways to do a pipeline's plan (best, cheapest, best result), by part.
         { key: "suggestions", label: "Suggestions", href: "suggestions.html", aliases: ["suggestions"] },
         { key: "commands", label: "Commands", href: "commands.html", aliases: ["commands"] },
+        { key: "ide", label: "IDE", href: "ide.html", aliases: ["ide", "workbench"] },
         // APIs and MCP servers are managed in the Control room now, so a page's
         // old "APIs/MCPs" button is taken over and relabelled rather than kept.
         { key: "control", label: "Control room", href: "control_room.html",
@@ -64,6 +65,7 @@
         "library.html": "library",
         "suggestions.html": "suggestions",
         "commands.html": "commands",
+        "ide.html": "ide",
         "control_room.html": "control",
         "provider_comparison.html": "control"
     }[page] || "";
