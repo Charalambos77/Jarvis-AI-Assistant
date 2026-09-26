@@ -43,6 +43,7 @@
 - **Files, editor, terminal**: a file explorer, a Monaco code editor with tabs (`Ctrl+S` saves, and it refuses to overwrite a file that changed on disk), and a terminal that runs in the project folder. The terminal still refuses anything on the Commands page's hard denylist.
 - **Missions**: tell Jarvis what to build, fix or explain. He writes down what he understood and his plan first. In **Review** mode you approve the plan, then accept or reject each change as a diff. In **Autopilot** he applies the changes, and any of them can be reverted. Commands he suggests are never run by him; each one has a Run button.
 - **Engines**: Jarvis's own model (any Gemini model, or a local Ollama model, so it works with no CLI connected), the Antigravity CLI, or the Claude coding agent when `agents/code_agent.py` is present and set up. The CLIs edit files themselves, so their changes arrive already applied, still with diffs and Revert.
+- **Sections from folders**: "Make a section from this folder" (and the ◆ on any subfolder) opens the same window a finished pipeline uses: brief, questions, research and the whole-project plan. The folder is only read; the section's own files go next to it under `Let Jarvis Handle It/`.
 - **This PC only**: the Workbench's routes answer only requests from this PC, even though the server listens on every interface. Set `JARVIS_IDE_ALLOW_REMOTE=1` to open them up on purpose.
 - **Tests**: `PYTHONPATH=. python scripts/test_ide.py` (offline, no key needed).
 

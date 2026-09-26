@@ -174,7 +174,8 @@ def tree(project: str) -> dict:
         return True
 
     complete = walk(root, "")
-    return {"project": project, "entries": entries, "truncated": not complete}
+    # The absolute folder is what Sections are made from (and matched against).
+    return {"project": project, "root": root, "entries": entries, "truncated": not complete}
 
 
 def _looks_binary(data: bytes) -> bool:

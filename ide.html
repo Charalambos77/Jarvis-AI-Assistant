@@ -117,6 +117,16 @@
         /* ---------- explorer ---------- */
         .explorer { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--bg2); }
         .tree { flex: 1; overflow: auto; padding: 0 6px 20px; font-size: 12.5px; }
+        /* The folder's standing as a section: a way in, or the button that makes one. */
+        .section-strip { padding: 0 10px 10px; }
+        .section-strip .btn { width: 100%; text-align: left; }
+        .section-strip .is-section {
+            display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 7px;
+            border: 1px solid rgba(56,189,248,0.3); background: var(--arc-soft); font-size: 11.5px;
+            color: var(--arc); cursor: pointer;
+        }
+        .section-strip .is-section b { color: #FFF; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+        .node .sec-mark { color: var(--arc); font-size: 10px; }
         .node {
             display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 5px;
             cursor: pointer; color: #CBD5E1; white-space: nowrap; user-select: none;
@@ -385,6 +395,7 @@
                 <button class="icon-btn" id="newDirBtn" title="New folder">＋ dir</button>
                 <button class="icon-btn" id="refreshBtn" title="Refresh">↻</button>
             </div>
+            <div class="section-strip" id="sectionStrip"></div>
             <div class="tree" id="tree"></div>
         </aside>
 
@@ -637,7 +648,8 @@
         }
         renderTabs(); showActive();
         $("termPrompt").textContent = (S.project || "no project") + " ›";
-        return Promise.all([loadTree(), loadMissions(true)]);
+        renderSectionStrip();
+        return Promise.all([loadTree(), loadMissions(true), loadSections()]);
     }
 
     $("projectSelect").addEventListener("change", function () {
@@ -663,6 +675,7 @@
         if (!S.project) { S.entries = []; renderTree(); return Promise.resolve(); }
         return api("GET", "/ide/tree?" + q({ project: S.project })).then(function (data) {
             S.entries = data.entries || [];
+            S.root = data.root || "";
             S.treeTruncated = data.truncated;
             renderTree();
         }).catch(function (e) { toast(e.message, true); });
@@ -705,7 +718,10 @@
                 '<span class="ico">' + (isDir ? "▣" : "·") + "</span>" +
                 '<span class="name">' + esc(name) + "</span>" +
                 (touched[e.path] ? '<span class="touched" title="Jarvis has a change waiting for this file"></span>' : "") +
-                '<span class="acts"><button class="icon-btn" data-act="rename" title="Rename">✎</button>' +
+                (isDir && sectionFor(e.path) ? '<span class="sec-mark" title="This folder is a section">◆</span>' : "") +
+                '<span class="acts">' +
+                (isDir && !sectionFor(e.path) ? '<button class="icon-btn" data-act="section" title="Make a section from this folder">◆</button>' : "") +
+                '<button class="icon-btn" data-act="rename" title="Rename">✎</button>' +
                 '<button class="icon-btn" data-act="delete" title="Delete">✕</button></span></div>'
             );
         });
@@ -718,6 +734,7 @@
         if (!node) return;
         var path = node.getAttribute("data-path");
         var act = ev.target.getAttribute("data-act");
+        if (act === "section") { makeSection(path); return; }
         if (act === "rename") {
             var to = prompt("Rename to:", path);
             if (to && to !== path) {
@@ -768,6 +785,65 @@
     $("newFileBtn").addEventListener("click", function () { newEntry("file"); });
     $("newDirBtn").addEventListener("click", function () { newEntry("dir"); });
     $("refreshBtn").addEventListener("click", function () { loadTree(); reloadCleanTabs(); });
+
+    // -------------------------------------------------------------- sections
+    /* A folder can become a section the same way a finished pipeline can: the
+       same window, the same questions, research and whole-project plan. The
+       sections window itself lives in sections_ui.js; this only says which folder. */
+    S.sections = [];
+
+    function absPath(rel) {
+        if (!S.root) return "";
+        var sep = S.root.indexOf("\\") !== -1 ? "\\" : "/";
+        return rel ? S.root + sep + rel.split("/").join(sep) : S.root;
+    }
+
+    function samePath(a, b) {
+        function norm(p) { return String(p || "").replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase(); }
+        return !!a && norm(a) === norm(b);
+    }
+
+    /* A folder is a section when a section was made from it. The project
+       folder also counts when it is a section's own folder. */
+    function sectionFor(rel) {
+        var abs = absPath(rel);
+        return S.sections.find(function (s) {
+            return samePath(s.source_path, abs) || (!rel && s.folder === S.project);
+        }) || null;
+    }
+
+    function loadSections() {
+        return api("GET", "/sections").then(function (data) {
+            S.sections = data.sections || [];
+            renderSectionStrip(); renderTree();
+        }).catch(function () { S.sections = []; renderSectionStrip(); });
+    }
+
+    function renderSectionStrip() {
+        var el = $("sectionStrip");
+        if (!S.project) { el.innerHTML = ""; return; }
+        var sec = sectionFor("");
+        el.innerHTML = sec
+            ? '<div class="is-section" data-open="' + esc(sec.id) + '" title="Open this section">◆ <b>' + esc(sec.name) + "</b>open ›</div>"
+            : '<button class="btn arc" id="makeSectionBtn" title="Research it, plan the whole project and give it standing agents">◆ Make a section from this folder</button>';
+    }
+
+    $("sectionStrip").addEventListener("click", function (ev) {
+        var open = ev.target.closest("[data-open]");
+        if (open) { window.location.href = "execution.html?section=" + encodeURIComponent(open.getAttribute("data-open")); return; }
+        if (ev.target.closest("#makeSectionBtn")) makeSection("");
+    });
+
+    function makeSection(rel) {
+        if (!S.project) return toast("Pick or create a project first.", true);
+        var js = window.JarvisSections;
+        var name = rel ? rel.split("/").pop() : S.project;
+        if (!js || typeof js.createFromFolder !== "function") {
+            return toast("Making a section from a folder needs the latest Sections update.", true);
+        }
+        if (!S.root) return toast("The folder is still loading. Try again in a moment.", true);
+        js.createFromFolder(absPath(rel), name);
+    }
 
     // ----------------------------------------------------------------- tabs
     function activeTab() {
