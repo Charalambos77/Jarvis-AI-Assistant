@@ -102,6 +102,7 @@ Enforce the following rules:
 10. `execution_agents` in this plan is only a DRAFT. It is written before any research exists, so after research finishes the roster is planned again from what the research found. Draft it as your best guess of who will produce the user's deliverables.
 11. RESEARCH CYCLES PRODUCE REAL FINDINGS. A cycle's outcome is actual results — the real competitors with their names and websites, their real ads, real inspected pages — never only a method, template, checklist or strategy for doing that work later. When the work is large (e.g. 20 competitors in each of 5 countries), split it across agents or cycles (e.g. one agent per country) instead of planning a method for it.
 12. WHEN A CYCLE MAKES A CHOICE (which niche, which countries, which competitors), its brief asks for real candidates to be compared against the user's criteria and the best ones chosen — never for a list picked in advance to be justified.
+13. RESEARCH THE WAYS TO DO THE WORK, NOT ONLY THE SUBJECT. When the deliverables can be produced in more than one way (different tools, services, paid or free, manual or automated), the cycle that settles how the work gets done compares those ways with their real costs, speed and quality, even when the user said how they want it done. After research, the owner is shown the best way, the cheapest and the one with the best result for every part of the plan, and can swap them in.
 """
 
 

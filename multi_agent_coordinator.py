@@ -16,6 +16,7 @@ from agents.synthesis import (run_synthesis_agent, run_master_synthesis, MERGE_F
                               DISAGREEMENT_RULES, DISAGREEMENT_SHAPE)
 from agents.links import URL_RE, Evidence, strip_unevidenced_links, cap_for_invented_links
 from agents.brief_changes import record_gate_change
+from agents import plan_suggestions
 
 # What a clarified brief means for the agents: it fixes WHAT the user wants, not
 # HOW they are allowed to work. Kept here so every planning call says the same thing.
@@ -927,6 +928,58 @@ def save_final_report_file(plan_id: str, report: dict, project_name: str = "Defa
 MAX_RETRIES = 3  # Configurable loop guard for all retry loops
 
 
+def write_plan_suggestions(plan_id, project_name, task, agent_plan, master_blueprint, event_logger=None):
+    """Split the execution plan into parts and write the other ways to do it.
+
+    Advisory: it never blocks the pipeline. The owner reads them on the
+    Suggestions page while the execution blueprint gate is open.
+    """
+    if not plan_id:
+        return None
+    try:
+        return plan_suggestions.build(plan_id, project_name, task, agent_plan.get("execution_agents", []),
+                                      master_blueprint, event_logger=event_logger)
+    except Exception as e:
+        print(f"[Pipeline] Suggestions failed; the plan goes ahead without them: {e}")
+        return None
+
+
+def take_chosen_plan(plan_id, project_name, agent_plan, event_logger=None, lock=False) -> bool:
+    """Put the plan the owner shaped on the Suggestions page into agent_plan.
+
+    Swapping a suggestion in only changes the suggestions file, because the page
+    can't reach the running pipeline. This reads it back at the gate. With lock,
+    the plan is final from here: execution is starting. Returns True if the
+    roster changed.
+    """
+    if not plan_id:
+        return False
+    state = plan_suggestions.lock(plan_id, project_name) if lock else plan_suggestions.load(plan_id, project_name)
+    if not state:
+        return False
+    chosen = plan_suggestions.execution_agents(state)
+    if not chosen:
+        return False
+    current = agent_plan.get("execution_agents") or []
+    if [a.get("agent_id") for a in chosen] == [a.get("agent_id") for a in current] and chosen == current:
+        return False
+    agent_plan["execution_agents"] = chosen
+    agent_plan["plan_parts"] = [
+        {"part_id": p["part_id"], "name": p["name"], "agent_ids": [a["agent_id"] for a in p["agents"]],
+         "source": p.get("source", "jarvis")}
+        for p in state.get("parts") or []
+    ]
+    save_agent_plan_file(plan_id, agent_plan, project_name)
+    if event_logger:
+        event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
+        swapped = [p["name"] for p in state.get("parts") or [] if str(p.get("source", "")).startswith("suggestion:")]
+        if swapped:
+            event_logger({"event_type": "narrative", "data": {
+                "phase": "execution", "icon": "💡",
+                "message": "Using the ways you chose on the Suggestions page for: " + ", ".join(swapped) + "."}})
+    return True
+
+
 async def run_full_pipeline(
     task: str,
     gate_approve_fn,        # async fn(gate_id: str, data: dict) -> {approved, redirect_note}
@@ -1450,6 +1503,11 @@ async def run_full_pipeline(
             if event_logger:
                 event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
 
+            # Phase 4b: The plan split into parts, with the other ways to do each part
+            # (best, cheapest, best result). The owner can swap them in on the
+            # Suggestions page while the gate below is open.
+            write_plan_suggestions(plan_id, project_name, user_brief, agent_plan, master_blueprint, event_logger)
+
             # Phase 5: Gate — Review Execution Blueprint
             print("[Pipeline] Phase 5: Waiting for human approval of execution blueprint...")
             exec_retry = 0
@@ -1461,6 +1519,9 @@ async def run_full_pipeline(
                     gate_id="execution_blueprint",
                     data={"master_blueprint": master_blueprint, "execution_agents": agent_plan["execution_agents"]}
                 )
+                # Whatever the owner swapped in on the Suggestions page while the gate
+                # was open is the plan now, approved or sent back.
+                take_chosen_plan(plan_id, project_name, agent_plan, event_logger, lock=bool(gate2.get("approved")))
                 if gate2.get("approved"):
                     if event_logger:
                         event_logger({"event_type": "gate_resolved", "source": "execution_blueprint", "data": gate2})
@@ -1483,6 +1544,8 @@ async def run_full_pipeline(
                 save_agent_plan_file(plan_id, agent_plan, project_name)
                 if event_logger:
                     event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
+                # The re-planned roster gets its own parts and suggestions.
+                write_plan_suggestions(plan_id, project_name, user_brief, agent_plan, master_blueprint, event_logger)
                 exec_retry += 1
 
             if exec_retry >= MAX_RETRIES:
@@ -1592,6 +1655,10 @@ async def run_full_pipeline(
                 event_logger({"event_type": "narrative", "data": {"phase": "execution", "message": "Force re-executing — discarding stale exec_results and running execution agents fresh...", "icon": "🔁"}})
 
         if not skip_execution:
+            # A resume can reach here with the gate approved earlier: the plan the
+            # owner chose on the Suggestions page is still the one that runs.
+            take_chosen_plan(plan_id, project_name, agent_plan, event_logger, lock=True)
+
             # New tools of a service the agents need may still be in review.
             await wait_for_tool_reviews(list(required_tools["connectable"]), event_logger)
 

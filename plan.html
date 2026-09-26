@@ -2394,6 +2394,15 @@
             let html = "";
             if (gateId === "execution_blueprint") {
                 const agents = data.execution_agents || [];
+                // The other ways to do this plan, part by part, live on their own page.
+                html += `
+                    <div class="step-row" style="border-color: rgba(192,132,252,0.35);">
+                        <div style="flex: 1; min-width: 0; font-size: 12px; line-height: 1.6;">
+                            Want to compare the best way, the cheapest and the one with the best result for each part?
+                            <a href="suggestions.html?plan=${encodeURIComponent(selectedPlanId || '')}" style="color: #C084FC;">Open Suggestions</a>
+                            and swap any of them in before you approve.
+                        </div>
+                    </div>`;
                 agents.forEach((a, idx) => {
                     const isChecked = currentlyChecked.has(a.agent_id) ? "checked" : "";
                     html += `
