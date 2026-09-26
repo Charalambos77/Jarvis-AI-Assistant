@@ -96,6 +96,7 @@ hook = subprocess.Popen(
     text=True, env=env)
 hook.stdin.write(json.dumps(payload))
 hook.stdin.close()
+hook.stdin = None  # already sent; communicate() must not flush it again
 
 waiting = []
 for _ in range(80):

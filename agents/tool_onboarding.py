@@ -25,6 +25,7 @@ The review lives in the catalogue, not in memory, so it survives a restart and
 its deadline keeps counting while Jarvis is closed.
 """
 import os
+import re
 import threading
 import time
 
@@ -296,7 +297,7 @@ def _research_then_review(server: str) -> None:
         found = tool_researcher.research(server, entry.get("kind", "mcp"), todo)
         error = None
     except Exception as e:
-        found, error = None, str(e)
+        found, error = None, _short_error(e)
         print(f"[Tool onboarding] Research of {server} failed: {e}")
 
     def _apply(catalog):
@@ -326,6 +327,16 @@ def _research_then_review(server: str) -> None:
 
     tool_catalog.update(_apply)
     _open_review(server)
+
+
+def _short_error(e: Exception) -> str:
+    """One readable line for the page. Model errors arrive with their whole JSON
+    body attached ("400 INVALID_ARGUMENT. {'error': {...}}"); keep the message."""
+    text = str(e)
+    message = re.search(r"""['"]message['"]:\s*['"]([^'"]+)['"]""", text)
+    head = text.split(" {", 1)[0].rstrip(". ")
+    short = f"{head}: {message.group(1)}" if message and message.group(1) not in head else head
+    return short[:200]
 
 
 def _open_review(server: str) -> None:

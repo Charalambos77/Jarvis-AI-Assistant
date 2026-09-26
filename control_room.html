@@ -314,7 +314,12 @@ function renderHeld(items) {
         host.innerHTML = `<div class="empty">No risky tool is waiting. When a service you connect offers a tool that costs money or is destructive, it waits here instead of on the Commands page.</div>`;
         return;
     }
-    host.innerHTML = items.map(t => `
+    // A big API (YouTube has 16) would fill the page with one card per tool, so a
+    // service with more than two waiting tools gets one card with a row per tool.
+    const byService = {};
+    items.forEach(t => (byService[t.service] = byService[t.service] || []).push(t));
+    host.innerHTML = Object.entries(byService).map(([service, tools]) => tools.length <= 2
+        ? tools.map(t => `
         <div class="card waiting">
             <div class="badges">
                 <span class="badge">${esc(t.service)}</span>
@@ -324,7 +329,38 @@ function renderHeld(items) {
             <div class="cmd">${esc(t.tool)}</div>
             <div class="breakdown">${esc(t.description)}</div>
             <div class="decide">${ruleButtons(t)}</div>
+        </div>`).join("")
+        : `
+        <div class="card waiting">
+            <div class="badges">
+                <span class="badge">${esc(service)}</span>
+                <span class="badge no">${tools.length} risky tools</span>
+                <span class="badge">found ${esc(ago(tools[0].discovered_at))}</span>
+            </div>
+            <div class="decide" style="margin:4px 0 10px">
+                <button class="btn tiny" onclick="decideAll('${esc(service)}','always_ask')">Ask every call for all ${tools.length}</button>
+                <button class="btn tiny" onclick="decideAll('${esc(service)}','block')">Block all ${tools.length}</button>
+            </div>
+            ${tools.map(t => `
+            <div class="rule-row">
+                <div style="flex:1 1 auto;min-width:0">
+                    <span class="sig">${esc(t.tool)}</span>
+                    <span class="badge no" style="margin-left:6px">${esc(RISK[t.risk] || t.risk)}</span>
+                    <div class="note" style="margin:4px 0 0">${esc(String(t.description || "").slice(0, 200))}</div>
+                </div>
+                <div class="decide" style="margin:0;flex:0 0 auto">${ruleButtons(t)}</div>
+            </div>`).join("")}
         </div>`).join("");
+}
+
+let heldCache = [];
+async function decideAll(service, decision) {
+    const tools = heldCache.filter(t => t.service === service);
+    if (!confirm(`${decision === 'block' ? 'Block' : 'Ask before every call to'} all ${tools.length} risky tools of ${service}?`)) return;
+    for (const t of tools)
+        await fetch('/control/tool', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service, tool: t.tool, decision }) });
+    refresh();
 }
 
 function renderRules(tools) {
@@ -644,7 +680,8 @@ async function refresh() {
             fetch('/control/tools').then(x => x.json())
         ]);
         renderCalls(p.calls || []);
-        renderHeld(p.tools || []);
+        heldCache = p.tools || [];
+        renderHeld(heldCache);
         renderRules(t.tools || []);
         renderLog(t.log || []);
     } catch (e) { /* Jarvis restarting; the next tick picks it up. */ }

@@ -1574,12 +1574,6 @@ tool_requests.set_notifier(lambda text: push_message("system", text))
 agent_questions.set_notifier(lambda text: push_message("system", text))
 tool_onboarding.set_notifier(lambda text: push_message("system", text))
 control_room.set_notifier(lambda text: push_message("system", text))
-# Reviews of newly connected tools approve themselves when their wait runs out,
-# even with no page open to notice.
-tool_onboarding.start_sweeper()
-# Connected services are looked at again: new or changed tools go up for review,
-# and connected APIs with no tools yet get them from their published spec.
-tool_onboarding.start_startup_check()
 coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
 coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
 coordinator.register_state_provider("get_pipelines", get_pipelines_local)
@@ -5255,12 +5249,27 @@ def mic_loop(window):
         pa.terminate()
 
 
+def start_tool_background_work():
+    """Background work on connected services, started only by the running app.
+
+    Kept out of import so a test that imports jarvis never starts servers,
+    fetches API specs or researches tools into this machine's real catalogue.
+    """
+    # Reviews of newly connected tools approve themselves when their wait runs
+    # out, even with no page open to notice.
+    tool_onboarding.start_sweeper()
+    # Connected services are looked at again: new or changed tools go up for
+    # review, and connected APIs with no tools yet get them from their spec.
+    tool_onboarding.start_startup_check()
+
+
 if __name__ == "__main__":
     from datetime import datetime
     import db
     
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
+    start_tool_background_work()
     time.sleep(0.5)  # give Flask a moment to bind before the window loads it
 
     # Start background reminder thread

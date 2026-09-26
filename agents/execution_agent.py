@@ -98,6 +98,10 @@ async def run_execution_agent(
               "part could not be completed and why.\n"
         )
 
+    # Built outside the f-string: a backslash inside {} is a SyntaxError before Python 3.12.
+    gate_note_block = ("GATE REJECTION NOTE (address this specifically in your output):\n"
+                       + gate_redirect_note) if gate_redirect_note else ""
+
     system_prompt = f"""
 You are a highly specialized {role} agent in the Jarvis multi-agent system.
 
@@ -108,7 +112,7 @@ YOUR BRIEF:
 APPROVED RESEARCH BLUEPRINT (use this as your source of truth):
 {blueprint_str}
 
-{"GATE REJECTION NOTE (address this specifically in your output):\n" + gate_redirect_note if gate_redirect_note else ""}
+{gate_note_block}
 
 REQUIRED OUTPUT KEYS: {json.dumps(output_spec.get("required_keys", []))}
 MINIMUM WORD COUNT: {output_spec.get("min_word_count", 0)}

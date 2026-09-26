@@ -110,6 +110,10 @@ check("and so does an MCP server's", tool_executor.describe_connectable("mcp:jar
 check("both are waited on", tool_onboarding.waiting_on_review(["jarvis_test", "notes_api", "google_search"])
       == ["jarvis_test", "notes_api"])
 
+check("a model error shows as one readable line, not its JSON body",
+      tool_onboarding._short_error(Exception("400 INVALID_ARGUMENT. {'error': {'message': 'API key not valid.'}}"))
+      == "400 INVALID_ARGUMENT: API key not valid.")
+
 # ---- 5. execution waits for the review -------------------------------------------------------
 import multi_agent_coordinator as mac
 mac.REVIEW_POLL_SECONDS = 0.02

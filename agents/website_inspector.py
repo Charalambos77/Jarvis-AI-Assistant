@@ -119,6 +119,7 @@ def _guard_route(url_guard, blocked: list, blocked_requests: list):
 
     Only navigations used to be checked, so an image, script, fetch or redirect a page
     aimed at this computer or the local network still went out from the browser.
+    Redirects are checked too, one hop at a time.
     Refused navigations go in `blocked`, everything else refused in `blocked_requests`.
     The guard judges an address by where it points, so each origin is checked once,
     not once per request.
@@ -136,7 +137,16 @@ def _guard_route(url_guard, blocked: list, blocked_requests: list):
             (blocked if request.is_navigation_request() else blocked_requests).append(problem)
             route.abort("blockedbyclient")
             return
-        route.continue_()
+        # A redirect the browser follows by itself never comes back through this
+        # handler, so an image on a public page could 302 to the local network
+        # unchecked. Fetch without following redirects instead: handing the 3xx back
+        # makes the browser request the new address, and that request is routed here.
+        try:
+            response = route.fetch(max_redirects=0)
+        except Exception:
+            route.abort("failed")
+            return
+        route.fulfill(response=response)
     return handle
 
 
@@ -311,8 +321,16 @@ def _installed_playwright_browsers() -> list[str]:
         match = re.search(r"-(\d+)[\\/]", exe_path)
         return int(match.group(1)) if match else 0
 
-    shells = glob.glob(os.path.join(root, "chromium_headless_shell-*", "chrome-headless-shell-*", "chrome-headless-shell.exe"))
-    full = glob.glob(os.path.join(root, "chromium-*", "chrome-win*", "chrome.exe"))
+    def find(*patterns):
+        return [hit for pattern in patterns for hit in glob.glob(os.path.join(root, *pattern))]
+
+    # Windows first; the Linux and macOS layouts let the same lookup work off Windows.
+    shells = find(("chromium_headless_shell-*", "chrome-headless-shell-*", "chrome-headless-shell.exe"),
+                  ("chromium_headless_shell-*", "chrome-*", "headless_shell"),
+                  ("chromium_headless_shell-*", "chrome-headless-shell-*", "chrome-headless-shell"))
+    full = find(("chromium-*", "chrome-win*", "chrome.exe"),
+                ("chromium-*", "chrome-linux*", "chrome"),
+                ("chromium-*", "chrome-mac*", "Chromium.app", "Contents", "MacOS", "Chromium"))
     return sorted(shells, key=revision, reverse=True) + sorted(full, key=revision, reverse=True)
 
 

@@ -167,6 +167,10 @@ check("Discovery: 'key' is not an argument, 'part' is required",
       list(dops["videos_list"]["input_schema"]["properties"]) == ["part"]
       and dops["videos_list"]["input_schema"]["required"] == ["part"])
 check("Discovery: DELETE is marked destructive", dops["videos_delete"]["annotations"] == {"destructiveHint": True})
+check("Discovery: listing subscriptions is a read, not a purchase",
+      tool_catalog.classify_risk("subscriptions_list", "", {"readOnlyHint": True}) == "read")
+check("Discovery: adding a subscription still counts as money, to be safe",
+      tool_catalog.classify_risk("subscriptions_insert", "", {}) == "costs_money")
 
 # ---- 3. an API with no spec -----------------------------------------------------------------
 api_connector.register_service("nospec", {"status": "up", "base_url": BASE + "/nothing-here"})

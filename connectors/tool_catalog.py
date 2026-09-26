@@ -145,7 +145,10 @@ def classify_risk(name: str, description: str = "", annotations: dict | None = N
     ordered = _words(name)
     name_words = set(ordered)
     text_words = set(_words(description))
-    reads_first = bool(ordered) and ordered[0] in _READ_VERBS
+    # Google's API documents name operations resource first ("subscriptions_list"),
+    # so for a tool the service itself marks read-only the verb may come last.
+    reads_first = bool(ordered) and (ordered[0] in _READ_VERBS
+                                     or (annotations.get("readOnlyHint") is True and ordered[-1] in _READ_VERBS))
 
     if name_words & _MONEY_ACTIONS or text_words & _MONEY_TEXT \
             or (not reads_first and name_words & _MONEY_NOUNS):
