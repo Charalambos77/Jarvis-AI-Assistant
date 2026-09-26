@@ -9,7 +9,7 @@ import os
 from google import genai
 from google.genai import types
 import db
-from agents.brain import build_agent_plan, plan_execution_agents, refresh_cycle_briefs
+from agents.brain import build_agent_plan, format_understanding, plan_execution_agents, refresh_cycle_briefs
 from agents.research_agent import run_research_agent
 from agents.execution_agent import run_execution_agent
 from agents.synthesis import (run_synthesis_agent, run_master_synthesis, MERGE_FACT_RULES,
@@ -635,7 +635,19 @@ def save_agent_plan_file(plan_id: str, agent_plan: dict, project_name: str = "De
     
     content = f"# Agent Spawn Plan - Plan ID: {plan_id}\n"
     content += f"**Task Summary:** {agent_plan.get('task_summary', 'N/A')}\n"
-    content += f"**Task Type:** {agent_plan.get('task_type', 'N/A')}\n\n"
+    content += f"**Task Type:** {agent_plan.get('task_type', 'N/A')}\n"
+    content += f"**Research Depth:** {agent_plan.get('research_depth', 'N/A')}\n\n"
+    understanding = agent_plan.get('task_understanding') or {}
+    if understanding:
+        content += "## Task Understanding\n"
+        if understanding.get('goal'):
+            content += f"- **Goal:** {understanding['goal']}\n"
+        for key, label in (('deliverables', 'Deliverables'), ('constraints', 'Constraints'),
+                           ('success_criteria', 'Success criteria'), ('unknowns', 'Unknowns to research'),
+                           ('assumptions', 'Assumptions')):
+            if understanding.get(key):
+                content += f"- **{label}:**\n" + "".join(f"  - {item}\n" for item in understanding[key])
+        content += "\n"
     content += "## Research Cycles\n"
     for cycle in agent_plan.get('cycles', []):
         content += f"### Cycle {cycle.get('cycle_id')}: {cycle.get('domain', 'N/A')}\n"
@@ -1088,6 +1100,12 @@ async def run_full_pipeline(
                     t["recommended_by"] = ["Brain"]
                 save_apis_mcps_file(plan_id, {"brain": init_tools, "agents": []}, project_name)
 
+        # Every later planning step (re-plans, brief refreshes, execution planning) works
+        # from Jarvis's understanding of the task, not only the task's own words.
+        understanding = agent_plan.get("task_understanding") or {}
+        if understanding:
+            planning_task = f"{planning_task}\n\n{format_understanding(understanding)}"
+
         cycles = agent_plan.get("cycles", [])
         # As many cycles as the task needs — one is enough, and there is no ceiling.
         if not cycles:
@@ -1431,6 +1449,11 @@ async def run_full_pipeline(
             if master_blueprint:
                 tools_data = load_apis_mcps_file(plan_id, project_name)
                 master_blueprint["tool_recommendations"] = tools_data.get("brain", []) + tools_data.get("agents", [])
+
+        # Execution agents and the quality checker read the blueprint, so they see the
+        # goal, constraints and success criteria the work is judged against.
+        if understanding and isinstance(master_blueprint, dict):
+            master_blueprint["task_understanding"] = understanding
 
         # Check if the execution blueprint gate was already approved
         skip_exec_gate = "execution_blueprint" in completed_stages
