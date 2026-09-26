@@ -37,6 +37,7 @@ import db
 import sections as section_store
 import command_gate
 import control_room
+import run_control
 from agents import tool_review, tool_requests, agent_questions, tool_onboarding
 
 # ---------------------------------------------------------------------------
@@ -1228,6 +1229,93 @@ def create_intake_draft(task: str, section_id: str | None = None,
     return draft
 
 
+def _make_gate_fn(plan_id: str):
+    """The approval gate a pipeline run waits at. Stopping the run from the
+    Control room ends the wait at once instead of leaving the gate open."""
+    async def gate_fn(gate_id: str, data: dict) -> dict:
+        with PIPELINE_LOCK:
+            state = _get_gate_state(plan_id)
+            state["current_gate"] = gate_id
+            state["gate_status"] = "waiting"
+            state["redirect_note"] = None
+            state["gate_data"] = data
+            state["rejected_steps"] = None
+        push_message("system", f"Gate {gate_id} is open. Waiting for your approval.")
+        import asyncio
+        while True:
+            await asyncio.sleep(2)
+            with PIPELINE_LOCK:
+                state = _get_gate_state(plan_id)
+                status = state["gate_status"]
+                note = state["redirect_note"]
+                rejected = state["rejected_steps"]
+            stopping = run_control.stop_requested(plan_id)
+            if status in ("approved", "rejected") or stopping:
+                with PIPELINE_LOCK:
+                    state = _get_gate_state(plan_id)
+                    state["current_gate"] = None
+                    state["gate_status"] = "idle"
+                    state["gate_data"] = None
+                    state["rejected_steps"] = None
+                if stopping:
+                    raise run_control.PipelineStopped(f"Stopped at gate {gate_id}")
+                return {"approved": status == "approved", "redirect_note": note, "rejected_steps": rejected}
+    return gate_fn
+
+
+def _set_plan_status(plan_id: str, status: str):
+    """Record a plan's run status in memory and in the database."""
+    plan_entry = None
+    with PLAN_STORE_LOCK:
+        for plan in PLAN_STORE:
+            if plan["id"] == plan_id:
+                plan["status"] = status
+                plan_entry = plan
+                break
+    if not plan_entry:
+        return
+    conn = db.get_connection(DB_PATH)
+    try:
+        db.save_pipeline(conn, plan_entry)
+    except Exception as e:
+        print(f"Error saving pipeline status '{status}': {e}")
+    finally:
+        conn.close()
+
+
+def _start_pipeline_thread(plan_id: str, task: str, gate_fn, **pipeline_kwargs):
+    """Run a pipeline on its own thread, under the Control room's pause and stop."""
+    def run_pipeline():
+        import asyncio
+        from multi_agent_coordinator import run_full_pipeline
+        with ACTIVE_PIPELINE_LOCK:
+            ACTIVE_PIPELINE_THREADS.add(plan_id)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, **pipeline_kwargs))
+            status = result.get('status', 'done')
+            if status == "escalated_to_human":
+                reason = result.get('message', 'Max retries exceeded.')
+                push_message("ai", f"Pipeline failed: {reason}")
+            else:
+                push_message("ai", f"Pipeline complete. Status: {status}.")
+        except run_control.PipelineStopped as e:
+            _set_plan_status(plan_id, "stopped")
+            push_message("system", f"Pipeline {plan_id} stopped ({e}). Its progress is saved; resume it any time.")
+        except Exception as e:
+            push_message("system", f"Pipeline error: {e}")
+        finally:
+            loop.close()
+            run_control.forget(plan_id)
+            with ACTIVE_PIPELINE_LOCK:
+                ACTIVE_PIPELINE_THREADS.discard(plan_id)
+
+    # Registered before the thread starts, so a pause pressed straight away lands.
+    run_control.register(plan_id)
+    threading.Thread(target=run_pipeline, daemon=True).start()
+
+
 def initiate_pipeline(task: str, project_name: str | None = None,
                       brief_path: str | None = None,
                       task_summary: str | None = None) -> str:
@@ -1297,55 +1385,9 @@ def initiate_pipeline(task: str, project_name: str | None = None,
     push_message("system", f"Pipeline started [Plan ID: {plan_id}]: {task_summary[:80]}...")
     create_initial_task_log(plan_id, task_summary, project_name)
 
-    async def gate_fn(gate_id: str, data: dict) -> dict:
-        with PIPELINE_LOCK:
-            state = _get_gate_state(plan_id)
-            state["current_gate"] = gate_id
-            state["gate_status"] = "waiting"
-            state["redirect_note"] = None
-            state["gate_data"] = data
-            state["rejected_steps"] = None
-        push_message("system", f"Gate {gate_id} is open. Waiting for your approval.")
-        import asyncio
-        while True:
-            await asyncio.sleep(2)
-            with PIPELINE_LOCK:
-                state = _get_gate_state(plan_id)
-                status = state["gate_status"]
-                note = state["redirect_note"]
-                rejected = state["rejected_steps"]
-            if status in ("approved", "rejected"):
-                with PIPELINE_LOCK:
-                    state = _get_gate_state(plan_id)
-                    state["current_gate"] = None
-                    state["gate_status"] = "idle"
-                    state["gate_data"] = None
-                    state["rejected_steps"] = None
-                return {"approved": status == "approved", "redirect_note": note, "rejected_steps": rejected}
+    gate_fn = _make_gate_fn(plan_id)
 
-    def run_pipeline():
-        import asyncio
-        from multi_agent_coordinator import run_full_pipeline
-        with ACTIVE_PIPELINE_LOCK:
-            ACTIVE_PIPELINE_THREADS.add(plan_id)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, brief_path=brief_path))
-            status = result.get('status', 'done')
-            if status == "escalated_to_human":
-                reason = result.get('message', 'Max retries exceeded.')
-                push_message("ai", f"Pipeline failed: {reason}")
-            else:
-                push_message("ai", f"Pipeline complete. Status: {status}.")
-        except Exception as e:
-            push_message("system", f"Pipeline error: {e}")
-        finally:
-            loop.close()
-            with ACTIVE_PIPELINE_LOCK:
-                ACTIVE_PIPELINE_THREADS.discard(plan_id)
-
-    threading.Thread(target=run_pipeline, daemon=True).start()
+    _start_pipeline_thread(plan_id, task, gate_fn, project_name=project_name, brief_path=brief_path)
     return plan_id
 
 def normalize_spoken_id(plan_id: str) -> str:
@@ -1406,6 +1448,10 @@ def resume_pipeline_local(settings_dict):
     plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
     if not plan_id:
         return {"error": "plan_id is required"}
+    # A run paused from the Control room is still alive: let it carry on from
+    # where it is waiting instead of starting a second run.
+    if run_control.get_state(plan_id)["state"] == run_control.PAUSED:
+        return {**run_control.resume(plan_id), "status": "pipeline_unpaused"}
     force_reexecute = bool(settings_dict.get("force_reexecute", False))
     
     plan_entry = None
@@ -1457,59 +1503,13 @@ def resume_pipeline_local(settings_dict):
     else:
         push_message("system", f"Resuming pipeline [Plan ID: {plan_id}]: {task_summary[:80]}...")
 
-    async def gate_fn(gate_id: str, data: dict) -> dict:
-        with PIPELINE_LOCK:
-            state = _get_gate_state(plan_id)
-            state["current_gate"] = gate_id
-            state["gate_status"] = "waiting"
-            state["redirect_note"] = None
-            state["gate_data"] = data
-            state["rejected_steps"] = None
-        push_message("system", f"Gate {gate_id} is open. Waiting for your approval.")
-        import asyncio
-        while True:
-            await asyncio.sleep(2)
-            with PIPELINE_LOCK:
-                state = _get_gate_state(plan_id)
-                status = state["gate_status"]
-                note = state["redirect_note"]
-                rejected = state["rejected_steps"]
-            if status in ("approved", "rejected"):
-                with PIPELINE_LOCK:
-                    state = _get_gate_state(plan_id)
-                    state["current_gate"] = None
-                    state["gate_status"] = "idle"
-                    state["gate_data"] = None
-                    state["rejected_steps"] = None
-                return {"approved": status == "approved", "redirect_note": note, "rejected_steps": rejected}
+    gate_fn = _make_gate_fn(plan_id)
 
     with ACTIVE_PIPELINE_LOCK:
         if plan_id in ACTIVE_PIPELINE_THREADS:
             return {"status": "already_running", "plan_id": plan_id}
 
-    def run_pipeline():
-        import asyncio
-        from multi_agent_coordinator import run_full_pipeline
-        with ACTIVE_PIPELINE_LOCK:
-            ACTIVE_PIPELINE_THREADS.add(plan_id)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(run_full_pipeline(task, gate_fn, event_logger=pipeline_event_logger, plan_id=plan_id, project_name=project_name, force_reexecute=force_reexecute, brief_path=brief_path))
-            status = result.get('status', 'done')
-            if status == "escalated_to_human":
-                reason = result.get('message', 'Max retries exceeded.')
-                push_message("ai", f"Pipeline failed: {reason}")
-            else:
-                push_message("ai", f"Pipeline complete. Status: {status}.")
-        except Exception as e:
-            push_message("system", f"Pipeline error: {e}")
-        finally:
-            loop.close()
-            with ACTIVE_PIPELINE_LOCK:
-                ACTIVE_PIPELINE_THREADS.discard(plan_id)
-
-    threading.Thread(target=run_pipeline, daemon=True).start()
+    _start_pipeline_thread(plan_id, task, gate_fn, project_name=project_name, brief_path=brief_path, force_reexecute=force_reexecute)
     return {"status": "pipeline_resumed", "plan_id": plan_id}
 
 def get_gate_status_local(plan_id: str | None = None):
@@ -1552,6 +1552,59 @@ def get_pipelines_local():
         trimmed.append(view)
     return trimmed
 
+def pause_pipeline_local(settings_dict):
+    """Pause a running pipeline after its current agent step."""
+    plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
+    if not plan_id:
+        return {"error": "plan_id is required"}
+    return run_control.pause(plan_id)
+
+def stop_pipeline_local(settings_dict):
+    """Stop a running pipeline after its current agent step. Its progress stays
+    saved, so resume_pipeline can pick it up again later."""
+    plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
+    if not plan_id:
+        return {"error": "plan_id is required"}
+    return run_control.stop(plan_id)
+
+def pipeline_runs_local():
+    """Every pipeline running right now, with its Control room state and the step
+    it is on or waiting before."""
+    with ACTIVE_PIPELINE_LOCK:
+        active = set(ACTIVE_PIPELINE_THREADS)
+    states = run_control.all_states()
+    with PLAN_STORE_LOCK:
+        plans = {p["id"]: p for p in PLAN_STORE}
+    with PIPELINE_LOCK:
+        gates = {pid: s.get("current_gate") for pid, s in PIPELINE_STATES.items()
+                 if s.get("gate_status") == "waiting"}
+    runs = []
+    for pid in sorted(active | set(states), key=lambda x: (len(x), x)):
+        plan = plans.get(pid) or {}
+        entry = states.get(pid) or {"state": run_control.RUNNING, "at": None}
+        runs.append({
+            "plan_id": pid,
+            "task": plan.get("task_summary") or plan.get("task") or "",
+            "project_name": plan.get("project_name"),
+            "phase": plan.get("phase"),
+            "state": entry["state"],
+            "at": entry["at"],
+            "gate": gates.get(pid),
+        })
+    # Runs stopped from here stay listed, so they can be resumed from the same place.
+    for pid, plan in plans.items():
+        if plan.get("status") == "stopped" and pid not in active:
+            runs.append({
+                "plan_id": pid,
+                "task": plan.get("task_summary") or plan.get("task") or "",
+                "project_name": plan.get("project_name"),
+                "phase": plan.get("phase"),
+                "state": "stopped",
+                "at": None,
+                "gate": None,
+            })
+    return runs
+
 def delete_pipeline_local(settings_dict):
     plan_id = normalize_spoken_id(settings_dict.get("plan_id", ""))
     if not plan_id:
@@ -1588,8 +1641,11 @@ tool_requests.set_notifier(lambda text: push_message("system", text))
 agent_questions.set_notifier(lambda text: push_message("system", text))
 tool_onboarding.set_notifier(lambda text: push_message("system", text))
 control_room.set_notifier(lambda text: push_message("system", text))
+run_control.set_notifier(lambda text: push_message("system", text))
 coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
 coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
+coordinator.register_state_provider("pause_pipeline", pause_pipeline_local)
+coordinator.register_state_provider("stop_pipeline", stop_pipeline_local)
 coordinator.register_state_provider("get_pipelines", get_pipelines_local)
 coordinator.register_state_provider("get_gate_status", get_gate_status_local)
 coordinator.register_state_provider("update_metric", update_metric_local)
@@ -5547,6 +5603,32 @@ def resume_pipeline_route():
     if "error" in res:
         return jsonify(res), 404
     return jsonify(res)
+
+
+@app.route("/pipeline/pause", methods=["POST"])
+def pause_pipeline_route():
+    """Pause a running pipeline after its current agent step."""
+    data = request.get_json(force=True) or {}
+    res = pause_pipeline_local({"plan_id": str(data.get("plan_id", "")).strip()})
+    if "error" in res:
+        return jsonify(res), 400
+    return jsonify(res)
+
+
+@app.route("/pipeline/stop", methods=["POST"])
+def stop_pipeline_route():
+    """Stop a running pipeline after its current agent step; progress stays saved."""
+    data = request.get_json(force=True) or {}
+    res = stop_pipeline_local({"plan_id": str(data.get("plan_id", "")).strip()})
+    if "error" in res:
+        return jsonify(res), 400
+    return jsonify(res)
+
+
+@app.route("/control/runs", methods=["GET"])
+def control_runs():
+    """Pipelines running right now, for the Control room's pause and stop buttons."""
+    return jsonify({"runs": pipeline_runs_local()})
 
 
 @app.route("/pipeline/delete", methods=["POST"])

@@ -21,6 +21,7 @@ from agents.user_brief import user_brief_block
 from agents.links import URL_RE, Evidence, strip_unevidenced_links, cap_for_invented_links
 from agents import tool_review, tool_requests, agent_questions
 import control_room
+import run_control
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -402,13 +403,19 @@ Output format:
             current_message = tool_response_parts
             # Rounds, not calls: a model often asks for several searches at once, and
             # counting each one paused an agent after its very first round.
+            # Paused from the Control room: wait here between tool rounds. Stopped: end
+            # now; the run drops this step and stops at its next checkpoint.
+            if await run_control.hold(f"{role}'s next tool call", event_logger):
+                stopped_after = len(calls)
+                break
             since_review += 1
             if since_review >= tool_review.REVIEW_EVERY:
                 since_review = 0
                 review = await tool_review.checkpoint(agent_id, role, "research", brief, calls, event_logger)
                 if review["decision"] != "continue":
                     stopped_after = len(calls)
-                    final_text = await tool_review.finish_without_tools(loop, chat, tool_response_parts, review)
+                    if not run_control.stop_requested():
+                        final_text = await tool_review.finish_without_tools(loop, chat, tool_response_parts, review)
                     break
                 current_message = tool_review.with_review_note(tool_response_parts, review)
 

@@ -35,6 +35,7 @@ import time
 import uuid
 
 from connectors import tool_catalog
+import run_control
 
 POLL_SECONDS = 1.0
 _LOG_LIMIT = 200
@@ -343,6 +344,10 @@ async def check_call(fn_name: str, args: dict, *, agent_id: str = "", role: str 
     while True:
         with _LOCK:
             decided = _DECIDED.pop(request_id, None)
+            # A run stopped from here takes its held calls with it, unanswered.
+            if decided is None and run_control.stop_requested(plan_id or None):
+                _PENDING.pop(request_id, None)
+                decided = {"decision": "deny", "reason": "The user stopped this pipeline."}
         if decided is not None:
             break
         await asyncio.sleep(POLL_SECONDS)

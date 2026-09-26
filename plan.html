@@ -1864,7 +1864,8 @@
                 let badgeOnclick = "";
 
                 let forceReexecuteBtn = "";
-                if (plan.status === 'running' && plan.active === false) {
+                // A run stopped from the Control room continues the same way.
+                if ((plan.status === 'running' && plan.active === false) || plan.status === 'stopped') {
                     statusText = "CONTINUE";
                     badgeClass = "paused";
                     badgeOnclick = `onclick="event.stopPropagation(); resumePipeline('${plan.id}')"`;
@@ -1971,7 +1972,7 @@
                     body: JSON.stringify({ plan_id: planId, force_reexecute: forceReexecute })
                 });
                 const data = await res.json();
-                if (data.status === 'pipeline_resumed') {
+                if (data.status === 'pipeline_resumed' || data.status === 'pipeline_unpaused') {
                     toast.innerText = `Pipeline [ID: ${planId}] resumed successfully.`;
                     selectPlan(planId);
                 } else {

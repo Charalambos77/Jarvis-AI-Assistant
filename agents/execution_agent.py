@@ -18,6 +18,7 @@ from agents.tool_executor import get_tools_for_execution_agent, run_tool
 from agents.user_brief import user_brief_block
 from agents import tool_review, tool_requests, agent_questions
 import control_room
+import run_control
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -248,13 +249,19 @@ RULES:
             current_message = tool_response_parts
             # Rounds, not calls: a model often asks for several tools at once, and
             # counting each one paused an agent after its very first round.
+            # Paused from the Control room: wait here between tool rounds. Stopped: end
+            # now; the run drops this step and stops at its next checkpoint.
+            if await run_control.hold(f"{role}'s next tool call", event_logger):
+                stopped_after = len(call_log)
+                break
             since_review += 1
             if since_review >= tool_review.REVIEW_EVERY:
                 since_review = 0
                 review = await tool_review.checkpoint(agent_id, role, "execution", brief, call_log, event_logger)
                 if review["decision"] != "continue":
                     stopped_after = len(call_log)
-                    final_text = await tool_review.finish_without_tools(loop, chat, tool_response_parts, review)
+                    if not run_control.stop_requested():
+                        final_text = await tool_review.finish_without_tools(loop, chat, tool_response_parts, review)
                     break
                 current_message = tool_review.with_review_note(tool_response_parts, review)
 

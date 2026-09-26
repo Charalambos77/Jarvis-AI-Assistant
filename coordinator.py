@@ -588,6 +588,28 @@ TOOLS = [
         }
     },
     {
+        "name": "pause_pipeline",
+        "description": "Pause a running pipeline by its plan_id. It pauses after the agent step it is on; resume_pipeline carries it on.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "string", "description": "The ID of the running pipeline to pause"}
+            },
+            "required": ["plan_id"]
+        }
+    },
+    {
+        "name": "stop_pipeline",
+        "description": "Stop a running pipeline by its plan_id. It stops after the agent step it is on, keeps its progress, and can be resumed later with resume_pipeline.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "plan_id": {"type": "string", "description": "The ID of the running pipeline to stop"}
+            },
+            "required": ["plan_id"]
+        }
+    },
+    {
         "name": "delete_pipeline",
         "description": "Delete a pipeline project permanently by its ID.",
         "parameters": {
@@ -786,6 +808,16 @@ TOOL_IMPL = {
         json=kw,
         timeout=2
     ).json() if requests else {}),
+    "pause_pipeline":     lambda conn, **kw: _state_providers["pause_pipeline"](kw) if "pause_pipeline" in _state_providers else (requests.post(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/pipeline/pause",
+        json=kw,
+        timeout=2
+    ).json() if requests else {}),
+    "stop_pipeline":      lambda conn, **kw: _state_providers["stop_pipeline"](kw) if "stop_pipeline" in _state_providers else (requests.post(
+        "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/pipeline/stop",
+        json=kw,
+        timeout=2
+    ).json() if requests else {}),
     "delete_pipeline":    lambda conn, **kw: _state_providers["delete_pipeline"](kw) if "delete_pipeline" in _state_providers else (requests.post(
         "http://127.0.0.1:" + os.getenv("JARVIS_PORT", "5000") + "/pipeline/delete",
         json=kw,
@@ -875,6 +907,8 @@ UI_MAP = (
     "  'start a pipeline for X' / 'let Jarvis handle it' \u2192 start_pipeline "
     "(asks about details first, then opens the details window)\n"
     "  'resume project Y' / 'resume pipeline Y' → resume_pipeline\n"
+    "  'pause project Y' / 'pause pipeline Y' → pause_pipeline\n"
+    "  'stop project Y' / 'stop pipeline Y' → stop_pipeline\n"
     "  'delete project Y' / 'delete pipeline Y' → delete_pipeline\n"
     "  'check pipeline status' → get_gate_status\n"
     "  'show all projects' / 'list pipelines' → get_pipelines\n"
