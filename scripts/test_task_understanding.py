@@ -244,6 +244,13 @@ mac.run_execution_phase = execution
 mac.run_quality_checker = qa
 mac.run_deployment_agent = deploy
 
+
+async def no_review_wait(*a, **k):
+    return []
+
+
+mac.wait_for_tool_reviews = no_review_wait  # the Control room's tool reviews are tested on their own
+
 result = run("p1", UNDERSTANDING)
 check("the pipeline completes", result.get("status") == "complete")
 check("a task that isn't simple is researched without asking",

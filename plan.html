@@ -2302,7 +2302,7 @@
                              ${itemsHtml}
                          </div>
  
-                         <div class="hitl-actions" style="display: flex; gap: 6px; justify-content: stretch;">
+                         <div class="hitl-actions" style="display: ${gateId === 'research_choice' ? 'none' : 'flex'}; gap: 6px; justify-content: stretch;">
                              <button class="action-button approve" style="flex: 1; padding: 6px; font-size: 11px;" onclick="submitApproval(true)">Quick Approve</button>
                              <button class="action-button" style="flex: 1; padding: 6px; font-size: 11px; background: rgba(255,255,255,0.05); color: #FFF; border: 1px solid rgba(255,255,255,0.1);" onclick="openApprovalModal()">Details</button>
                          </div>

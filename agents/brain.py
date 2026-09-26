@@ -402,11 +402,19 @@ def services_involved(agent_plan: dict) -> list[str]:
 
     services, seen = [], set()
     for name in found:
+        # Connected services resolve to keys like "api:youtube_api" or "mcp:notes"; name them plainly.
+        name = re.sub(r"^(api|mcp):", "", str(name).strip())
         key = _key(name)
         if key and key not in _BUILT_IN_TOOLS and key not in seen:
             seen.add(key)
             services.append(name)
     return services
+
+
+def _service_core(name: str) -> str:
+    """A service's name without API/MCP wording, for spotting it in a brief ("youtube_api" -> "youtube")."""
+    words = [w for w in _key(name).split("_") if w not in ("api", "apis", "mcp", "server", "the")]
+    return " ".join(words)
 
 
 def _new_cycle(cycle_id: int, domain: str, goal: str, lead: tuple, advisor: tuple, memory: str) -> dict:
@@ -450,8 +458,9 @@ def ensure_research(agent_plan: dict) -> dict:
         + " ".join(f"{a.get('brief', '')} {' '.join(map(str, a.get('tools_needed') or []))}" for a in _cycle_agents(c))
         for c in cycles
     ).lower()
+    covered = re.sub(r"[^a-z0-9]+", " ", covered)
     uncovered = [s for s in services_involved({**agent_plan, "cycles": cycles})
-                 if _key(s).replace("_", " ") not in covered.replace("_", " ")]
+                 if f" {_service_core(s)} " not in f" {covered} "]
     if uncovered:
         listed = ", ".join(uncovered)
         next_id = max((_as_int(c.get("cycle_id")) or 0 for c in cycles), default=0) + 1
