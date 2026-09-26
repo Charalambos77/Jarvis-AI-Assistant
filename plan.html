@@ -1195,6 +1195,23 @@
         // into an onclick='...' attribute must be HTML-escaped or a stray
         // quote silently truncates the attribute. See the Connect-button
         // note further down for the bug this class of mistake caused once.
+        // Where a service's new tools are in the Control room review, for the
+        // Plugging Gate. The pipeline waits after the gate while they are in review.
+        function toolReviewNote(r) {
+            const rv = r.review || {};
+            if (rv.state === 'researching')
+                return `<br><span style="color:#fcd34d; font-size:11px;">Jarvis is researching its new tools. The agents start once they have been reviewed in the <a href="control_room.html" style="color:inherit; text-decoration:underline;">Control room</a>.</span>`;
+            if (rv.state === 'awaiting_review') {
+                const mins = rv.expires_in != null ? ` They approve themselves in ${Math.max(1, Math.round(rv.expires_in / 60))} min if you don't answer.` : "";
+                return `<br><span style="color:#fcd34d; font-size:11px;">${rv.pending || 0} new tool(s) waiting for your review in the <a href="control_room.html" style="color:inherit; text-decoration:underline;">Control room</a>. The agents start once they are reviewed.${mins}</span>`;
+            }
+            if (rv.state === 'no_spec')
+                return `<br><span style="color:#fca5a5; font-size:11px;">Connected, but Jarvis found no API description for it. Add its spec link in the <a href="control_room.html" style="color:inherit; text-decoration:underline;">Control room</a>.</span>`;
+            if (rv.held)
+                return `<br><span style="color:var(--text-muted); font-size:11px;">${rv.held} tool(s) that cost money or are destructive wait in the Control room; the agents are told.</span>`;
+            return "";
+        }
+
         function htmlAttrEscape(s) {
             return String(s)
                 .replace(/&/g, '&amp;')
@@ -2485,6 +2502,7 @@
                                                     style="background: rgba(${btnColour}, 0.15); border: 1px solid rgba(${btnColour}, 0.4); color: rgb(${btnColour}); font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px; cursor: pointer; margin-left: 8px;">${btnLabel}</button>
                                             ${errHtml}
                                             ${toolsHtml}
+                                            ${toolReviewNote(r)}
                                         </label>
                                     </div>
                                 `;
@@ -2560,7 +2578,7 @@
                                     <input type="checkbox" id="check-${idx}" value="${r.service}" ${isChecked}>
                                     <label for="check-${idx}">
                                         <strong>Tool: ${r.service}</strong> (Recommended by: ${recBy})<br>
-                                        ${statusHtml}<br>
+                                        ${statusHtml}${toolReviewNote(r)}<br>
                                         <strong style="color: var(--text-muted);">What we'll use it for:</strong> ${purposeText}<br>
                                         <strong style="color: var(--text-muted);">Pros:</strong> ${prosText}<br>
                                         <strong style="color: var(--text-muted);">Cons:</strong> <span style="color: #fca5a5;">${consText}</span>

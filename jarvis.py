@@ -1577,8 +1577,9 @@ control_room.set_notifier(lambda text: push_message("system", text))
 # Reviews of newly connected tools approve themselves when their wait runs out,
 # even with no page open to notice.
 tool_onboarding.start_sweeper()
-# Connected APIs with no tools yet get them from their published spec.
-tool_onboarding.start_api_discovery()
+# Connected services are looked at again: new or changed tools go up for review,
+# and connected APIs with no tools yet get them from their published spec.
+tool_onboarding.start_startup_check()
 coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
 coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
 coordinator.register_state_provider("get_pipelines", get_pipelines_local)
@@ -4927,9 +4928,19 @@ def tools_overview_route():
     apis = []
     # Everything Jarvis has a real connector for, plus anything already in the
     # registry — so services with a handler show up even before they're set up.
-    names = sorted(set(registry) | set(REGISTRY_TOOLS))
+    #
+    # Connecting a service saves it under the name it was given AND a cleaned-up
+    # one ("Mini API" and "mini_api"). Those are one service, so they get one
+    # row, under the cleaned-up name, connected if either spelling is.
+    clean = lambda n: n.lower().replace("-", "_").replace(" ", "_")
+    spellings: dict[str, list[str]] = {}
+    for name in sorted(set(registry) | set(REGISTRY_TOOLS)):
+        spellings.setdefault(clean(name), []).append(name)
+    names = sorted(spellings)
     for name in names:
-        cfg = registry.get(name) or {}
+        configs = [registry[n] for n in spellings[name] if registry.get(n)]
+        cfg = next((c for c in configs if c.get("status", "unknown") != "unknown"), None) \
+            or registry.get(name) or (configs[0] if configs else {})
         status = cfg.get("status", "unknown")
         # Resolve rather than test membership: google_drive_api has no entry of
         # its own but aliases onto google_docs_api's handler, and calling that
@@ -5016,10 +5027,15 @@ def disconnect_tool_route():
         return jsonify({"error": "service_name is required"}), 400
 
     registry = load_registry()
-    if service not in registry:
+    # Every spelling it was saved under ("Mini API" and "mini_api"), or it would
+    # still count as connected under the other one.
+    clean = lambda n: n.lower().replace("-", "_").replace(" ", "_")
+    names = [n for n in registry if clean(n) == clean(service)]
+    if not names:
         return jsonify({"error": f"'{service}' is not in the registry."}), 404
 
-    registry[service]["status"] = "unknown"
+    for name in names:
+        registry[name]["status"] = "unknown"
     save_registry()
     push_message("system", f"{service} disconnected. Stored credentials were left in place.")
     return jsonify({"service": service, "status": "unknown", "configured": False})

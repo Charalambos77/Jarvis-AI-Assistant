@@ -1136,7 +1136,7 @@ def describe_connectable(key: str) -> dict:
                 tool_onboarding.observe_mcp(server, info.get("tools", []))
             except Exception as e:
                 print(f"[ToolResolver] Could not record {server}'s tools: {e}")
-        return {
+        out = {
             "kind": "mcp",
             "service": server,
             "configured": info.get("status") == "up",
@@ -1144,6 +1144,10 @@ def describe_connectable(key: str) -> dict:
             "error": info.get("error"),
             "tools": [t["name"] for t in info.get("tools", [])],
         }
+        if out["configured"]:
+            from agents import tool_onboarding
+            out["review"] = tool_onboarding.tools_state(server)
+        return out
 
     from connectors.api_connector import get_service_status
     service = key[len(API_KEY_PREFIX):] if key.startswith(API_KEY_PREFIX) else key
@@ -1159,6 +1163,8 @@ def describe_connectable(key: str) -> dict:
         entry = tool_catalog.get(service) or {}
         out["tools"] = sorted(entry.get("tools") or {})
         out["spec_url"] = entry.get("spec_url")
+        from agents import tool_onboarding
+        out["review"] = tool_onboarding.tools_state(service)
     return out
 
 

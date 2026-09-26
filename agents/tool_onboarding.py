@@ -165,9 +165,87 @@ def discover_connected_apis() -> list[str]:
     return looked
 
 
-def start_api_discovery() -> None:
-    """discover_connected_apis on its own thread, so startup never waits on the web."""
-    threading.Thread(target=discover_connected_apis, name="api-discovery", daemon=True).start()
+def check_for_changes() -> dict:
+    """At startup: look at every connected service again for new or changed tools.
+
+    Switched-on MCP servers are started and their tool lists compared with the
+    catalogue; APIs already in it have their spec read again; connected APIs
+    with no tools yet are discovered. Anything new or changed goes up for
+    research and review; unchanged tools keep their decisions. Returns
+    {"mcp": [...], "api": [...], "changed": [...]}.
+    """
+    before = {name: entry.get("tools_hash") for name, entry in tool_catalog.load().items()}
+    looked_mcp, looked_api = [], []
+    try:
+        from connectors.mcp_client import enabled_servers, ensure_server_running
+        servers = list(enabled_servers())
+    except Exception as e:
+        print(f"[Tool onboarding] MCP client unavailable at startup: {e}")
+        servers = []
+    for server in servers:
+        try:
+            info = ensure_server_running(server)
+            if info and info.get("status") == "up":
+                observe_mcp(server, info.get("tools", []))
+                looked_mcp.append(server)
+        except Exception as e:
+            print(f"[Tool onboarding] Could not check {server} at startup: {e}")
+
+    try:
+        from connectors.api_connector import get_service_status
+    except Exception:
+        get_service_status = lambda _name: "unknown"
+    for name, entry in tool_catalog.load().items():
+        if entry.get("kind") != "api" or entry.get("state") == "no_spec" or get_service_status(name) == "unknown":
+            continue
+        try:
+            observe_api(name)
+            looked_api.append(name)
+        except Exception as e:
+            print(f"[Tool onboarding] Could not re-read {name}'s API description: {e}")
+    looked_api += discover_connected_apis()
+
+    after = tool_catalog.load()
+    changed = sorted(name for name in set(looked_mcp) | set(looked_api)
+                     if name in after and after[name].get("tools_hash") != before.get(name))
+    return {"mcp": looked_mcp, "api": looked_api, "changed": changed}
+
+
+def start_startup_check() -> None:
+    """check_for_changes on its own thread, so startup never waits on servers or the web."""
+    threading.Thread(target=check_for_changes, name="tool-startup-check", daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# What the Plugging Gate needs to know
+# ---------------------------------------------------------------------------
+
+WAITING_STATES = ("researching", "awaiting_review")
+
+
+def tools_state(service: str) -> dict:
+    """Where a service's tools are, for the gate: state, counts and time left on its review."""
+    entry = tool_catalog.get(service) or {}
+    statuses = [t.get("status") for t in (entry.get("tools") or {}).values()]
+    review = entry.get("review") or {}
+    out = {"state": entry.get("state") or ("ready" if statuses else None),
+           "enabled": statuses.count("enabled"), "pending": statuses.count("pending"),
+           "held": statuses.count("held")}
+    if review.get("deadline"):
+        out["expires_in"] = max(0, int(float(review["deadline"]) - time.time()))
+    if entry.get("spec_error") and entry.get("state") == "no_spec":
+        out["spec_error"] = entry["spec_error"]
+    return out
+
+
+def waiting_on_review(services) -> list[str]:
+    """The services whose new tools are still being researched or waiting for review.
+
+    Tools held in the Control room are not counted: they wait with no time
+    limit, and a pipeline must never stall on them. The agent is told instead.
+    """
+    sweep()
+    return [s for s in dict.fromkeys(services or []) if (tool_catalog.get(s) or {}).get("state") in WAITING_STATES]
 
 
 def start_research(server: str) -> None:
