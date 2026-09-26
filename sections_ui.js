@@ -314,6 +314,43 @@
     textarea.jsec-field { min-height: 78px; resize: vertical; line-height: 1.65; }
     .jsec-empty-crew { font-size: 12.5px; color: #6B7280; line-height: 1.8; }
 
+    /* ---- the plan: research progress, where the pipeline fits, every ask ---- */
+    .jsec-steps { list-style: none; margin: 0; padding: 0; }
+    .jsec-steps li {
+        display: flex; gap: 12px; padding: 9px 0; font-size: 12.5px; color: #CBD5E1;
+        border-bottom: 1px solid rgba(255,255,255,0.045); line-height: 1.5;
+    }
+    .jsec-steps .ic { width: 16px; flex: 0 0 auto; text-align: center; }
+    .jsec-steps .running .ic { color: #60A5FA; animation: jsec-pulse 1.2s ease-in-out infinite; }
+    .jsec-steps .done .ic { color: #34D399; }
+    .jsec-steps .failed .ic { color: #F87171; }
+    .jsec-steps .dt { color: #6B7280; margin-left: auto; white-space: nowrap; font-size: 11px; }
+    @keyframes jsec-pulse { 50% { opacity: .35; } }
+    .jsec-plan-box {
+        border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+        padding: 14px 16px; margin-bottom: 14px; background: rgba(255,255,255,0.015);
+        font-size: 12.5px; color: #CBD5E1; line-height: 1.7;
+    }
+    .jsec-plan-box h4 {
+        margin: 0 0 8px; font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+        color: #9CA3AF; font-weight: 700;
+    }
+    .jsec-asks { list-style: none; margin: 0; padding: 0; }
+    .jsec-asks li { display: flex; gap: 10px; padding: 4px 0; }
+    .jsec-asks .ok { color: #34D399; flex: 0 0 auto; }
+    .jsec-asks .miss { color: #F87171; flex: 0 0 auto; }
+    .jsec-asks .who { color: #6B7280; font-size: 11px; }
+    .jsec-plan-box details summary { cursor: pointer; color: #93C5FD; }
+    .jsec-status {
+        font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+        padding: 4px 9px; border-radius: 5px; flex: 0 0 auto; white-space: nowrap;
+        border: 1px solid rgba(255,255,255,0.12); color: #9CA3AF;
+    }
+    .jsec-status.done { background: rgba(52,211,153,0.12); color: #34D399; border-color: transparent; }
+    .jsec-status.gap { background: rgba(248,113,113,0.12); color: #F87171; border-color: transparent; }
+    .jsec-covers { font-size: 10.5px; color: #6B7280; margin-top: 6px; line-height: 1.6; }
+    .jsec-covers b { color: #93C5FD; font-weight: 600; }
+
     /* ---- the section information overlay ---- */
     .jsec-info {
         position: fixed; inset: 0; z-index: 9050;
@@ -886,7 +923,7 @@
                 draft.editing = true;
                 renderBriefText();
             }),
-            footButton("Continue", "primary", proposeCrew)
+            footButton("Research and plan", "primary", runPlan)
         ]);
     }
 
@@ -914,8 +951,143 @@
     // said it is for. Every agent shown carries where it came from, because a
     // roster you cannot check is a roster you cannot trust.
 
+    // A whole project can have many parts, so the palette is longer than a
+    // pipeline's and still cycles past it.
     var CREW_COLORS = ["#22D3EE", "#60A5FA", "#34D399", "#F87171",
-                       "#FB7185", "#FCD34D", "#A78BFA", "#818CF8"];
+                       "#FB7185", "#FCD34D", "#A78BFA", "#818CF8",
+                       "#2DD4BF", "#F472B6", "#FB923C", "#A3E635",
+                       "#38BDF8", "#C084FC", "#FACC15", "#4ADE80"];
+
+    // Jarvis researches the whole section before planning it, which takes a
+    // while, so the window shows each step as it happens.
+    function runPlan() {
+        draft.busy = true;
+        draft.planSteps = [];
+        renderPlanProgress();
+        return post("/sections/intake/plan", {
+            draft_id: draft.draftId,
+            brief_text: draft.briefText
+        })
+        .then(pollPlan)
+        .catch(function (e) {
+            // Without a plan the old crew proposal still gives the section agents.
+            setStatus(e.message || "Jarvis could not plan the section.");
+            proposeCrew();
+        });
+    }
+
+    function pollPlan(view) {
+        if (!draft || !modal.classList.contains("open")) return;
+        if (view.state === "running") {
+            draft.planSteps = view.steps || [];
+            renderPlanProgress();
+            var id = draft.draftId;
+            setTimeout(function () {
+                if (!draft || draft.draftId !== id) return;
+                fetch("/sections/intake/plan/status?draft_id=" + encodeURIComponent(id))
+                    .then(function (r) { return r.json(); })
+                    .then(pollPlan)
+                    .catch(function () { pollPlan({ state: "running", steps: draft.planSteps }); });
+            }, 1500);
+            return;
+        }
+        if (view.state === "done") {
+            draft.crew = view.crew || { departments: [] };
+            draft.plan = view.plan || null;
+            draft.crewDegraded = view.degraded || "";
+            draft.editing = null;
+            renderCrewStage();
+            return;
+        }
+        setStatus(view.error || "Jarvis could not plan the section.");
+        proposeCrew();
+    }
+
+    function renderPlanProgress() {
+        setHead(draft.name || "Make this a section",
+                "Jarvis is researching everything this section needs, then planning every " +
+                "part and its agents. Nothing is created yet.");
+        var steps = draft.planSteps || [];
+        var html = '<ul class="jsec-steps">';
+        if (!steps.length) html += '<li class="running"><span class="ic">●</span>Starting…</li>';
+        steps.forEach(function (st) {
+            var ic = st.state === "done" ? "✓" : st.state === "failed" ? "✕" : "●";
+            html += '<li class="' + esc(st.state) + '"><span class="ic">' + ic + "</span>" +
+                "<span>" + esc(st.label) + "</span>" +
+                (st.detail ? '<span class="dt">' + esc(st.detail) + "</span>" : "") + "</li>";
+        });
+        panelBody().innerHTML = html + "</ul>";
+        setFooter([footButton("Cancel", "danger", function () {
+            draft.busy = false;
+            cancelDraft();
+        })]);
+        setStatus("");
+    }
+
+    // Which agents answer for each ask, recomputed as the crew is edited, so
+    // dropping an agent shows at once what it leaves uncovered.
+    function coverage() {
+        var asks = (draft.plan && draft.plan.asks) || [];
+        var by = {};
+        asks.forEach(function (a) { by[a.id] = []; });
+        ((draft.crew && draft.crew.departments) || []).forEach(function (d) {
+            (d.agents || []).forEach(function (ag) {
+                (ag.covers || []).forEach(function (id) {
+                    if (by[id] && by[id].indexOf(ag.role) < 0) by[id].push(ag.role);
+                });
+            });
+        });
+        return by;
+    }
+
+    function planPart(dept) {
+        var parts = (draft.plan && draft.plan.parts) || [];
+        for (var i = 0; i < parts.length; i++) if (parts[i].id === dept.id) return parts[i];
+        return null;
+    }
+
+    function planHeaderHtml() {
+        var plan = draft.plan;
+        if (!plan) return "";
+        var html = "";
+        var goal = plan.understanding && plan.understanding.goal;
+        var pos = plan.position || {};
+        var fits = pos.kind === "part"
+            ? "The pipeline you finished is <b>one part</b> of this section"
+            : "The pipeline you finished is <b>the beginning</b> of this section";
+        var founding = null;
+        (plan.parts || []).forEach(function (p) { if (p.id === pos.part_id) founding = p; });
+        html += '<div class="jsec-plan-box">' +
+            (goal ? "<h4>Goal</h4><div>" + esc(goal) + "</div><br>" : "") +
+            "<h4>Where your pipeline fits</h4><div>" + fits +
+            (founding ? ": " + esc(founding.title) : "") + ". " + esc(pos.why || "") + "</div></div>";
+
+        var by = coverage();
+        var asks = plan.asks || [];
+        var missing = asks.filter(function (a) { return !by[a.id].length; }).length;
+        html += '<div class="jsec-plan-box"><h4>Every ask (' + asks.length + ")" +
+            (missing ? ' · <span style="color:#F87171">' + missing + " not covered</span>" : "") +
+            '</h4><ul class="jsec-asks">';
+        asks.forEach(function (a) {
+            var who = by[a.id];
+            html += "<li>" + (who.length ? '<span class="ok">✓</span>' : '<span class="miss">✕</span>') +
+                "<div>" + esc(a.text) + '<div class="who">' +
+                (who.length ? esc(who.join(", ")) : "Nobody covers this now") + "</div></div></li>";
+        });
+        html += "</ul></div>";
+
+        var research = plan.research || [];
+        if (research.length) {
+            html += '<div class="jsec-plan-box"><details><summary>Researched ' + research.length +
+                " questions about what this section needs</summary><ul>";
+            research.forEach(function (r) {
+                html += "<li>" + esc(r.question) +
+                    (r.summary ? "" : ' <span class="who">(no answer found)</span>') + "</li>";
+            });
+            html += "</ul></details></div>";
+        }
+        return html;
+    }
 
     function proposeCrew() {
         setBusy("Working out who this section keeps…");
@@ -943,25 +1115,31 @@
         var depts = (draft.crew && draft.crew.departments) || [];
         var agents = 0;
         depts.forEach(function (d) { agents += (d.agents || []).length; });
-        return depts.length + (depts.length === 1 ? " baby section · " : " baby sections · ") +
+        return depts.length + (depts.length === 1 ? " part · " : " parts · ") +
                agents + (agents === 1 ? " agent" : " agents");
     }
 
     function renderCrewStage() {
         draft.busy = false;
         var depts = (draft.crew && draft.crew.departments) || [];
-        setHead(draft.name || "Make this a section",
-                "The standing agents of this section. Every pipeline started here begins " +
-                "from them — cut anything that does not earn its place.");
+        setHead(draft.name || "Make this a section", draft.plan
+                ? "The plan for the whole section: every part in order, and the agents that " +
+                  "do it. Every ask you made has to be covered before you create it."
+                : "The standing agents of this section. Every pipeline started here begins " +
+                  "from them — cut anything that does not earn its place.");
 
         var html = "";
         if (draft.crewDegraded) html += '<div class="jsec-note">' + esc(draft.crewDegraded) + "</div>";
+        html += planHeaderHtml();
 
         html += '<div class="jsec-crew-note">Every agent below is traceable. ' +
             '<b>Founding</b> means the pipeline really ran it and its findings are on disk. ' +
             '<b>Merged</b> means two near-duplicate roles were folded into one. ' +
-            '<b>New</b> means it exists because of what you wrote, and nothing on disk ' +
-            'covers it yet. Nothing here was invented from the section’s name.</div>';
+            (draft.plan
+                ? '<b>New</b> means Jarvis added it for one of your asks or for what the research ' +
+                  'showed this section needs. Nothing here was invented from the section’s name.</div>'
+                : '<b>New</b> means it exists because of what you wrote, and nothing on disk ' +
+                  'covers it yet. Nothing here was invented from the section’s name.</div>');
 
         if (!depts.length) {
             html += '<div class="jsec-empty-crew">No crew planned. Creating the section will ' +
@@ -975,6 +1153,7 @@
                     '<span class="jsec-dot" style="background:' + color +
                         ';box-shadow:0 0 12px ' + color + '"></span>' +
                     '<div class="jsec-grow">' + deptHeadHtml(dept, di) + "</div>" +
+                    partStatusHtml(dept) +
                     '<span class="jsec-src ' + esc(dept.origin || "brief") + '">' +
                         esc(originLabel(dept.origin)) + "</span>" +
                     '<div class="jsec-acts">' +
@@ -1016,6 +1195,25 @@
         setStatus(crewCounts());
     }
 
+    function partStatusHtml(dept) {
+        var part = planPart(dept);
+        if (!part) return "";
+        if (part.gap) return '<span class="jsec-status gap">Added for an ask</span>';
+        if (part.status === "done") return '<span class="jsec-status done">Done</span>';
+        return '<span class="jsec-status">Part ' + esc(part.order) + "</span>";
+    }
+
+    function coversHtml(agent) {
+        var asks = (draft.plan && draft.plan.asks) || [];
+        var names = [];
+        asks.forEach(function (a) {
+            if ((agent.covers || []).indexOf(a.id) >= 0) names.push(a.text);
+        });
+        return names.length
+            ? '<div class="jsec-covers"><b>Covers:</b> ' + esc(names.join(" · ")) + "</div>"
+            : "";
+    }
+
     function originLabel(origin) {
         if (origin === "founding") return "Founding";
         if (origin === "merged") return "Merged";
@@ -1054,7 +1252,8 @@
         }
         var why = agent.why ? '<div class="jsec-why">' + renderWhy(agent.why) + "</div>" : "";
         return '<div class="jsec-role">' + esc(agent.role) + "</div>" +
-               '<div class="jsec-ag-brief">' + esc(agent.brief || "") + "</div>" + why;
+               '<div class="jsec-ag-brief">' + esc(agent.brief || "") + "</div>" +
+               coversHtml(agent) + why;
     }
 
     // Provenance names real agent_ids, so `backticks` are rendered as code.
@@ -1210,6 +1409,8 @@
             degraded: "",
             editing: false,
             crew: null,
+            plan: null,
+            planSteps: [],
             crewDegraded: "",
             filesUploaded: false,
             busy: false
