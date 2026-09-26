@@ -105,6 +105,16 @@ Enforce the following rules:
 """
 
 
+def _connected_services() -> str:
+    """The user's connected services, for the planning prompts. Empty if none, or on any error."""
+    try:
+        from agents.tool_onboarding import connected_services_note
+        return connected_services_note()
+    except Exception as e:
+        print(f"[Brain] Could not list connected services: {e}")
+        return ""
+
+
 def build_agent_plan(
     task: str,
     redirect_note: str | None = None,
@@ -152,6 +162,11 @@ def build_agent_plan(
                 f"Adjust the agent briefs to address the rejection note. "
                 f"Do not restart from scratch — only modify what the note targets."
             )
+
+    # Services the user already connected, so research agents that need one ask for it by name.
+    connected = _connected_services()
+    if connected:
+        user_input += f"\n\n{connected}"
 
     # NEW: Emit thinking event (what Brain is considering) and Narrative
     if event_logger:
@@ -378,12 +393,13 @@ DRAFT ROSTER (written before any research; a starting point only — add, drop, 
 COMPLETED RESEARCH — MASTER BLUEPRINT (the source of truth):
 {json.dumps(master_blueprint, indent=2)}
 
+{_connected_services()}
 {rejection}RULES:
 1. Every deliverable the user's brief asks for (a Google Doc, a website, a script, a report) must have an agent whose job is to produce it.
 2. Each brief names the master blueprint sections the agent works from and states the concrete content it must produce.
 3. `output_spec` reflects what the research actually found: for example, require one section per competitor only if the blueprint covers those competitors. `required_keys` are keys of the agent's final JSON; set `min_word_count` only where length matters.
 4. One focused purpose per agent. Role-first ids ending in `_exec_N` (e.g. `report_writer_exec_1`), and `role` is the human-readable name.
-5. `tools_needed` uses the exact service names from the blueprint's tool_recommendations. Don't just keyword-match the brief: read each tool's "purpose" and "cons" for dependencies — if uploading a file and editing a document's content are separate tools, an agent that must do both needs both. Leave it empty if the agent needs no external tool.
+5. `tools_needed` uses the exact service names from the blueprint's tool_recommendations, or of a connected service listed above when it fits the agent's job better. Don't just keyword-match the brief: read each tool's "purpose" and "cons" for dependencies — if uploading a file and editing a document's content are separate tools, an agent that must do both needs both. Leave it empty if the agent needs no external tool.
 6. Do not plan research. Research is finished.
 
 Return JSON: {{"execution_agents": [{{"agent_id": "...", "role": "...", "brief": "...", "tools_needed": [], "output_spec": {{"required_keys": [], "min_word_count": 0}}}}]}}"""
@@ -481,9 +497,10 @@ DRAFT EXECUTION AGENTS (do not change agent_id, role, brief, or output_spec — 
 COMPLETED RESEARCH — MASTER BLUEPRINT (the actual, informed source of truth):
 {json.dumps(master_blueprint, indent=2)}
 
+{_connected_services()}
 Revise each execution agent's "tools_needed" list to accurately reflect what the completed research
 determined is actually required. Use the exact service names found in the master blueprint's
-tool_recommendations.
+tool_recommendations, or of a connected service listed above.
 
 IMPORTANT: don't just keyword-match tool names mentioned literally in the brief's wording — the brief
 was also written before research and may itself only name one tool where the completed research (see

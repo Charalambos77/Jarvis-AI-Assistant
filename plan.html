@@ -1735,7 +1735,7 @@
         }
 
         function goApisNavTarget() {
-            window.location.href = `provider_comparison.html?from=${fromSource}`;
+            window.location.href = `control_room.html?from=${fromSource}`;
         }
 
         // Poll sessions list
@@ -3103,7 +3103,7 @@
                                 window.location.href = 'execution.html';
                             } else if (action === 'go_to_apis') {
                                 const from = new URLSearchParams(window.location.search).get('from');
-                                window.location.href = from === 'execution' ? 'provider_comparison.html?from=execution' : 'provider_comparison.html';
+                                window.location.href = from === 'execution' ? 'control_room.html?from=execution' : 'control_room.html';
                             }
                         }
                     }

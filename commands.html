@@ -172,11 +172,11 @@
             <div class="eyebrow">Jarvis · Antigravity</div>
             <h1>Commands</h1>
             <div class="sub">
-                Everything a running pipeline needs your say on stops here first: new tools from a service
-                you connected, agents asking whether to keep going, agents asking for a tool they don't have,
-                and commands the builder wants to <em>run</em>. Answer and it goes ahead; ignore it for ten
-                minutes and it is turned down and the work carries on without it, except new tools, which
-                are approved. Anything that costs money or is destructive waits in the Control room instead.
+                Everything a running pipeline needs your say on stops here first: agents asking whether
+                to keep going, agents asking for a tool they don't have, and commands the builder wants
+                to <em>run</em>. Answer and it goes ahead; ignore it for ten minutes and it is turned
+                down, and the work carries on without it. Connected APIs and MCP servers, their new tools,
+                and anything that costs money or is destructive are in the Control room.
             </div>
         </div>
         <!-- Filled in by nav_ui.js, which gives every page the same set. -->
@@ -184,11 +184,6 @@
     </header>
 
     <div class="body">
-        <div class="section-title">
-            New tools to review <span class="count-pill" id="onboarding-count">0</span>
-        </div>
-        <div id="onboarding"></div>
-
         <div class="section-title">
             Agents asking to keep going <span class="count-pill" id="tool-review-count">0</span>
         </div>
@@ -481,111 +476,6 @@ async function decideToolRequest(requestId, decision) {
     refresh();
 }
 
-/* ---------- new tools from a connected service ---------- */
-
-/* Unticked boxes, kept across the 2-second repaint (everything starts ticked). */
-const onboardingUnticked = {};
-const RISK_LABEL = { read: "reads only", write: "changes things", destructive: "destructive", costs_money: "costs money" };
-
-function renderOnboarding(items, answered, waitFor, researching) {
-    const host = document.getElementById('onboarding');
-    const pill = document.getElementById('onboarding-count');
-    pill.textContent = items.length;
-    pill.className = items.length ? "count-pill live" : "count-pill";
-
-    // Services being researched come first: no buttons yet, their review opens when it's done.
-    const studying = (researching || []).map(r => `
-        <div class="card">
-            <div class="badges"><span class="badge">${esc(r.service)}</span>
-                <span class="badge">started ${esc(ago(r.started_at))}</span></div>
-            <div class="cmd">Jarvis is researching ${esc(r.service)}'s ${esc(r.tools)} new tool(s)</div>
-            <div class="breakdown">It is reading the service's documentation and writing a guide for each tool.
-                The review opens here when it's done.</div>
-        </div>`).join("");
-
-    if (!items.length) {
-        const recent = (answered || []).slice(0, 5).map(r => `
-            <div class="breakdown"><span class="sig">${esc(r.service)}</span>
-                — <b>${esc(r.by === "timeout" ? "approved (no answer)" : r.decision.replace("_", " "))}</b>,
-                ${esc((r.enabled || []).length)} tool(s) enabled ${esc(ago(r.at))}</div>`).join("");
-        host.innerHTML = studying + `<div class="empty">
-            No new tools waiting. When you connect a service, the tools it offers appear here before any agent can use them.
-            Tools that cost money or are destructive go to the <a href="control_room.html" style="color:var(--accent)">Control room</a> instead.
-        </div>${recent}`;
-        return;
-    }
-
-    host.innerHTML = studying + items.map(item => {
-        const pct = Math.max(0, Math.min(100, (item.expires_in / waitFor) * 100));
-        const mins = Math.floor(item.expires_in / 60), secs = item.expires_in % 60;
-        const key = item.service;
-        const research = item.research || {};
-        const about = item.summary ? `<div class="breakdown"><b>What it is:</b> ${esc(item.summary)}</div>` : "";
-        const useFor = (item.use_for || []).length
-            ? `<div class="breakdown"><b>Good for:</b> ${item.use_for.map(esc).join(" · ")}</div>` : "";
-        const failed = research.status === "failed"
-            ? `<div class="breakdown" style="color:var(--warn)">Jarvis couldn't research this service (${esc(research.error || "unknown error")}), so the tools show the server's own descriptions.</div>` : "";
-        const off = onboardingUnticked[key] || {};
-        const rows = item.tools.map(t => `
-            <label class="scope" style="align-items:flex-start;margin-top:10px">
-                <input type="checkbox" ${off[t.name] ? "" : "checked"}
-                       onchange="toggleOnboardingTool('${esc(key)}','${esc(t.name)}', this.checked)">
-                <span><span class="sig">${esc(t.name)}</span>
-                    <span class="badge ${t.risk === "read" ? "go" : "warn"}" style="margin-left:6px">${esc(RISK_LABEL[t.risk] || t.risk)}</span>
-                    ${t.researched ? "" : `<span class="badge" style="margin-left:6px">not researched</span>`}<br>
-                    ${esc(t.description)}</span>
-            </label>`).join("");
-        const held = item.held_in_control_room
-            ? `<div class="breakdown">${esc(item.held_in_control_room)} more tool(s) cost money or are destructive — those wait in the
-               <a href="control_room.html" style="color:var(--accent)">Control room</a>, with no time limit.</div>` : "";
-        return `
-        <div class="card waiting">
-            <div class="badges">
-                <span class="badge">${esc(item.kind.toUpperCase())} · ${esc(item.service)}</span>
-                <span class="badge">found ${esc(ago(item.asked_ts))}</span>
-            </div>
-            <div class="cmd">${esc(item.service)} offers ${esc(item.tools.length)} new tool(s)</div>
-            ${about}${useFor}${failed}
-            <div class="breakdown">Approved read-only tools go to every agent. Tools that change things go to agents whose plan asks for ${esc(item.service)}.</div>
-            ${rows}
-            ${held}
-            <div class="timer">
-                <div class="timer-bar"><div class="timer-fill" style="width:${pct}%"></div></div>
-                <div class="timer-text">Approved automatically in ${mins}m ${String(secs).padStart(2, "0")}s if nobody answers.</div>
-            </div>
-            <div class="decide">
-                <button class="btn go" onclick="decideOnboarding('${esc(key)}','approve')">Approve all</button>
-                <button class="btn always" onclick="decideOnboarding('${esc(key)}','approve_read')">Approve read-only</button>
-                <button class="btn" onclick="decideOnboarding('${esc(key)}','pick')">Approve ticked</button>
-                <button class="btn no" onclick="decideOnboarding('${esc(key)}','reject')">Reject</button>
-            </div>
-        </div>`;
-    }).join("");
-    onboardingCache = items;
-}
-
-let onboardingCache = [];
-
-function toggleOnboardingTool(service, tool, checked) {
-    onboardingUnticked[service] = onboardingUnticked[service] || {};
-    if (checked) delete onboardingUnticked[service][tool];
-    else onboardingUnticked[service][tool] = true;
-}
-
-async function decideOnboarding(service, decision) {
-    const item = onboardingCache.find(i => i.service === service) || { tools: [] };
-    const off = onboardingUnticked[service] || {};
-    const tools = item.tools.map(t => t.name).filter(n => !off[n]);
-    const res = await fetch('/tool_onboarding/decide', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ service, decision, tools })
-    });
-    const out = await res.json().catch(() => ({}));
-    if (out.error) alert(out.error);
-    delete onboardingUnticked[service];
-    refresh();
-}
-
 /* ---------- log ---------- */
 
 function renderLog() {
@@ -687,11 +577,6 @@ async function refresh() {
             fetch('/tool_requests/log').then(x => x.json())
         ]);
         renderToolRequests(tp.pending || [], tl.log || [], tp.wait_seconds || 600);
-    } catch (e) { /* Not available yet; the next tick tries again. */ }
-
-    try {
-        const ob = await fetch('/tool_onboarding/pending').then(x => x.json());
-        renderOnboarding(ob.pending || [], ob.log || [], ob.wait_seconds || 600, ob.researching || []);
     } catch (e) { /* Not available yet; the next tick tries again. */ }
 
     try {

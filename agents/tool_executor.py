@@ -533,7 +533,7 @@ _TOKEN_RULES = [
 _GENERIC_SUFFIX_TOKENS = {
     "tool", "tools", "api", "apis", "library", "libraries", "service", "services",
     "framework", "frameworks", "sdk", "client", "access", "integration", "integrations",
-    "connector", "plugin", "software", "utility", "utilities", "module",
+    "connector", "plugin", "software", "utility", "utilities", "module", "mcp",
 }
 
 
@@ -682,6 +682,15 @@ def _resolve_tool_key(raw_name: str, context: str | None = None, allow_llm: bool
     mcp_servers = _mcp_server_names()
     if key in mcp_servers:
         return MCP_KEY_PREFIX + key
+    # An agent may name one of a server's tools by the name it is called by.
+    if key.startswith("mcp_"):
+        try:
+            from connectors import tool_catalog
+            found = tool_catalog.find_by_fn_name(key)
+            if found and found[0] in mcp_servers:
+                return MCP_KEY_PREFIX + found[0]
+        except Exception:
+            pass
     ruled = _token_rule_match(key)
     if ruled:
         return ruled
@@ -694,6 +703,8 @@ def _resolve_tool_key(raw_name: str, context: str | None = None, allow_llm: bool
             return stem
         if stem in TOOL_ALIASES:
             return TOOL_ALIASES[stem]
+        if stem in mcp_servers:          # "github_api" or "github_mcp" for a server called github
+            return MCP_KEY_PREFIX + stem
         ruled = _token_rule_match(stem)
         if ruled:
             return ruled
@@ -826,7 +837,7 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, co
             elif bound == 0 and not _catalog_has_enabled(server_name):
                 unavailable.append(
                     f"{raw_name} (MCP server '{server_name}' is running, but none of its tools is approved yet — "
-                    "they are waiting for review on the Commands page or in the Control room; do not claim to have used it)"
+                    "they are waiting for review in the Control room; do not claim to have used it)"
                 )
             continue
 

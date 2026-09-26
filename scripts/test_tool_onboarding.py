@@ -68,12 +68,12 @@ check("the catalogue has all three tools", set(entry["tools"]) == {"echo", "add"
 check("echo is read, add is write, delete_note is destructive",
       [entry["tools"][t]["risk"] for t in ("echo", "add", "delete_note")] == ["read", "write", "destructive"])
 pending = tool_onboarding.pending()
-check("one review waits on the Commands page", len(pending) == 1 and pending[0]["service"] == "jarvis_test")
+check("one review waits in the Control room", len(pending) == 1 and pending[0]["service"] == "jarvis_test")
 check("the review lists echo and add, not the destructive tool",
       {t["name"] for t in pending[0]["tools"]} == {"echo", "add"})
 check("the review says one tool waits in the Control room", pending[0]["held_in_control_room"] == 1)
 check("delete_note waits in the Control room", [t["tool"] for t in control_room.held_tools()] == ["delete_note"])
-check("the user was told where to look", any("Commands page" in n and "Control room" in n for n in notes))
+check("the user was told where to look", any("to review in the Control room" in n and "cost money" in n for n in notes))
 
 # ---- 3. an unanswered review approves itself, except the risky tool ----------------------
 tool_catalog.update(lambda cat: cat["jarvis_test"]["review"].update(deadline=time.time() - 1))

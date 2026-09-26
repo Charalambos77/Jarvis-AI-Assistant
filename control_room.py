@@ -16,12 +16,20 @@ wrong way round.
     in its cycle keep working — until the user allows it once or denies it.
     A denied call returns an error that says plainly the action did not happen.
 
+  * A call to a tool that costs money which would take its service, or its
+    pipeline, over a spending limit. It is held even when the tool is on
+    "always allow". Amounts are read from the call's own arguments (amount,
+    price, cost, total…) in whatever unit the service charges; a money call
+    with no readable amount counts as going over any limit that is set, so the
+    user always sees it. Allowed calls add their amount to what was spent.
+
 Risk labels and rules live in the tool catalogue (connectors/tool_catalog.py);
-held calls live in memory, like the command gate's pending list, so they end
-with the run that made them.
+limits and spending in data/spending.json; held calls live in memory, like the
+command gate's pending list, so they end with the run that made them.
 """
 import asyncio
 import json
+import os
 import threading
 import time
 import uuid
@@ -87,10 +95,144 @@ def decide_tool(service: str, tool: str, decision: str) -> dict:
     if not current:
         return {"error": f"{service} has no tool called {tool}."}
     if current.get("risk") not in tool_catalog.RISKY:
-        return {"error": f"{tool} neither costs money nor is destructive, so it is decided on the Commands page."}
+        return {"error": f"{tool} neither costs money nor is destructive, so it is decided in the new-tool review."}
     fields = dict(TOOL_DECISIONS[decision], decided_at=tool_catalog.now_iso())
     tool_catalog.set_tool(service, tool, **fields)
     return {"status": "ok", "service": service, "tool": tool, "decision": decision}
+
+
+# ---------------------------------------------------------------------------
+# Spending limits
+# ---------------------------------------------------------------------------
+
+SPENDING_PATH = os.path.join(tool_catalog.BASE_DIR, "data", "spending.json")
+# Argument names a paid call puts its amount under, most specific first.
+AMOUNT_KEYS = ("amount", "total", "total_amount", "price", "cost", "value", "amount_usd", "price_usd",
+               "cost_usd", "credits", "max_price", "budget", "quantity_price")
+_SPEND_LOCK = threading.RLock()
+
+
+def _load_spending() -> dict:
+    with _SPEND_LOCK:
+        try:
+            with open(SPENDING_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            data = {}
+        except Exception as e:
+            print(f"[Control room] Could not read {SPENDING_PATH}: {e}")
+            data = {}
+        data.setdefault("limits", {}).setdefault("service", {})
+        data["limits"].setdefault("pipeline", None)
+        data.setdefault("spent", {}).setdefault("service", {})
+        data["spent"].setdefault("pipeline", {})
+        return data
+
+
+def _save_spending(data: dict) -> None:
+    with _SPEND_LOCK:
+        os.makedirs(os.path.dirname(SPENDING_PATH), exist_ok=True)
+        tmp = SPENDING_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+        os.replace(tmp, SPENDING_PATH)
+
+
+def call_amount(args: dict) -> float | None:
+    """The amount a paid call would spend, if its arguments say."""
+    def _num(v):
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            cleaned = v.replace(",", "").strip().lstrip("$€£").strip()
+            try:
+                return float(cleaned)
+            except ValueError:
+                return None
+        return None
+
+    lowered = {str(k).lower(): v for k, v in (args or {}).items()}
+    for key in AMOUNT_KEYS:
+        if key in lowered:
+            value = _num(lowered[key])
+            if value is not None:
+                return abs(value)
+    for value in lowered.values():               # one level down, e.g. {"order": {"amount": 5}}
+        if isinstance(value, dict):
+            found = call_amount(value)
+            if found is not None:
+                return found
+    return None
+
+
+def spending() -> dict:
+    """Limits and what was spent, for the page."""
+    data = _load_spending()
+    money_services = sorted({t["service"] for t in risky_tools() if t["risk"] == "costs_money"}
+                            | set(data["limits"]["service"]))
+    return {
+        "pipeline_limit": data["limits"]["pipeline"],
+        "pipelines": data["spent"]["pipeline"],
+        "services": [{"service": s, "limit": data["limits"]["service"].get(s),
+                      "spent": round(data["spent"]["service"].get(s, 0.0), 4)} for s in money_services],
+    }
+
+
+def set_limit(scope: str, service: str = "", limit=None) -> dict:
+    """Set or clear one limit. scope is "service" (with a service name) or "pipeline" (every pipeline)."""
+    if scope not in ("service", "pipeline"):
+        return {"error": "scope must be 'service' or 'pipeline'."}
+    if scope == "service" and not service:
+        return {"error": "Say which service the limit is for."}
+    value = None
+    if limit not in (None, ""):
+        try:
+            value = float(str(limit).replace(",", "").strip().lstrip("$€£"))
+        except ValueError:
+            return {"error": f"'{limit}' is not a number."}
+        if value < 0:
+            return {"error": "A limit can't be negative."}
+    with _SPEND_LOCK:
+        data = _load_spending()
+        if scope == "pipeline":
+            data["limits"]["pipeline"] = value
+        elif value is None:
+            data["limits"]["service"].pop(service, None)
+        else:
+            data["limits"]["service"][service] = value
+        _save_spending(data)
+    return {"status": "ok", "scope": scope, "service": service, "limit": value}
+
+
+def over_limit(service: str, plan_id: str, amount: float | None) -> str | None:
+    """Why this call would break a limit, or None if it wouldn't."""
+    data = _load_spending()
+    checks = [(data["limits"]["service"].get(service), data["spent"]["service"].get(service, 0.0),
+               f"{service}'s spending limit")]
+    if plan_id:
+        checks.append((data["limits"]["pipeline"], data["spent"]["pipeline"].get(plan_id, 0.0),
+                       f"the spending limit for pipeline {plan_id}"))
+    for limit, spent, what in checks:
+        if limit is None:
+            continue
+        if amount is None:
+            return f"Jarvis can't tell how much this call costs, and {what} is {limit:g}."
+        if spent + amount > limit:
+            return f"This call ({amount:g}) would take {what} over: {spent:g} of {limit:g} is spent already."
+    return None
+
+
+def record_spend(service: str, plan_id: str, amount: float | None) -> None:
+    if not amount:
+        return
+    with _SPEND_LOCK:
+        data = _load_spending()
+        data["spent"]["service"][service] = data["spent"]["service"].get(service, 0.0) + amount
+        if plan_id:
+            data["spent"]["pipeline"][plan_id] = data["spent"]["pipeline"].get(plan_id, 0.0) + amount
+        _save_spending(data)
 
 
 # ---------------------------------------------------------------------------
@@ -149,14 +291,26 @@ async def check_call(fn_name: str, args: dict, *, agent_id: str = "", role: str 
         return None
     if spec.get("status") != "enabled":
         return _denied(tool, f"{tool} is blocked in the Control room.")
-    if spec.get("rule") == "always_allow":
-        return None
 
+    money = spec.get("risk") == "costs_money"
     request_id = uuid.uuid4().hex[:12]
-    event = {"event_type": "control_room_waiting", "source": agent_id,
+    event = {"event_type": "control_room_check", "source": agent_id,
              "data": {"request_id": request_id, "service": service, "tool": tool, "risk": spec.get("risk")}}
     if event_logger:
         event_logger(event)          # the pipeline's logger stamps its plan_id on the event
+    plan_id = str(event.get("plan_id") or "")
+    amount = call_amount(args) if money else None
+    limit_reason = over_limit(service, plan_id, amount) if money else None
+
+    if spec.get("rule") == "always_allow" and not limit_reason:
+        if money:
+            record_spend(service, plan_id, amount)
+        return None
+
+    if event_logger:
+        event_logger({"event_type": "control_room_waiting", "source": agent_id,
+                      "data": {"request_id": request_id, "service": service, "tool": tool,
+                               "risk": spec.get("risk"), "limit": limit_reason}})
 
     item = {
         "request_id": request_id,
@@ -168,7 +322,9 @@ async def check_call(fn_name: str, args: dict, *, agent_id: str = "", role: str 
         "agent_id": agent_id,
         "role": role,
         "kind": kind,
-        "plan_id": str(event.get("plan_id") or ""),
+        "plan_id": plan_id,
+        "amount": amount,
+        "limit_reason": limit_reason or "",
         "asked_at": tool_catalog.now_iso(),
         "asked_ts": time.time(),
     }
@@ -176,10 +332,11 @@ async def check_call(fn_name: str, args: dict, *, agent_id: str = "", role: str 
         _PENDING[request_id] = item
     if _notifier:
         try:
-            what = "spend money" if spec.get("risk") == "costs_money" else "do something destructive"
+            what = "spend money" if money else "do something destructive"
             where = f" in pipeline {item['plan_id']}" if item["plan_id"] else ""
+            why = f" {limit_reason}" if limit_reason else ""
             _notifier(f"{role or agent_id or 'An agent'}{where} wants to call {tool} on {service}, which can "
-                      f"{what}. It is waiting for you in the Control room.")
+                      f"{what}.{why} It is waiting for you in the Control room.")
         except Exception as e:
             print(f"[Control room] Could not announce the call: {e}")
 
@@ -197,6 +354,8 @@ async def check_call(fn_name: str, args: dict, *, agent_id: str = "", role: str 
         event_logger({"event_type": "control_room_resolved", "source": agent_id,
                       "data": {"request_id": request_id, "tool": tool, "decision": decided["decision"]}})
     if decided["decision"] == "allow":
+        if money:
+            record_spend(service, plan_id, amount)
         return None
     said = f' They said: "{decided["reason"].rstrip(".")}".' if decided.get("reason") else ""
     return _denied(tool, f"The user denied this call to {tool} in the Control room.{said}")

@@ -172,9 +172,11 @@
             <div class="eyebrow">Jarvis · Control room</div>
             <h1>Control room</h1>
             <div class="sub">
-                Anything that can <em>spend money</em> or <em>do something destructive</em> (delete, send, publish)
-                is decided here. Nothing here has a time limit: a tool or a call waits until you answer, and
-                the rest of the pipeline keeps working meanwhile.
+                Your connected APIs and MCP servers, the new tools they bring, and anything that can
+                <em>spend money</em> or <em>do something destructive</em> (delete, send, publish). New tools that
+                only read or change things approve themselves after ten minutes if you don't answer. Money and
+                destructive tools and calls have no time limit: they wait until you answer, and the rest of the
+                pipeline keeps working meanwhile.
             </div>
         </div>
         <!-- Filled in by nav_ui.js, which gives every page the same set. -->
@@ -192,8 +194,48 @@
         </div>
         <div id="held"></div>
 
+        <!-- New tools from a connected service (read and write ones; risky ones are above) -->
+        <div class="section-title">
+            New tools to review <span class="count-pill" id="onboarding-count">0</span>
+        </div>
+        <div id="onboarding"></div>
+
+        <!-- Spending limits for tools that cost money -->
+        <div class="section-title">Spending limits</div>
+        <div class="card">
+            <div class="note">
+                A call that would take a service or a pipeline over its limit waits here for you, even when its tool
+                is set to "Always allow". Amounts are in whatever unit the service charges (dollars, credits…),
+                read from the call's own amount or price. A money call with no amount Jarvis can read counts as
+                over any limit you set, so it is always shown to you. Leave a box empty for no limit.
+            </div>
+            <div id="limits"></div>
+        </div>
+
+        <!-- Rules for tools that cost money or are destructive -->
         <div class="section-title">Rules for risky tools</div>
         <div class="card"><div id="rules"></div></div>
+
+        <!-- Connected APIs and MCP servers (moved here from the APIs/MCPs page) -->
+        <div class="section-title">Connected services</div>
+        <div class="two-col">
+            <div class="card">
+                <div class="eyebrow">MCP servers</div>
+                <div class="note">Switching a server on finds its tools, researches them, and puts them up for review above.</div>
+                <div id="mcps"></div>
+            </div>
+            <div class="card">
+                <div class="eyebrow">APIs</div>
+                <div id="apis"></div>
+                <div id="connect-form" class="decide" style="display:none"></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="eyebrow">Always on — no setup</div>
+            <div id="always-on"></div>
+            <div class="note" style="margin:12px 0 0">Comparing AI providers and their costs?
+                <a href="provider_comparison.html" style="color:var(--accent)">Open the provider directory</a>.</div>
+        </div>
 
         <div class="section-title">Already decided</div>
         <div id="log"></div>
@@ -247,6 +289,8 @@ function renderCalls(items) {
             </div>
             <div class="cmd">${esc(c.service)} · ${esc(c.tool)}</div>
             <div class="breakdown"><b>With:</b> <span class="sig">${esc(c.args)}</span></div>
+            ${c.amount != null ? `<div class="breakdown"><b>Amount:</b> ${esc(c.amount)}</div>` : ""}
+            ${c.limit_reason ? `<div class="breakdown" style="color:var(--warn)"><b>Spending limit:</b> ${esc(c.limit_reason)}</div>` : ""}
             <div class="decide">
                 <input type="text" id="why-${c.request_id}" placeholder="Why — optional, the agent is told"
                        value="${esc(draft[c.request_id] || "")}" oninput="draft['${c.request_id}'] = this.value">
@@ -306,6 +350,236 @@ function renderLog(log) {
         </table>` : `<div class="empty">No call has been answered yet.</div>`;
 }
 
+/* ---------- new tools from a connected service ---------- */
+
+/* Unticked boxes, kept across the 2-second repaint (everything starts ticked). */
+const onboardingUnticked = {};
+const RISK_LABEL = { read: "reads only", write: "changes things", destructive: "destructive", costs_money: "costs money" };
+
+function renderOnboarding(items, answered, waitFor, researching) {
+    const host = document.getElementById('onboarding');
+    const pill = document.getElementById('onboarding-count');
+    pill.textContent = items.length;
+    pill.className = items.length ? "count-pill live" : "count-pill";
+
+    // Services being researched come first: no buttons yet, their review opens when it's done.
+    const studying = (researching || []).map(r => `
+        <div class="card">
+            <div class="badges"><span class="badge">${esc(r.service)}</span>
+                <span class="badge">started ${esc(ago(r.started_at))}</span></div>
+            <div class="cmd">Jarvis is researching ${esc(r.service)}'s ${esc(r.tools)} new tool(s)</div>
+            <div class="breakdown">It is reading the service's documentation and writing a guide for each tool.
+                The review opens here when it's done.</div>
+        </div>`).join("");
+
+    if (!items.length) {
+        const recent = (answered || []).slice(0, 5).map(r => `
+            <div class="breakdown"><span class="sig">${esc(r.service)}</span>
+                — <b>${esc(r.by === "timeout" ? "approved (no answer)" : r.decision.replace("_", " "))}</b>,
+                ${esc((r.enabled || []).length)} tool(s) enabled ${esc(ago(r.at))}</div>`).join("");
+        host.innerHTML = studying + `<div class="empty">
+            No new tools waiting. When you connect a service, the tools it offers appear here before any agent can use them.
+            Tools that cost money or are destructive wait under "New risky tools" above instead.
+        </div>${recent}`;
+        return;
+    }
+
+    host.innerHTML = studying + items.map(item => {
+        const pct = Math.max(0, Math.min(100, (item.expires_in / waitFor) * 100));
+        const mins = Math.floor(item.expires_in / 60), secs = item.expires_in % 60;
+        const key = item.service;
+        const research = item.research || {};
+        const about = item.summary ? `<div class="breakdown"><b>What it is:</b> ${esc(item.summary)}</div>` : "";
+        const useFor = (item.use_for || []).length
+            ? `<div class="breakdown"><b>Good for:</b> ${item.use_for.map(esc).join(" · ")}</div>` : "";
+        const failed = research.status === "failed"
+            ? `<div class="breakdown" style="color:var(--warn)">Jarvis couldn't research this service (${esc(research.error || "unknown error")}), so the tools show the server's own descriptions.</div>` : "";
+        const off = onboardingUnticked[key] || {};
+        const rows = item.tools.map(t => `
+            <label class="scope" style="align-items:flex-start;margin-top:10px">
+                <input type="checkbox" ${off[t.name] ? "" : "checked"}
+                       onchange="toggleOnboardingTool('${esc(key)}','${esc(t.name)}', this.checked)">
+                <span><span class="sig">${esc(t.name)}</span>
+                    <span class="badge ${t.risk === "read" ? "go" : "warn"}" style="margin-left:6px">${esc(RISK_LABEL[t.risk] || t.risk)}</span>
+                    ${t.researched ? "" : `<span class="badge" style="margin-left:6px">not researched</span>`}<br>
+                    ${esc(t.description)}</span>
+            </label>`).join("");
+        const held = item.held_in_control_room
+            ? `<div class="breakdown">${esc(item.held_in_control_room)} more tool(s) cost money or are destructive — those wait
+               under "New risky tools" above, with no time limit.</div>` : "";
+        return `
+        <div class="card waiting">
+            <div class="badges">
+                <span class="badge">${esc(item.kind.toUpperCase())} · ${esc(item.service)}</span>
+                <span class="badge">found ${esc(ago(item.asked_ts))}</span>
+            </div>
+            <div class="cmd">${esc(item.service)} offers ${esc(item.tools.length)} new tool(s)</div>
+            ${about}${useFor}${failed}
+            <div class="breakdown">Approved read-only tools go to every agent. Tools that change things go to agents whose plan asks for ${esc(item.service)}.</div>
+            ${rows}
+            ${held}
+            <div class="timer">
+                <div class="timer-bar"><div class="timer-fill" style="width:${pct}%"></div></div>
+                <div class="timer-text">Approved automatically in ${mins}m ${String(secs).padStart(2, "0")}s if nobody answers.</div>
+            </div>
+            <div class="decide">
+                <button class="btn go" onclick="decideOnboarding('${esc(key)}','approve')">Approve all</button>
+                <button class="btn always" onclick="decideOnboarding('${esc(key)}','approve_read')">Approve read-only</button>
+                <button class="btn" onclick="decideOnboarding('${esc(key)}','pick')">Approve ticked</button>
+                <button class="btn no" onclick="decideOnboarding('${esc(key)}','reject')">Reject</button>
+            </div>
+        </div>`;
+    }).join("");
+    onboardingCache = items;
+}
+
+let onboardingCache = [];
+
+function toggleOnboardingTool(service, tool, checked) {
+    onboardingUnticked[service] = onboardingUnticked[service] || {};
+    if (checked) delete onboardingUnticked[service][tool];
+    else onboardingUnticked[service][tool] = true;
+}
+
+async function decideOnboarding(service, decision) {
+    const item = onboardingCache.find(i => i.service === service) || { tools: [] };
+    const off = onboardingUnticked[service] || {};
+    const tools = item.tools.map(t => t.name).filter(n => !off[n]);
+    const res = await fetch('/tool_onboarding/decide', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service, decision, tools })
+    });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    delete onboardingUnticked[service];
+    refresh();
+}
+
+/* ---------- spending limits ---------- */
+
+// A number being typed into a limit box, kept across the 2-second repaint.
+const limitDraft = {};
+
+function renderLimits(data) {
+    const host = document.getElementById('limits');
+    if (document.activeElement && document.activeElement.classList.contains('limit-input')) return;
+    const services = data.services || [];
+    const row = (scope, key, label, spent, limit) => `
+        <div class="rule-row">
+            <div class="sig">${esc(label)}</div>
+            <div class="note" style="margin:0">spent ${esc(spent || 0)}</div>
+            <input type="text" class="limit-input" style="flex:0 0 120px;min-width:0" placeholder="no limit"
+                   value="${esc(limitDraft[scope + key] != null ? limitDraft[scope + key] : (limit == null ? "" : limit))}"
+                   oninput="limitDraft['${scope}${esc(key)}'] = this.value">
+            <button class="btn tiny" onclick="saveLimit('${scope}','${esc(key)}')">Save</button>
+        </div>`;
+    host.innerHTML =
+        row("pipeline", "", "Each pipeline", "", data.pipeline_limit) +
+        (services.length ? services.map(s => row("service", s.service, s.service, s.spent, s.limit)).join("")
+                         : `<div class="note" style="margin-top:10px">No connected service has a tool that costs money yet.</div>`);
+}
+
+function saveLimit(scope, key) {
+    const raw = limitDraft[scope + key];
+    delete limitDraft[scope + key];
+    post('/control/limits', { scope, service: key, limit: raw == null ? undefined : raw });
+}
+
+/* ---------- connected services ---------- */
+
+const CATALOG_STATE = {
+    researching: "researching its tools",
+    awaiting_review: "tools waiting for your review",
+    ready: "ready",
+    rejected: "rejected",
+};
+let connectBusy = false;    // no repaint while the connect form is open
+
+function renderMcps(mcps) {
+    document.getElementById('mcps').innerHTML = mcps.length ? mcps.map(m => {
+        const up = m.status === 'up';
+        const status = up ? "running" : (m.status === 'down' ? "failed to start" : (m.status === 'enabled' ? "on, starts when needed" : "off"));
+        const cat = m.catalog || {};
+        const tools = cat.state ? `<div class="note" style="margin:4px 0 0">${esc(CATALOG_STATE[cat.state] || cat.state)} ·
+            ${esc(cat.enabled || 0)} in use · ${esc(cat.pending || 0)} to review · ${esc(cat.held || 0)} risky waiting</div>` : "";
+        const err = m.status === 'down' && m.error ? `<div class="note" style="margin:4px 0 0;color:var(--no)">${esc(String(m.error).slice(0, 160))}</div>` : "";
+        return `<div class="rule-row">
+            <div style="flex:1 1 auto;min-width:0">
+                <span class="sig">${esc(m.name)}</span>
+                <span class="badge ${up ? "go" : (m.status === 'down' ? "no" : "")}" style="margin-left:6px">${esc(status)}</span>
+                <div class="note" style="margin:4px 0 0">${esc(m.description || "")}</div>${tools}${err}
+            </div>
+            <button class="btn tiny ${m.enabled ? "no" : "go"}" onclick="toggleMcp('${esc(m.name)}', ${!m.enabled}, this)">${m.enabled ? "Switch off" : "Switch on"}</button>
+        </div>`;
+    }).join("") : `<div class="note">No MCP servers configured. Add one to mcp_registry.json.</div>`;
+}
+
+function renderApis(apis) {
+    document.getElementById('apis').innerHTML = apis.length ? apis.map(a => {
+        const on = a.configured;
+        const note = on && !a.has_handler ? "Connected, but Jarvis has no connector for it yet — agents can't call it."
+            : (a.has_handler ? `Agents call it as ${a.tool_name}${a.handled_by ? ` (via ${a.handled_by})` : ""}.` : "No connector yet.");
+        return `<div class="rule-row">
+            <div style="flex:1 1 auto;min-width:0">
+                <span class="sig">${esc(a.service)}</span>
+                <span class="badge ${on ? "go" : ""}" style="margin-left:6px">${on ? "connected" : "not connected"}</span>
+                <div class="note" style="margin:4px 0 0">${esc(note)}</div>
+            </div>
+            ${on ? `<button class="btn tiny no" onclick="disconnectApi('${esc(a.service)}')">Disconnect</button>`
+                 : `<button class="btn tiny go" onclick="openConnect('${esc(a.service)}','${esc(a.auth)}')">Connect</button>`}
+        </div>`;
+    }).join("") : `<div class="note">No APIs known yet.</div>`;
+}
+
+function renderAlwaysOn(tools) {
+    document.getElementById('always-on').innerHTML = tools.map(t =>
+        `<div class="rule-row"><span class="sig">${esc(t.name)}</span><span class="note" style="margin:0">${esc(String(t.description).slice(0, 110))}</span></div>`).join("");
+}
+
+async function toggleMcp(name, enabled, btn) {
+    btn.disabled = true;
+    btn.textContent = enabled ? "Starting…" : "Stopping…";
+    await post('/api/mcp/toggle', { name, enabled });
+}
+
+async function disconnectApi(service) {
+    if (!confirm(`Disconnect ${service}? Agents stop being offered it. Your stored credentials are kept.`)) return;
+    await post('/api/tools/disconnect', { service_name: service });
+}
+
+function openConnect(service, auth) {
+    connectBusy = true;
+    const form = document.getElementById('connect-form');
+    form.style.display = 'flex';
+    form.innerHTML = (auth === 'oauth'
+        ? `<input type="text" id="cf-id" placeholder="${esc(service)} OAuth Client ID">
+           <input type="text" id="cf-secret" placeholder="OAuth Client Secret">`
+        : `<input type="text" id="cf-key" placeholder="${esc(service)} API key">`) +
+        `<button class="btn go" onclick="submitConnect('${esc(service)}','${esc(auth)}', this)">Connect</button>
+         <button class="btn" onclick="closeConnect()">Cancel</button>`;
+}
+
+function closeConnect() {
+    connectBusy = false;
+    const form = document.getElementById('connect-form');
+    form.style.display = 'none';
+    form.innerHTML = "";
+}
+
+async function submitConnect(service, auth, btn) {
+    const val = id => ((document.getElementById(id) || {}).value || "").trim();
+    const credentials = auth === 'oauth' ? { client_id: val('cf-id'), client_secret: val('cf-secret') } : { api_key: val('cf-key') };
+    if (Object.values(credentials).some(v => !v)) { alert("Fill in every box first."); return; }
+    btn.disabled = true;
+    btn.textContent = auth === 'oauth' ? "Waiting for consent in your browser…" : "Connecting…";
+    const res = await fetch('/api/connect-tool', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_name: service, credentials, method_id: auth }) });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    closeConnect();
+    refresh();
+}
+
 async function post(url, body) {
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const out = await res.json().catch(() => ({}));
@@ -334,6 +608,25 @@ async function refresh() {
         renderRules(t.tools || []);
         renderLog(t.log || []);
     } catch (e) { /* Jarvis restarting; the next tick picks it up. */ }
+
+    // Kept apart, so one failing route can't blank the rest of the page.
+    try {
+        const ob = await fetch('/tool_onboarding/pending').then(x => x.json());
+        renderOnboarding(ob.pending || [], ob.log || [], ob.wait_seconds || 600, ob.researching || []);
+    } catch (e) { /* Not available yet; the next tick tries again. */ }
+
+    try {
+        renderLimits(await fetch('/control/limits').then(x => x.json()));
+    } catch (e) { /* Not available yet; the next tick tries again. */ }
+
+    if (!connectBusy) {
+        try {
+            const o = await fetch('/api/tools/overview').then(x => x.json());
+            renderMcps(o.mcps || []);
+            renderApis(o.apis || []);
+            renderAlwaysOn(o.always_on || []);
+        } catch (e) { /* Not available yet; the next tick tries again. */ }
+    }
 }
 
 refresh();

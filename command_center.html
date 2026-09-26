@@ -1051,7 +1051,7 @@
              parked command is visible from the Brain rather than only on its
              own page. -->
         <button class="nav-btn" id="btn-commands">Commands</button>
-        <button class="nav-btn" id="btn-apis">APIs/MCPs</button>
+        <button class="nav-btn" id="btn-apis">Control room</button>
     </div>
 
     <!-- Transparent Chat terminal -->
@@ -3709,8 +3709,8 @@
         });
 
         buttons.apis.addEventListener('click', () => {
-            syncUiState({ current_page: "APIs/MCPs Page" });
-            window.location.href = 'provider_comparison.html';
+            syncUiState({ current_page: "Control Room" });
+            window.location.href = 'control_room.html';
         });
 
         // The waiting-command count on the Commands button is kept by
@@ -4185,7 +4185,7 @@
                                     const brainData = brainHitMesh.userData.data;
                                     openDetailPanel(brainData);
                                 } else if (action === 'go_to_apis') {
-                                    window.location.href = 'provider_comparison.html';
+                                    window.location.href = 'control_room.html';
                                 } else if (action === 'go_to_execution') {
                                     window.location.href = 'execution.html';
                                 } else if (action === 'open_side_panel') {
@@ -4581,7 +4581,7 @@
         const INTAKE_RETURN_PAGES = {
             execution: 'execution.html',
             plan: 'plan.html',
-            apis: 'provider_comparison.html'
+            apis: 'control_room.html'
         };
 
         function returnFromIntake(message) {

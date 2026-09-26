@@ -76,6 +76,18 @@ async def run_execution_agent(
     )
     declarations = list(declarations) + [tool_requests.DECLARATION, agent_questions.DECLARATION]
 
+    # Services the user connected. Their approved read-only tools are already in
+    # this agent's tools; the rest it can ask for with request_tool by service name.
+    try:
+        from agents.tool_onboarding import connected_services_note
+        connected_note = connected_services_note()
+    except Exception:
+        connected_note = ""
+    if connected_note:
+        connected_note = (connected_note.replace("name one in tools_needed exactly as written to give an agent "
+                                                 "all its approved tools", "if you need one's tools that you don't "
+                                                 "have, call request_tool with its name") + "\n")
+
     unavailable_note = ""
     if unavailable:
         unavailable_note = (
@@ -109,7 +121,7 @@ to action — call inspect_website with its URL. web_search only returns what ot
 If you need a tool you don't have, or a better one for this job, call request_tool with its name and
 why. The user approves or rejects it on the Commands page and the call returns their answer. Don't
 decide on your own that no tool could help — ask.
-{unavailable_note}
+{connected_note}{unavailable_note}
 RULES:
 1. Stay strictly within your brief.
 2. Actually call your tools to do real work before answering. Do not just describe actions.

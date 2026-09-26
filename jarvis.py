@@ -2244,6 +2244,18 @@ def control_tool_decide():
     return jsonify(result)
 
 
+@app.route("/control/limits", methods=["GET", "POST"])
+def control_limits():
+    """Spending limits per service and per pipeline, and what has been spent."""
+    if request.method == "POST":
+        data = request.get_json(force=True) or {}
+        result = control_room.set_limit((data.get("scope") or "").strip(), (data.get("service") or "").strip(),
+                                        data.get("limit"))
+        if "error" in result:
+            return jsonify(result), 400
+    return jsonify(control_room.spending())
+
+
 @app.route("/control/call", methods=["POST"])
 def control_call_decide():
     """Allow one held call once, or deny it."""
@@ -4893,6 +4905,21 @@ def tools_overview_route():
     except Exception as e:
         mcps = []
         print(f"[Tools] Could not list MCP servers: {e}")
+
+    # Where each server's tools are in the catalogue: researched, reviewed, in use.
+    try:
+        from connectors import tool_catalog
+        catalog = tool_catalog.load()
+        for m in mcps:
+            entry = catalog.get(m.get("name")) or {}
+            statuses = [t.get("status") for t in (entry.get("tools") or {}).values()]
+            if entry:
+                m["catalog"] = {"state": entry.get("state"), "summary": entry.get("summary", ""),
+                                "enabled": statuses.count("enabled"), "pending": statuses.count("pending"),
+                                "held": statuses.count("held"),
+                                "research": (entry.get("research") or {}).get("status")}
+    except Exception as e:
+        print(f"[Tools] Could not read the tool catalogue: {e}")
 
     always_on = [
         {"name": spec["declaration"]["name"], "description": spec["declaration"]["description"]}

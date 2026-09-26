@@ -13,7 +13,7 @@ an agent), it is written into the tool catalogue and:
     research fails, the review opens anyway with the server's own descriptions;
   * tools that cost money or are destructive go to the Control room,
     where they wait for the user with no time limit (see control_room.py);
-  * every other new tool waits for a review on the Commands page. The user can
+  * every other new tool waits for a review in the Control room. The user can
     approve them all, approve only the read-only ones, pick some, or reject the
     lot. An unanswered review approves itself after WAIT_SECONDS, like the
     other approvals there, so a forgotten review never stalls a pipeline.
@@ -30,7 +30,7 @@ import time
 
 from connectors import tool_catalog
 
-# Same patience as every other approval on the Commands page.
+# Same patience as the approvals on the Commands page.
 WAIT_SECONDS = int(os.getenv("JARVIS_COMMAND_WAIT", "600"))
 SWEEP_SECONDS = 5.0
 DECISIONS = ("approve", "approve_read", "pick", "reject")
@@ -187,7 +187,7 @@ def _open_review(server: str) -> None:
     research = (tool_catalog.get(server) or {}).get("research") or {}
     parts = []
     if opened.get("pending"):
-        parts.append(f"{opened['pending']} new tool(s) to review on the Commands page "
+        parts.append(f"{opened['pending']} new tool(s) to review in the Control room "
                      f"(approved automatically in {WAIT_SECONDS // 60} minutes if you don't answer)")
     if opened.get("held"):
         parts.append(f"{opened['held']} that cost money or are destructive, waiting in the Control room")
@@ -329,6 +329,39 @@ def researching() -> list[dict]:
     return [{"service": name, "started_at": (entry.get("research") or {}).get("started_at"),
              "tools": sum(1 for t in entry["tools"].values() if t.get("status") in ("pending", "held"))}
             for name, entry in tool_catalog.load().items() if entry.get("state") == "researching"]
+
+
+RISK_WORDS = {"read": "reads", "write": "changes things", "destructive": "destructive, asks first",
+              "costs_money": "costs money, asks first"}
+
+
+def connected_services_note(max_tools: int = 12) -> str:
+    """What the Brain and the agents are told about connected services.
+
+    Only switched-on servers with at least one approved tool: planning around a
+    service nobody can use yet would only produce a blocked agent.
+    """
+    try:
+        from connectors.mcp_client import enabled_servers
+        on = set(enabled_servers())
+    except Exception:
+        on = set()
+    lines = []
+    for name, entry in sorted(tool_catalog.load().items()):
+        if name not in on:
+            continue
+        tools = [(n, t) for n, t in (entry.get("tools") or {}).items() if t.get("status") == "enabled"]
+        if not tools:
+            continue
+        shown = ", ".join(f"{n} ({RISK_WORDS.get(t.get('risk'), t.get('risk'))})" for n, t in tools[:max_tools])
+        more = f", and {len(tools) - max_tools} more" if len(tools) > max_tools else ""
+        about = entry.get("summary") or ""
+        use_for = f" Good for: {'; '.join(entry['use_for'])}." if entry.get("use_for") else ""
+        lines.append(f"- {name}: {about}{use_for} Tools: {shown}{more}.")
+    if not lines:
+        return ""
+    return ("CONNECTED SERVICES (set up and approved by the user; name one in tools_needed exactly as written "
+            "to give an agent all its approved tools):\n" + "\n".join(lines) + "\n")
 
 
 def log(limit: int = 20) -> list[dict]:
