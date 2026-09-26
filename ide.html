@@ -626,7 +626,15 @@
 
     function openProject() {
         store("project", S.project);
-        S.tabs = []; S.active = null; S.selected = null; S.mission = null;
+        // Reloading the same project (the project list can arrive after the
+        // owner already opened a file) must not throw their open tabs away.
+        if (S.opened !== S.project) {
+            S.tabs.slice().forEach(function (t) { closeTab(t.key, true); });
+            S.active = null; S.selected = null; S.mission = null;
+            $("deck").classList.remove("detail");
+            S.opened = S.project;
+            updateComposer();
+        }
         renderTabs(); showActive();
         $("termPrompt").textContent = (S.project || "no project") + " ›";
         return Promise.all([loadTree(), loadMissions(true)]);
