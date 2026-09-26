@@ -1063,18 +1063,31 @@
             (founding ? ": " + esc(founding.title) : "") + ". " + esc(pos.why || "") + "</div></div>";
 
         var by = coverage();
-        var asks = plan.asks || [];
-        var missing = asks.filter(function (a) { return !by[a.id].length; }).length;
-        html += '<div class="jsec-plan-box"><h4>Every ask (' + asks.length + ")" +
-            (missing ? ' · <span style="color:#F87171">' + missing + " not covered</span>" : "") +
-            '</h4><ul class="jsec-asks">';
-        asks.forEach(function (a) {
-            var who = by[a.id];
-            html += "<li>" + (who.length ? '<span class="ok">✓</span>' : '<span class="miss">✕</span>') +
-                "<div>" + esc(a.text) + '<div class="who">' +
-                (who.length ? esc(who.join(", ")) : "Nobody covers this now") + "</div></div></li>";
-        });
-        html += "</ul></div>";
+        var all = plan.asks || [];
+        function listHtml(title, items, sub) {
+            if (!items.length) return "";
+            var missing = items.filter(function (a) { return !by[a.id].length; }).length;
+            var out = '<div class="jsec-plan-box"><h4>' + title + " (" + items.length + ")" +
+                (missing ? ' · <span style="color:#F87171">' + missing + " not covered</span>" : "") +
+                "</h4>" + (sub ? '<div class="who" style="margin-bottom:8px">' + sub + "</div>" : "") +
+                '<ul class="jsec-asks">';
+            items.forEach(function (a) {
+                var who = by[a.id];
+                out += "<li>" + (who.length ? '<span class="ok">✓</span>' : '<span class="miss">✕</span>') +
+                    "<div>" + esc(a.text) +
+                    (a.why ? '<div class="who">Why: ' + esc(a.why) + "</div>" : "") +
+                    '<div class="who">' +
+                    (who.length ? "Covered by " + esc(who.join(", ")) : "Nobody covers this now") +
+                    "</div></div></li>";
+            });
+            return out + "</ul></div>";
+        }
+        html += listHtml("Everything you asked for",
+                         all.filter(function (a) { return a.origin !== "research"; }), "");
+        html += listHtml("What it needs that you did not mention",
+                         all.filter(function (a) { return a.origin === "research"; }),
+                         "Found by the research. Each one is planned like your own asks, so the " +
+                         "section is built fully and correctly.");
 
         var research = plan.research || [];
         if (research.length) {
@@ -1198,7 +1211,7 @@
     function partStatusHtml(dept) {
         var part = planPart(dept);
         if (!part) return "";
-        if (part.gap) return '<span class="jsec-status gap">Added for an ask</span>';
+        if (part.gap) return '<span class="jsec-status gap">Added so nothing is missed</span>';
         if (part.status === "done") return '<span class="jsec-status done">Done</span>';
         return '<span class="jsec-status">Part ' + esc(part.order) + "</span>";
     }
@@ -1207,7 +1220,9 @@
         var asks = (draft.plan && draft.plan.asks) || [];
         var names = [];
         asks.forEach(function (a) {
-            if ((agent.covers || []).indexOf(a.id) >= 0) names.push(a.text);
+            if ((agent.covers || []).indexOf(a.id) >= 0) {
+                names.push((a.origin === "research" ? "(needed) " : "") + a.text);
+            }
         });
         return names.length
             ? '<div class="jsec-covers"><b>Covers:</b> ' + esc(names.join(" · ")) + "</div>"

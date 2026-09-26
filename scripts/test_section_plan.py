@@ -54,7 +54,7 @@ jarvis.initiate_pipeline = fake_initiate
 
 # ---- the model and the web, stubbed by what each call asks for ------------
 CALLS = []
-MODEL = {"down": False, "understanding": None, "plan": None, "audits": []}
+MODEL = {"down": False, "understanding": None, "plan": None, "audits": [], "needs": []}
 SEARCHED = []
 
 
@@ -66,6 +66,8 @@ def fake_model(instruction, context_text, parts=None):
         return MODEL["understanding"]
     if "SECTION PLAN" in instruction:
         return MODEL["plan"]
+    if "SECTION REQUIREMENTS" in instruction:
+        return MODEL["needs"].pop(0) if MODEL["needs"] else {"requirements": []}
     if "SECTION AUDIT" in instruction:
         return MODEL["audits"].pop(0) if MODEL["audits"] else {"missed_asks": [], "parts": []}
     if '"brief_text"' in instruction:
@@ -156,7 +158,7 @@ MODEL["plan"] = {
         {"title": "Company Setup", "goal": "Register the company", "order": 1, "status": "todo",
          "covers": ["ask_1"], "deliverables": ["Registered company"],
          "agents": [{"role": "Company Registrar", "brief": "Own the registration.",
-                     "covers": ["ask_1"], "is_lead": True}]},
+                     "covers": ["ask_1", "need_1"], "is_lead": True}]},
         {"title": "Competitive Research", "goal": "Who the rivals are", "order": 2, "status": "done",
          "agents": [{"role": "Competitor Analyst", "brief": "Own who the rivals are.",
                      "from_agent_ids": ["competitor_analyst_cycle1"], "covers": ["ask_1"]},
@@ -175,6 +177,15 @@ MODEL["plan"] = {
     ],
     "services": [{"name": "Stripe", "why": "Take booking payments."}],
 }
+# The research turns up what the owner never said: a licence (planned), a
+# repeat of an ask (ignored), a deep dive, and then commercial insurance
+# (which the plan forgets, so it must get a part of its own).
+MODEL["needs"] = [
+    {"requirements": [{"text": "Rental car operator licence", "why": "Required by Cyprus law."},
+                      {"text": "Budget under 50,000 euro"}],
+     "deep_dive_questions": ["Cyprus rental licence process"]},
+    {"requirements": [{"text": "Commercial vehicle insurance", "why": "Rental cars need it."}]},
+]
 # The first audit finds an ask the understanding missed and covers it; it
 # still forgets the airport pickup, so that ask must get a part of its own.
 MODEL["audits"] = [
@@ -202,19 +213,33 @@ check("Jarvis is told to list every ask", "EVERY distinct thing the owner asked 
       understand["instruction"])
 check("he reads the owner's own words", "we pick up at the airport" in understand["context"])
 check("he reads what the founding pipeline found", "35 to 60 euro" in understand["context"])
+check("he researches what it takes to do it fully and correctly",
+      "FULLY and CORRECTLY" in understand["instruction"])
+check("aimed above all at what the owner did not mention",
+      "what the owner did NOT" in understand["instruction"])
 check("he decides whether it is the beginning or one part",
       '"beginning" or "part"' in understand["instruction"])
 
-check("every research question is searched", len(SEARCHED) == 3)
+check("every research question is searched, then the deep dive",
+      len(SEARCHED) == 4 and SEARCHED[-1] == "Cyprus rental licence process")
 labels = [s["label"] for s in view["steps"]]
 check("the progress names each research question",
-      "Researching: How to register a company in Cyprus" in labels)
+      "Researching what it takes: How to register a company in Cyprus" in labels)
+check("the progress shows the deep dive", "Deep dive: Cyprus rental licence process" in labels)
+needs_calls = [c for c in CALLS if "SECTION REQUIREMENTS" in c["instruction"]]
+check("requirements are worked out from the research, twice",
+      len(needs_calls) == 2 and "Findings about How to register" in needs_calls[0]["context"])
+check("the second pass has the deep dive",
+      "Findings about Cyprus rental licence process" in needs_calls[1]["context"])
 plan_call = next(c for c in CALLS if "SECTION PLAN" in c["instruction"])
 check("the research reaches the planner",
       "Findings about Car rental insurance rules in Cyprus" in plan_call["context"])
 check("the planner is told there is no limit on parts or agents",
       "There is no limit on parts or agents" in plan_call["instruction"])
 check("the planner is given every ask by id", "ask_4: Airport pickup service" in plan_call["context"])
+check("and every requirement the research found",
+      "need_1: Rental car operator licence" in plan_call["context"]
+      and "need_2: Commercial vehicle insurance" in plan_call["context"])
 
 plan, crew = view["plan"], view["crew"]
 check("the plan is not capped at 8 parts", len(plan["parts"]) >= 10)
@@ -233,11 +258,19 @@ check("an ask cited by its wording counts as covered",
       "Budget Controller" in view["coverage"]["covered"]["ask_2"])
 
 ask_texts = {a["text"]: a["id"] for a in plan["asks"]}
+needs = [a for a in plan["asks"] if a["origin"] == "research"]
+check("requirements are kept apart from the owner's asks",
+      [a["text"] for a in needs] == ["Rental car operator licence", "Commercial vehicle insurance"])
+check("a requirement that repeats an ask is not added twice",
+      sum(1 for a in plan["asks"] if a["text"] == "Budget under 50,000 euro") == 1)
+check("a requirement keeps why it is needed", needs[0]["why"] == "Required by Cyprus law.")
+check("a planned requirement is covered", view["coverage"]["covered"]["need_1"] == ["Company Registrar"])
 check("the audit adds the ask Jarvis first missed", "Insurance for every car" in ask_texts)
 check("and an agent for it",
       "Insurance Buyer" in view["coverage"]["covered"][ask_texts["Insurance for every car"]])
 check("no ask is left without an agent", view["coverage"]["uncovered"] == [])
-check("the forgotten ask got a part of its own", view["gaps_closed"] == ["ask_4"])
+check("the forgotten ask and requirement got parts of their own",
+      view["gaps_closed"] == ["ask_4", "need_2"])
 gap = next(p for p in plan["parts"] if "ask_4" in p["covers"])
 check("that part says what it is for", gap["goal"] == "Airport pickup service")
 
@@ -261,7 +294,7 @@ check("the plan is written", os.path.exists(os.path.join(PROJECT_DIR, section_st
 knowledge = os.path.join(PROJECT_DIR, "Knowledge")
 with open(os.path.join(knowledge, section_store.PLAN_NOTE), encoding="utf-8") as f:
     note = f.read()
-check("a readable plan is written", "## Every ask, and who covers it" in note)
+check("a readable plan is written", "## Every ask and requirement, and who covers it" in note)
 check("it says where the founding pipeline fits", "one part of this section" in note)
 with open(os.path.join(knowledge, section_store.RESEARCH_NOTE), encoding="utf-8") as f:
     research_note = f.read()

@@ -1051,6 +1051,10 @@ def normalise_asks(raw) -> list[dict]:
             "id": str(item.get("id") or "").strip() or f"ask_{len(asks) + 1}",
             "text": text,
             "quote": str(item.get("quote") or "").strip(),
+            # "owner": the owner asked for it. "research": the research showed the
+            # section needs it to be done fully and correctly. Both must be covered.
+            "origin": "research" if item.get("origin") == "research" else "owner",
+            "why": str(item.get("why") or "").strip(),
         })
     # Ids must be unique even when a model repeats one.
     used = set()
@@ -1177,6 +1181,7 @@ def close_coverage_gaps(plan: dict, crew: dict) -> tuple[dict, dict, list[str]]:
     added = []
     for aid in uncovered:
         text = asks[aid]["text"]
+        what = "requirement" if asks[aid].get("origin") == "research" else "ask"
         title = slugify(text, "Ask")[:60].strip()
         pid = part_id_for(title)
         if any(p["id"] == pid for p in plan["parts"]):
@@ -1195,8 +1200,8 @@ def close_coverage_gaps(plan: dict, crew: dict) -> tuple[dict, dict, list[str]]:
             "id": pid, "domain": title, "goal": text, "origin": "brief",
             "agents": [{
                 "role": role, "is_lead": True, "origin": "brief", "covers": [aid],
-                "brief": f"Owns this ask until it is planned properly: {text}",
-                "why": "Added so this ask is not forgotten. Nothing else in the plan covered it.",
+                "brief": f"Owns this {what} until it is planned properly: {text}",
+                "why": f"Added so this {what} is not forgotten. Nothing else in the plan covered it.",
             }],
         })
         added.append(aid)
@@ -1341,8 +1346,10 @@ def _write_plan_note(folder: str, plan: dict, crew: dict, section_name: str = ""
         out.append("")
     if asks:
         coverage = plan_coverage(plan, crew)["covered"]
-        out += ["## Every ask, and who covers it", ""]
+        out += ["## Every ask and requirement, and who covers it", ""]
         for aid, ask in asks.items():
+            if ask.get("origin") == "research":
+                ask = dict(ask, text="(needed) " + ask["text"])
             who = ", ".join(coverage.get(aid) or []) or "NOBODY YET"
             out.append(f"- {ask['text']} — {who}")
         out.append("")
@@ -1436,7 +1443,8 @@ def plan_seed_text(section: dict, part_id: str | None = None, max_chars: int = 5
         mine = sorted({aid for a in agents_by_part.get(this["id"], []) for aid in a.get("covers", [])}
                       | set(this.get("covers", [])))
         if mine:
-            out += ["The owner's asks this part answers for — every one must be delivered:"]
+            out += ["What this part answers for — the owner's asks and what the research showed "
+                    "the section needs. Every one must be delivered:"]
             out += [f"- {asks[a]}" for a in mine if a in asks] + [""]
         roles = [a["role"] for a in agents_by_part.get(this["id"], [])]
         if roles:

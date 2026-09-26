@@ -639,6 +639,12 @@ runs `_run_section_plan` in the background and the window shows each step:
 3. **Plan** — every part in order, with `depends_on`, deliverables and as many
    agents as each part needs. The founding pipeline is placed as the beginning
    or as one part, and the part it did is marked done and credited to it.
+   Then **what it needs that the owner did not mention**: a requirements pass
+   (`_section_requirements`) reads the research and lists everything the section
+   must meet to be done fully and correctly (stages, legal steps, technical
+   pieces, money, people, risks), asks for up to 8 deep-dive searches where the
+   research was thin, runs them, and checks again. Each requirement becomes a
+   `need_*` item that a part must cover exactly like an owner's `ask_*`.
 4. **Audit** — the owner's words are re-read for asks the first pass missed, and
    every uncovered ask is given an agent (up to two rounds).
 5. **Close the gaps** — any ask still without an agent gets a part and an agent
@@ -674,4 +680,4 @@ to in progress when the pipeline starts and to done when it completes.
 agents, hand edits and finished parts are kept. A section made with *Create
 section without questions* is planned right after creation.
 
-Tests: `scripts/test_section_plan.py` (57 checks).
+Tests: `scripts/test_section_plan.py` (67 checks).

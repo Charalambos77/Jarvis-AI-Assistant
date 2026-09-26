@@ -4242,6 +4242,56 @@ _SECTION_PLAN_RULES = (
 )
 
 
+SECTION_DEEP_DIVE_MAX = 8
+
+
+def _section_requirements(inputs: dict, understanding: dict, asks: list[dict],
+                          research: list[dict], files: list) -> dict:
+    """What doing this fully and correctly requires, beyond what the owner said."""
+    try:
+        data = _ask_model_json(
+            "You are Jarvis. SECTION REQUIREMENTS. The owner said what they want; the research "
+            "below says what it actually takes. List every REQUIREMENT this section must meet to "
+            "be done FULLY and CORRECTLY that the owner's asks do not already cover: stages, "
+            "legal and regulatory steps, technical pieces, money, people, quality checks, risks "
+            "to handle. One requirement per item, concrete, each with \"why\" (what in the "
+            "research shows it is needed). Never repeat an ask or a requirement already listed. "
+            "Never invent a need the research and the goal do not support.\n"
+            "Also give \"deep_dive_questions\": up to " + str(SECTION_DEEP_DIVE_MAX) + " "
+            "follow-up web searches for the requirements the research only touched on, so they "
+            "can be planned correctly. Empty when the research is already deep enough.\n\n"
+            "Reply with JSON only: {\"requirements\": [{\"text\": \"...\", \"why\": \"...\"}], "
+            "\"deep_dive_questions\": [\"...\"]}",
+            _section_plan_context(
+                inputs,
+                "GOAL: " + str(understanding.get("goal") or "(unknown)"),
+                "ALREADY LISTED:\n" + _section_asks_text(asks),
+                "THE RESEARCH:\n" + _section_research_text(research),
+            ), files) or {}
+    except Exception as e:
+        print(f"[Sections] Working out the requirements failed: {e}")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _section_add_needs(asks: list[dict], raw) -> int:
+    """Add research requirements to the list every part must cover. Returns how many."""
+    known = {section_store._norm(a["text"]) for a in asks}
+    added = 0
+    for item in section_store.normalise_asks(raw):
+        if section_store._norm(item["text"]) in known:
+            continue
+        n = sum(1 for a in asks if a.get("origin") == "research") + 1
+        item["id"] = f"need_{n}"
+        while any(a["id"] == item["id"] for a in asks):
+            item["id"] += "b"
+        item["origin"] = "research"
+        asks.append(item)
+        known.add(section_store._norm(item["text"]))
+        added += 1
+    return added
+
+
 def _run_section_plan(inputs: dict, job: dict) -> dict:
     """Understand, research, plan and audit a whole section. Never raises."""
     folder = inputs["folder"]
@@ -4266,10 +4316,11 @@ def _run_section_plan(inputs: dict, job: dict) -> dict:
             "Constraints (budget, deadline, place, audience, tone, counts) are asks too. Each "
             "with \"quote\": the owner's words it comes from. Add nothing they did not ask.\n"
             "- \"research_questions\": between 6 and " + str(SECTION_RESEARCH_MAX_QUESTIONS) + " "
-            "web-search-sized questions that, answered, tell you EVERYTHING this whole "
-            "undertaking needs to work: every stage, workstream, requirement and risk a project "
-            "of this kind has, including the ones the owner never mentioned. Do not re-research "
-            "what the founding pipeline already found.\n"
+            "web-search-sized questions that, answered, tell you what it takes to create this "
+            "FULLY and CORRECTLY: every stage, workstream, legal or technical requirement, cost "
+            "and risk a project of this kind has. Aim them above all at what the owner did NOT "
+            "mention — that is where a plan goes wrong. Do not re-research what the founding "
+            "pipeline already found.\n"
             "- \"position\": {\"kind\": \"beginning\" or \"part\", \"why\": one sentence} — is "
             "the founding pipeline the first step of this section, or one part of a larger whole?\n\n"
             "Reply with JSON only: {\"goal\": \"...\", \"kind\": \"...\", \"asks\": [{\"text\": "
@@ -4296,8 +4347,8 @@ def _run_section_plan(inputs: dict, job: dict) -> dict:
                  if str(q).strip()][:SECTION_RESEARCH_MAX_QUESTIONS]
     research = []
 
-    def _one(question):
-        label = f"Researching: {question}"
+    def _one(question, prefix="Researching what it takes"):
+        label = f"{prefix}: {question}"
         _plan_job_step(job, label)
         try:
             found = _section_web_search(folder, question) or {}
@@ -4320,6 +4371,31 @@ def _run_section_plan(inputs: dict, job: dict) -> dict:
     else:
         degraded.append("Jarvis could not work out what to research, so the plan was made "
                         "without new research.")
+
+    # ---- 2b. what it needs that the owner never said, then a deeper dive ----
+    # The owner names what they want; the research says what it takes. Every
+    # requirement found here is covered by a part exactly like an ask, so the
+    # section is built fully and correctly, not just as asked.
+    if research and any(r["summary"] for r in research):
+        step = "Working out everything it needs that you did not mention"
+        _plan_job_step(job, step)
+        needs = _section_requirements(inputs, understanding, asks, research, files)
+        added = _section_add_needs(asks, needs.get("requirements"))
+        _plan_job_step(job, step, "done", f"{added} requirements")
+
+        dive = [str(q).strip() for q in (needs.get("deep_dive_questions") or [])
+                if str(q).strip() and str(q).strip() not in questions][:SECTION_DEEP_DIVE_MAX]
+        if dive:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                deeper = list(pool.map(lambda q: _one(q, "Deep dive"), dive))
+            research += deeper
+            if any(r["summary"] for r in deeper):
+                step = "Checking the deep dive for anything else it needs"
+                _plan_job_step(job, step)
+                more = _section_requirements(inputs, understanding, asks, research, files)
+                added = _section_add_needs(asks, more.get("requirements"))
+                _plan_job_step(job, step, "done", f"{added} more")
 
     # ---- 3. plan every part and its agents ----
     step = "Planning every part and the agents each one needs"
@@ -4350,7 +4426,10 @@ def _run_section_plan(inputs: dict, job: dict) -> dict:
                 "UNDERSTANDING:\nGoal: " + str(understanding.get("goal") or "(unknown)") +
                 "\nKind: " + str(understanding.get("kind") or "(unknown)") +
                 "\nFirst read of where the founding pipeline fits: " + json.dumps(position_guess),
-                "EVERY ASK — each must be covered by at least one agent:\n" + _section_asks_text(asks),
+                "EVERY ASK (ask_*) AND EVERY REQUIREMENT THE RESEARCH FOUND (need_*) — each must "
+                "be covered by at least one agent. The requirements are what makes the section "
+                "complete and correct; plan parts for them exactly as for the owner's asks:\n"
+                + _section_asks_text(asks),
                 ("WHAT THE RESEARCH FOUND about everything this section needs:\n" +
                  _section_research_text(research)) if research else "",
                 ("CONNECTED SERVICES:\n" + services_note) if services_note else "",
@@ -4395,7 +4474,8 @@ def _run_section_plan(inputs: dict, job: dict) -> dict:
                 "because nothing they asked for may be forgotten.\n"
                 "1. \"missed_asks\": anything the owner asked for, required or constrained that "
                 "the ASKS list below does not have. Each with \"quote\". Empty if none.\n"
-                "2. \"parts\": the agents that cover every UNCOVERED ask and every missed ask. "
+                "2. \"parts\": the agents that cover every UNCOVERED ask or requirement, and "
+                "every missed ask. "
                 "To add agents to an existing part, repeat its exact title with only the new "
                 "agents; to add a new part, give it in full. In \"covers\" use ask ids, or the "
                 "exact text of a missed ask. Same rules as the plan:\n" + _SECTION_PLAN_RULES +

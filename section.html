@@ -599,18 +599,24 @@
             '</b>' + (founding ? ': ' + esc(founding.title) : '') + '. ' + esc(pos.why || '') + '</div>';
 
         const cov = sectionData.coverage || { covered: {}, uncovered: [] };
+        const listHtml = (label, items) => {
+            if (!items.length) return "";
+            const missing = items.filter(a => !(cov.covered[a.id] || []).length).length;
+            let out = '<details class="plan-asks"' + (missing ? ' open' : '') + '><summary>' +
+                label + ': ' + (items.length - missing) + ' of ' + items.length + ' covered' +
+                (missing ? ' · ' + missing + ' need an agent' : '') + '</summary><ul>';
+            items.forEach(a => {
+                const who = cov.covered[a.id] || [];
+                out += '<li>' + (who.length ? '<span class="ok">✓</span>' : '<span class="miss">✕</span>') +
+                    esc(a.text) + (who.length ? ' <span style="color:var(--dim)">— ' +
+                    esc(who.join(", ")) + '</span>' : '') + '</li>';
+            });
+            return out + '</ul></details>';
+        };
         const asks = plan.asks || [];
-        const missing = cov.uncovered.length;
-        html += '<details class="plan-asks"' + (missing ? ' open' : '') + '><summary>' +
-            (asks.length - missing) + ' of ' + asks.length + ' asks covered' +
-            (missing ? ' · ' + missing + ' need an agent' : '') + '</summary><ul>';
-        asks.forEach(a => {
-            const who = cov.covered[a.id] || [];
-            html += '<li>' + (who.length ? '<span class="ok">✓</span>' : '<span class="miss">✕</span>') +
-                esc(a.text) + (who.length ? ' <span style="color:var(--dim)">— ' +
-                esc(who.join(", ")) + '</span>' : '') + '</li>';
-        });
-        html += '</ul></details>';
+        html += listHtml("Your asks", asks.filter(a => a.origin !== "research"));
+        html += listHtml("What it needs that you did not mention",
+                         asks.filter(a => a.origin === "research"));
         box.innerHTML = html;
 
         const ready = new Set(sectionData.next_parts || []);
@@ -628,7 +634,7 @@
             }
             const badge = p.status === "done" ? '<span class="badge done">Done</span>'
                 : p.status === "in_progress" ? '<span class="badge running">Running</span>'
-                : p.gap ? '<span class="badge gap">Added for an ask</span>' : '';
+                : p.gap ? '<span class="badge gap">Added so nothing is missed</span>' : '';
             row.innerHTML =
                 '<div class="row-main">' +
                     '<div class="row-title">' + esc(p.order + ". " + p.title) + '</div>' +
