@@ -9,11 +9,20 @@ No separate manual wiring step — approve a service at the Plugging Gate
 (or it ships pre-configured, like google_search/arxiv_api) and any agent
 that lists it in tools_needed gets a real handler for it automatically.
 
-Two tiers:
+Three tiers:
   1. ALWAYS_ON_TOOLS   — no credentials required, always bound (write_file,
                           read_file, list_deliverables). This is what turns
                           "the agent wrote prose describing a file" into an
                           actual file landing on disk.
+  1b. CODE_TOOLS       — the `code_project` tool, bound only when the optional
+                          coding agent has a usable backend — the Claude Agent
+                          SDK with ANTHROPIC_API_KEY, or the Claude CLI on PATH
+                          (see agents/code_agent.py). Writing a file and
+                          building working software are different jobs; this
+                          tier is the second one. Entirely optional — when it's
+                          missing the agent is simply told so and falls back to
+                          write_file, exactly as Jarvis behaved before it
+                          existed.
   2. REGISTRY_TOOLS    — bound only when connectors/api_connector.py reports
                           the backing service as configured/up. If a brief
                           asks for a tool that has no real handler yet, we do
@@ -275,6 +284,82 @@ LOCAL_TOOLS = {
 
 
 # ---------------------------------------------------------------------------
+# CODE TOOLS — real software work, bound only when the optional coding agent has
+# a usable backend (Claude Agent SDK + key, or the Claude CLI). Absent, nothing here binds and the pipeline runs
+# exactly as it did before.
+# ---------------------------------------------------------------------------
+
+def code_project_impl(project_name: str, agent_id: str, task: str,
+                      subdirectory: str | None = None, event_logger=None) -> dict:
+    """Hand one coding task to the Claude coding agent (agents/code_agent.py).
+
+    Imported lazily and defensively: agents/code_agent.py is safe to import
+    without the SDK, but a missing/renamed module must never be what takes a
+    pipeline down — an unavailable coding agent is a normal, expected state."""
+    try:
+        from agents import code_agent
+    except Exception as e:
+        return {"status": "error", "action": "code_project", "error": f"Coding agent unavailable: {e}"}
+    return code_agent.run_coding_task(
+        project_name=project_name,
+        agent_id=agent_id,
+        task=task,
+        subdirectory=subdirectory,
+        event_logger=event_logger,
+    )
+
+
+CODE_TOOLS = {
+    "claude_code": {
+        "declaration": {
+            "name": "code_project",
+            "description": (
+                "Hand a concrete software task to a real coding agent that writes files, RUNS them, "
+                "reads the errors, and fixes them until they work — then reports what it built and "
+                "what it could not. Use this for any working software: scripts, apps, APIs, tests, "
+                "data pipelines. Prefer it over write_file whenever the deliverable is code that has "
+                "to actually run, and give it the full task in one call (it does its own multi-step "
+                "loop) rather than dictating file contents yourself."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": (
+                            "Complete, self-contained description of the software to build: what it "
+                            "must do, the language/stack, inputs and outputs, and how to tell it works."
+                        ),
+                    },
+                    "subdirectory": {
+                        "type": "string",
+                        "description": "Optional subfolder of Deliverables to build in, e.g. 'api' or 'scraper'.",
+                    },
+                },
+                "required": ["task"],
+            },
+        },
+        "handler": code_project_impl,
+    },
+}
+
+# Tools whose handler accepts event_logger, so run_tool knows to forward it.
+# The coding agent runs for minutes; without this its progress would land as a
+# single silent blob at the end instead of streaming to the UI like every other
+# agent's work.
+EVENT_LOGGER_AWARE_TOOLS = {"code_project"}
+
+
+def code_agent_status() -> tuple[bool, str]:
+    """(available, reason) for the optional coding agent — never raises."""
+    try:
+        from agents import code_agent
+        return code_agent.describe_availability()
+    except Exception as e:
+        return False, f"coding agent module could not be loaded ({e})"
+
+
+# ---------------------------------------------------------------------------
 # REGISTRY-GATED TOOLS — real handlers, only offered when the backing
 # service is configured (status != "unknown" in api_registry.json)
 # ---------------------------------------------------------------------------
@@ -422,6 +507,13 @@ TOOL_ALIASES = {
     "search_memory_patterns": "memory_patterns",
     "memory_query": "memory_patterns",
     "memory_patterns_search": "memory_patterns",
+    "claude_code": "claude_code",
+    "code_project": "claude_code",
+    "coding_agent": "claude_code",
+    "code_generation": "claude_code",
+    "code_interpreter": "claude_code",
+    "software_development": "claude_code",
+    "claude_agent_sdk": "claude_code",
 }
 
 
@@ -519,6 +611,13 @@ _TOKEN_RULES = [
          "inspect", "inspector", "inspection", "screenshot", "screenshots", "capture",
          "analysis", "analyzer", "analyser", "audit", "extraction", "extractor",
          "testing", "tester", "review"},
+    ]),
+    # The optional coding agent. "code" alone is too loose (a "zip code lookup"
+    # isn't software work), so it needs a building word next to it.
+    ("claude_code", [{"coding", "programming", "developer", "compiler"}]),
+    ("claude_code", [
+        {"code", "software"},
+        {"agent", "project", "generation", "generator", "interpreter", "writer", "builder", "development"},
     ]),
     ("google_search", [
         {"web", "internet", "google", "online", "www"},
@@ -777,7 +876,8 @@ REGISTRY_TOOLS = {
 }
 
 
-def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, context: str | None = None):
+def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, context: str | None = None,
+                                  include_code_agent: bool = True):
     """
     Automatically resolves an execution agent's `tools_needed` (from the Brain's
     brief) into (gemini_function_declarations, handler_map, unavailable) —
@@ -785,6 +885,10 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, co
 
     A tool is bound for real only if:
       - it's an always-on tool (files, internal memory search), or
+      - it's the coding agent AND it has a usable backend — the Claude Agent SDK
+        with ANTHROPIC_API_KEY, or the Claude CLI (see agents/code_agent.py) —
+        AND include_code_agent is set — research agents pass False, since
+        research reads and summarizes, it doesn't build, or
       - its backing service is configured/up in api_registry.json (i.e. the
         user approved it at the API/MCP Plugging Gate) AND a real handler
         exists in REGISTRY_TOOLS.
@@ -834,6 +938,27 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, co
 
         if key in ALWAYS_ON_TOOLS:
             continue  # bound above for every agent, no credentials involved
+
+        if key == "claude_code":
+            if not include_code_agent:
+                continue  # not an error — this phase just doesn't build software
+            code_available, code_reason = code_agent_status()
+            if code_available:
+                spec = CODE_TOOLS["claude_code"]
+                fn_name = spec["declaration"]["name"]
+                if fn_name not in seen:
+                    declarations.append(spec["declaration"])
+                    handlers[fn_name] = spec["handler"]
+                    seen.add(fn_name)
+            else:
+                # Optional by design. Say so precisely so the agent falls back to
+                # write_file and reports honestly, instead of either crashing or
+                # pretending it ran code it never ran.
+                unavailable.append(
+                    f"{raw_name} (the optional coding agent is not enabled: {code_reason} — "
+                    f"write your code with write_file instead and state that it was not executed or tested)"
+                )
+            continue
 
         if key.startswith(MCP_KEY_PREFIX):
             server_name = key[len(MCP_KEY_PREFIX):]
@@ -1107,7 +1232,7 @@ def classify_requested_tools(names, context: str | None = None) -> dict:
         if raw_key in ("", "none", "n/a", "na"):
             continue
         key = _resolve_tool_key(raw_key, context=context)
-        if key in ALWAYS_ON_TOOLS:
+        if key in ALWAYS_ON_TOOLS or key == "claude_code":
             if raw not in always_on:
                 always_on.append(raw)
         elif key in REGISTRY_TOOLS or key.startswith((MCP_KEY_PREFIX, API_KEY_PREFIX)):
@@ -1168,11 +1293,15 @@ def describe_connectable(key: str) -> dict:
     return out
 
 
-def run_tool(handler_map: dict, project_name: str, agent_id: str, tool_name: str, tool_args: dict) -> dict:
+def run_tool(handler_map: dict, project_name: str, agent_id: str, tool_name: str, tool_args: dict,
+             event_logger=None) -> dict:
     handler = handler_map.get(tool_name)
     if not handler:
         return {"status": "error", "error": f"Unknown or unbound tool '{tool_name}'."}
+    kwargs = dict(tool_args or {})
+    if tool_name in EVENT_LOGGER_AWARE_TOOLS:
+        kwargs["event_logger"] = event_logger
     try:
-        return handler(project_name=project_name, agent_id=agent_id, **(tool_args or {}))
+        return handler(project_name=project_name, agent_id=agent_id, **kwargs)
     except Exception as e:
         return {"status": "error", "error": str(e)}

@@ -99,6 +99,20 @@ async def run_execution_agent(
               "part could not be completed and why.\n"
         )
 
+    # Bound only when the optional coding agent is actually enabled — see
+    # agents/code_agent.py. When it isn't, this is empty and the prompt reads
+    # exactly as it did before the coding agent existed.
+    code_agent_note = ""
+    if any(d.get("name") == "code_project" for d in declarations):
+        code_agent_note = (
+            "\nCODING AGENT: You also have `code_project`, which hands a task to a real coding agent "
+            "that writes files, runs them, reads the errors and fixes them until they work. For any "
+            "deliverable that is software meant to actually run, call `code_project` with the full "
+            "task in one go instead of dictating file contents through write_file. Use write_file for "
+            "prose, config, and documents. Report the files it says it changed in your final JSON, and "
+            "if it reports a limitation, pass that through honestly rather than smoothing it over.\n"
+        )
+
     # Built outside the f-string: a backslash inside {} is a SyntaxError before Python 3.12.
     gate_note_block = ("GATE REJECTION NOTE (address this specifically in your output):\n"
                        + gate_redirect_note) if gate_redirect_note else ""
@@ -126,7 +140,7 @@ to action — call inspect_website with its URL. web_search only returns what ot
 If you need a tool you don't have, or a better one for this job, call request_tool with its name and
 why. The user approves or rejects it on the Commands page and the call returns their answer. Don't
 decide on your own that no tool could help — ask.
-{connected_note}{unavailable_note}
+{connected_note}{code_agent_note}{unavailable_note}
 RULES:
 1. Stay strictly within your brief.
 2. Actually call your tools to do real work before answering. Do not just describe actions.
@@ -229,7 +243,12 @@ RULES:
                     result = await control_room.check_call(fc.name, tool_args, agent_id=agent_id, role=role,
                                                            kind="execution", event_logger=event_logger)
                     if result is None:
-                        result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
+                        # Off the event loop: execution agents run side by side under
+                        # asyncio.gather, and a coding task can take minutes. Called
+                        # inline, it would freeze every other agent until it finished.
+                        result = await loop.run_in_executor(
+                            None, lambda n=fc.name, a=tool_args: run_tool(
+                                handlers, project_name, agent_id, n, a, event_logger=event_logger))
                 call_log.append({"tool": fc.name, "args": tool_args})
                 artifact = _extract_artifact(fc.name, tool_args, result)
                 if artifact:
