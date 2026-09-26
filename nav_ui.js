@@ -28,6 +28,7 @@
         { key: "plan", label: "Plan", href: "plan.html", aliases: ["plan"] },
         { key: "library", label: "Library", href: "library.html", aliases: ["library"] },
         { key: "commands", label: "Commands", href: "commands.html", aliases: ["commands"] },
+        { key: "control", label: "Control room", href: "control_room.html", aliases: ["control room", "control"] },
         { key: "apis", label: "APIs/MCPs", href: "provider_comparison.html",
           aliases: ["apis/mcps", "apis", "apis/mcp"] }
     ];
@@ -59,6 +60,7 @@
         "plan.html": "plan",
         "library.html": "library",
         "commands.html": "commands",
+        "control_room.html": "control",
         "provider_comparison.html": "apis"
     }[page] || "";
 
@@ -200,6 +202,23 @@
         }
         tick();
         setInterval(tick, 3000);
+
+        /* The Control room has no time limit, so a waiting call or tool is easy to
+           forget: its button carries the count on every page too. */
+        function tickControl() {
+            fetch("/control/pending")
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var count = (data.calls || []).length + (data.tools || []).length;
+                    var btn = document.querySelector('[data-nav="control"]');
+                    if (!btn) return;
+                    btn.textContent = count ? "Control room (" + count + ")" : "Control room";
+                    btn.classList.toggle("jarvis-nav-waiting", count > 0);
+                })
+                .catch(function () { /* Jarvis restarting; the next tick retries. */ });
+        }
+        tickControl();
+        setInterval(tickControl, 3000);
     }
 
     function start() {

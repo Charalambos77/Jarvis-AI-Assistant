@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Control Room</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #05070A;
+            --panel: rgba(255,255,255,0.025);
+            --line: rgba(255,255,255,0.08);
+            --text: #E2E8F0;
+            --muted: #9CA3AF;
+            --dim: #4B5563;
+            --accent: #60A5FA;
+            --go: #34D399;
+            --no: #F87171;
+            --warn: #FBBF24;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        .shell { display: flex; flex-direction: column; height: 100vh; }
+
+        header {
+            flex: 0 0 auto; padding: 22px 34px;
+            border-bottom: 1px solid var(--line);
+            display: flex; align-items: flex-start; gap: 24px;
+            background: rgba(8,10,14,0.9);
+        }
+        .id-block { flex: 1 1 auto; min-width: 0; }
+        .eyebrow {
+            font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin-bottom: 8px;
+        }
+        h1 { margin: 0; font-size: 22px; font-weight: 700; color: #FFF; }
+        .sub { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.7; max-width: 780px; }
+        .top-right-nav { display: flex; gap: 10px; flex: 0 0 auto; }
+        .nav-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit;
+            font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+            text-transform: uppercase; padding: 12px 20px; border-radius: 8px;
+            cursor: pointer; transition: all .25s ease;
+        }
+        .nav-btn:hover { background: rgba(255,255,255,0.07); color: #FFF; border-color: rgba(255,255,255,0.25); }
+        .nav-btn.active { background: #FFF; color: #000; border-color: #FFF; }
+
+        .body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 26px 34px 70px; }
+        .body::-webkit-scrollbar { width: 10px; }
+        .body::-webkit-scrollbar-track { background: transparent; }
+        .body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 6px; }
+        .body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+        .section-title {
+            font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin: 30px 0 14px; display: flex; align-items: center; gap: 10px;
+        }
+        .section-title:first-child { margin-top: 0; }
+        .count-pill {
+            background: rgba(255,255,255,0.06); border-radius: 20px; padding: 2px 9px;
+            font-size: 10px; letter-spacing: 1px; color: var(--muted);
+        }
+        .count-pill.live { background: rgba(251,191,36,0.16); color: var(--warn); }
+
+        .card {
+            background: var(--panel); border: 1px solid var(--line);
+            border-radius: 12px; padding: 20px 22px; margin-bottom: 14px;
+        }
+        .card.waiting { border-color: rgba(251,191,36,0.42); background: rgba(251,191,36,0.04); }
+
+        .cmd {
+            font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #FFF;
+            background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 8px;
+            padding: 13px 15px; word-break: break-all; line-height: 1.6;
+        }
+        .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 13px; }
+        .badge {
+            font-size: 10.5px; letter-spacing: .6px; padding: 4px 10px; border-radius: 6px;
+            background: rgba(255,255,255,0.05); color: var(--muted); border: 1px solid var(--line);
+        }
+        .badge.link { cursor: pointer; }
+        .badge.link:hover { color: #FFF; border-color: rgba(255,255,255,0.28); }
+        .badge.go { background: rgba(52,211,153,0.13); color: var(--go); border-color: rgba(52,211,153,0.25); }
+        .badge.no { background: rgba(248,113,113,0.13); color: var(--no); border-color: rgba(248,113,113,0.25); }
+        .badge.warn { background: rgba(251,191,36,0.14); color: var(--warn); border-color: rgba(251,191,36,0.28); }
+
+        .breakdown { margin-top: 14px; font-size: 12px; color: var(--muted); line-height: 1.9; }
+        .breakdown b { color: var(--text); font-weight: 500; }
+        .sig { font-family: 'JetBrains Mono', monospace; color: var(--accent); font-size: 12px; }
+
+        .timer { margin-top: 15px; }
+        .timer-bar { height: 3px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
+        .timer-fill { height: 100%; background: var(--warn); transition: width 1s linear; }
+        .timer-text { font-size: 11px; color: var(--dim); margin-top: 7px; }
+
+        .decide { margin-top: 17px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        input[type=text] {
+            flex: 1 1 240px; min-width: 200px;
+            background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); font-family: inherit; font-size: 12.5px; padding: 10px 13px;
+        }
+        input[type=text]:focus { outline: none; border-color: rgba(96,165,250,0.45); }
+        .btn {
+            border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text);
+            font-family: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: .8px;
+            padding: 10px 16px; border-radius: 8px; cursor: pointer; transition: all .2s ease;
+            white-space: nowrap;
+        }
+        .btn:hover { background: rgba(255,255,255,0.08); }
+        .btn.go { border-color: rgba(52,211,153,0.4); color: var(--go); }
+        .btn.go:hover { background: rgba(52,211,153,0.13); }
+        .btn.always { border-color: rgba(96,165,250,0.4); color: var(--accent); }
+        .btn.always:hover { background: rgba(96,165,250,0.13); }
+        .btn.no { border-color: rgba(248,113,113,0.4); color: var(--no); }
+        .btn.no:hover { background: rgba(248,113,113,0.13); }
+        .btn.tiny { padding: 6px 11px; font-size: 10.5px; }
+        .scope {
+            display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted);
+            cursor: pointer; user-select: none;
+        }
+
+        .empty {
+            border: 1px dashed var(--line); border-radius: 12px; padding: 26px;
+            font-size: 12.5px; color: var(--dim); line-height: 1.8;
+        }
+
+        .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+        select {
+            background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); font-family: inherit; font-size: 12px; padding: 9px 12px;
+        }
+        select:focus { outline: none; border-color: rgba(96,165,250,0.45); }
+
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            text-align: left; font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase;
+            color: var(--dim); font-weight: 600; padding: 0 12px 10px; border-bottom: 1px solid var(--line);
+        }
+        td { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.045); font-size: 12.5px; vertical-align: top; }
+        tr:hover td { background: rgba(255,255,255,0.018); }
+        td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #FFF; word-break: break-all; max-width: 420px; }
+        td.why { color: var(--muted); max-width: 300px; }
+        .when { color: var(--dim); white-space: nowrap; font-size: 11.5px; }
+
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 1000px) { .two-col { grid-template-columns: 1fr; } }
+        .rule-row {
+            display: flex; align-items: center; gap: 12px; padding: 11px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.045);
+        }
+        .rule-row:last-child { border-bottom: none; }
+        .rule-row .sig { flex: 1 1 auto; }
+        .deny-row {
+            padding: 9px 0; font-size: 12.5px; color: var(--muted); line-height: 1.6;
+            border-bottom: 1px solid rgba(255,255,255,0.045); display: flex; gap: 10px;
+        }
+        .deny-row:last-child { border-bottom: none; }
+        .deny-row::before { content: "✕"; color: var(--no); flex: 0 0 auto; }
+        .note { font-size: 12px; color: var(--dim); line-height: 1.8; margin-bottom: 14px; }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div class="id-block">
+            <div class="eyebrow">Jarvis · Control room</div>
+            <h1>Control room</h1>
+            <div class="sub">
+                Anything that can <em>spend money</em> or <em>do something destructive</em> (delete, send, publish)
+                is decided here. Nothing here has a time limit: a tool or a call waits until you answer, and
+                the rest of the pipeline keeps working meanwhile.
+            </div>
+        </div>
+        <!-- Filled in by nav_ui.js, which gives every page the same set. -->
+        <div class="top-right-nav"></div>
+    </header>
+
+    <div class="body">
+        <div class="section-title">
+            Calls waiting for you <span class="count-pill" id="call-count">0</span>
+        </div>
+        <div id="calls"></div>
+
+        <div class="section-title">
+            New risky tools <span class="count-pill" id="held-count">0</span>
+        </div>
+        <div id="held"></div>
+
+        <div class="section-title">Rules for risky tools</div>
+        <div class="card"><div id="rules"></div></div>
+
+        <div class="section-title">Already decided</div>
+        <div id="log"></div>
+    </div>
+</div>
+
+<script>
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const RISK = { costs_money: "costs money", destructive: "destructive" };
+const RULE = { always_ask: "Ask every call", always_allow: "Always allow", block: "Blocked" };
+// A reason being typed against a held call, kept across the 2-second repaint.
+const draft = {};
+
+function ago(iso) {
+    const t = typeof iso === "number" ? iso * 1000 : Date.parse(iso);
+    if (!t) return "";
+    const s = Math.floor((Date.now() - t) / 1000);
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+}
+
+function openPipeline(planId) {
+    if (!planId) return;
+    localStorage.setItem('jarvis_active_pipeline_id', planId);
+    location.href = 'plan.html';
+}
+
+function pill(id, n) {
+    const el = document.getElementById(id);
+    el.textContent = n;
+    el.className = n ? "count-pill live" : "count-pill";
+}
+
+function renderCalls(items) {
+    pill('call-count', items.length);
+    const host = document.getElementById('calls');
+    if (!items.length) {
+        host.innerHTML = `<div class="empty">No call is waiting. When an agent wants to use a tool that costs money or is destructive, it stops here until you allow or deny it.</div>`;
+        return;
+    }
+    host.innerHTML = items.map(c => `
+        <div class="card waiting">
+            <div class="badges">
+                ${c.plan_id ? `<span class="badge link" onclick="openPipeline('${esc(c.plan_id)}')">Pipeline ${esc(c.plan_id)} →</span>` : ""}
+                <span class="badge">${esc(c.role || c.agent_id || "agent")} · ${esc(c.kind || "")} agent</span>
+                <span class="badge no">${esc(RISK[c.risk] || c.risk)}</span>
+                <span class="badge">waiting ${esc(ago(c.asked_ts))}</span>
+            </div>
+            <div class="cmd">${esc(c.service)} · ${esc(c.tool)}</div>
+            <div class="breakdown"><b>With:</b> <span class="sig">${esc(c.args)}</span></div>
+            <div class="decide">
+                <input type="text" id="why-${c.request_id}" placeholder="Why — optional, the agent is told"
+                       value="${esc(draft[c.request_id] || "")}" oninput="draft['${c.request_id}'] = this.value">
+                <button class="btn go" onclick="decideCall('${c.request_id}','allow')">Allow once</button>
+                <button class="btn no" onclick="decideCall('${c.request_id}','deny')">Deny</button>
+            </div>
+        </div>`).join("");
+}
+
+function ruleButtons(t) {
+    const current = t.status === "disabled" ? "block" : (t.status === "held" ? "" : t.rule);
+    return ["always_ask", "always_allow", "block"].map(d => `
+        <button class="btn tiny ${d === current ? (d === "block" ? "no" : "go") : ""}"
+                onclick="decideTool('${esc(t.service)}','${esc(t.tool)}','${d}')">${RULE[d]}</button>`).join(" ");
+}
+
+function renderHeld(items) {
+    pill('held-count', items.length);
+    const host = document.getElementById('held');
+    if (!items.length) {
+        host.innerHTML = `<div class="empty">No risky tool is waiting. When a service you connect offers a tool that costs money or is destructive, it waits here instead of on the Commands page.</div>`;
+        return;
+    }
+    host.innerHTML = items.map(t => `
+        <div class="card waiting">
+            <div class="badges">
+                <span class="badge">${esc(t.service)}</span>
+                <span class="badge no">${esc(RISK[t.risk] || t.risk)}</span>
+                <span class="badge">found ${esc(ago(t.discovered_at))}</span>
+            </div>
+            <div class="cmd">${esc(t.tool)}</div>
+            <div class="breakdown">${esc(t.description)}</div>
+            <div class="decide">${ruleButtons(t)}</div>
+        </div>`).join("");
+}
+
+function renderRules(tools) {
+    const decided = tools.filter(t => t.status !== "held");
+    document.getElementById('rules').innerHTML = decided.length ? `
+        <table><tr><th>Tool</th><th>Risk</th><th>Rule</th></tr>
+        ${decided.map(t => `<tr>
+            <td class="mono">${esc(t.service)} · ${esc(t.tool)}</td>
+            <td>${esc(RISK[t.risk] || t.risk)}</td>
+            <td>${ruleButtons(t)}</td></tr>`).join("")}
+        </table>` : `<div class="note">No risky tool has been decided yet.</div>`;
+}
+
+function renderLog(log) {
+    document.getElementById('log').innerHTML = log.length ? `
+        <table><tr><th>When</th><th>Call</th><th>Agent</th><th>Answer</th></tr>
+        ${log.slice(0, 50).map(c => `<tr>
+            <td class="when">${esc(ago(c.decided_at))}</td>
+            <td class="mono">${esc(c.service)} · ${esc(c.tool)}</td>
+            <td class="why">${esc(c.role || c.agent_id)}</td>
+            <td><span class="badge ${c.decision === "allow" ? "go" : "no"}">${esc(c.decision === "allow" ? "allowed once" : "denied")}</span>
+                ${c.reason ? `<div class="why">${esc(c.reason)}</div>` : ""}</td></tr>`).join("")}
+        </table>` : `<div class="empty">No call has been answered yet.</div>`;
+}
+
+async function post(url, body) {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    refresh();
+}
+
+function decideCall(requestId, decision) {
+    const reason = (document.getElementById('why-' + requestId) || {}).value || "";
+    delete draft[requestId];
+    post('/control/call', { request_id: requestId, decision, reason });
+}
+
+function decideTool(service, tool, decision) {
+    post('/control/tool', { service, tool, decision });
+}
+
+async function refresh() {
+    try {
+        const [p, t] = await Promise.all([
+            fetch('/control/pending').then(x => x.json()),
+            fetch('/control/tools').then(x => x.json())
+        ]);
+        renderCalls(p.calls || []);
+        renderHeld(p.tools || []);
+        renderRules(t.tools || []);
+        renderLog(t.log || []);
+    } catch (e) { /* Jarvis restarting; the next tick picks it up. */ }
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+  <script src="nav_ui.js"></script>
+  <script src="questions_ui.js"></script>
+  <script src="sections_ui.js"></script>
+</body>
+</html>

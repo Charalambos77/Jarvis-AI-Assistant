@@ -20,6 +20,7 @@ from agents.tool_executor import get_tools_for_execution_agent, run_tool
 from agents.user_brief import user_brief_block
 from agents.links import URL_RE, Evidence, strip_unevidenced_links, cap_for_invented_links
 from agents import tool_review, tool_requests, agent_questions
+import control_room
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -362,7 +363,11 @@ Output format:
                             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                         )
                 else:
-                    result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
+                    # Money and destructive calls wait in the Control room first, for as long as it takes.
+                    result = await control_room.check_call(fc.name, tool_args, agent_id=agent_id, role=role,
+                                                           kind="research", event_logger=event_logger)
+                    if result is None:
+                        result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
                     calls.append({"tool": fc.name, "args": tool_args})
                     tool_texts.append(json.dumps(result, default=str, ensure_ascii=False)[:50000])
                 if event_logger:

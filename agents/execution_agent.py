@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from agents.tool_executor import get_tools_for_execution_agent, run_tool
 from agents.user_brief import user_brief_block
 from agents import tool_review, tool_requests, agent_questions
+import control_room
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -207,7 +208,11 @@ RULES:
                             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                         )
                 else:
-                    result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
+                    # Money and destructive calls wait in the Control room first, for as long as it takes.
+                    result = await control_room.check_call(fc.name, tool_args, agent_id=agent_id, role=role,
+                                                           kind="execution", event_logger=event_logger)
+                    if result is None:
+                        result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
                 call_log.append({"tool": fc.name, "args": tool_args})
                 artifact = _extract_artifact(fc.name, tool_args, result)
                 if artifact:

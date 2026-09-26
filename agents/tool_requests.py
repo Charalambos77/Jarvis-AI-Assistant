@@ -115,7 +115,8 @@ def availability(tool: str, project_name: str, context: str, handlers: dict) -> 
                 "handlers": {d["name"]: new_handlers[d["name"]] for d in added if d["name"] in new_handlers}}
     if unavailable:
         detail = unavailable[0]
-        state = "needs_setup" if ("not yet configured" in detail or "did not start" in detail) else "no_connector"
+        state = "needs_setup" if ("not yet configured" in detail or "did not start" in detail
+                                  or "waiting for review" in detail) else "no_connector"
         return {"state": state, "detail": detail, "declarations": [], "handlers": {}}
     try:
         key = _resolve_tool_key(tool, allow_llm=False)

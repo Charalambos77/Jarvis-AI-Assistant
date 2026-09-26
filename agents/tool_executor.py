@@ -798,6 +798,11 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, co
                 handlers[fn_name] = spec["handler"]
                 seen.add(fn_name)
 
+    # Approved read-only tools from every switched-on MCP server, for every agent —
+    # the same way inspect_website reaches all of them. Tools that change things
+    # still need the agent's plan to ask for their server (below).
+    _bind_catalog_read_tools(declarations, handlers, seen)
+
     unavailable = []
     for raw_name in (tools_needed or []):
         raw_key = _normalize_tool_name(raw_name)
@@ -813,11 +818,16 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, co
 
         if key.startswith(MCP_KEY_PREFIX):
             server_name = key[len(MCP_KEY_PREFIX):]
-            if _bind_mcp_server(server_name, declarations, handlers, seen):
-                continue
-            unavailable.append(
-                f"{raw_name} (MCP server '{server_name}' is enabled but did not start — do not claim to have used it)"
-            )
+            bound = _bind_mcp_server(server_name, declarations, handlers, seen)
+            if bound is None:
+                unavailable.append(
+                    f"{raw_name} (MCP server '{server_name}' is enabled but did not start — do not claim to have used it)"
+                )
+            elif bound == 0 and not _catalog_has_enabled(server_name):
+                unavailable.append(
+                    f"{raw_name} (MCP server '{server_name}' is running, but none of its tools is approved yet — "
+                    "they are waiting for review on the Commands page or in the Control room; do not claim to have used it)"
+                )
             continue
 
         if key in REGISTRY_TOOLS:
@@ -901,36 +911,87 @@ def _mcp_server_names() -> dict:
         return {}
 
 
-def _bind_mcp_server(server_name: str, declarations: list, handlers: dict, seen: set) -> bool:
-    """Add every tool a running MCP server offers. False if it isn't running."""
+# At most this many approved read-only tools are handed to every agent. Past it
+# Gemini gets slow and vague about which tool to pick; the rest are still bound
+# for agents whose plan names their server.
+TOOL_BUDGET = int(os.getenv("JARVIS_TOOL_BUDGET", "40"))
+
+
+def _mcp_handler(server_name: str, tool_name: str):
+    def _handler(project_name: str, agent_id: str, **kwargs):
+        from connectors.mcp_client import call_mcp_tool
+        return call_mcp_tool(server_name, tool_name, kwargs)
+    return _handler
+
+
+def _catalog_declaration(server_name: str, tool_name: str, tool: dict) -> dict:
+    note = ""
+    if tool.get("risk") in ("destructive", "costs_money") and tool.get("rule") != "always_allow":
+        note = " Every call waits for the user's approval in the Control room first."
+    return {
+        "name": tool["fn_name"],
+        "description": f"[MCP:{server_name}] {tool.get('description') or tool_name}{note}",
+        "parameters": _sanitize_schema(tool.get("parameters")),
+    }
+
+
+def _catalog_has_enabled(server_name: str) -> bool:
+    from connectors import tool_catalog
+    return bool(tool_catalog.enabled_tools(server_name))
+
+
+def _bind_catalog_read_tools(declarations: list, handlers: dict, seen: set) -> int:
+    """Approved read-only tools of every enabled MCP server. Starts nothing:
+    the catalogue already has their declarations, and a call starts the server."""
     try:
-        from connectors.mcp_client import ensure_server_running, call_mcp_tool
+        from connectors import tool_catalog
+        from agents import tool_onboarding
+        tool_onboarding.sweep()
+        servers = _mcp_server_names()
+        bound = 0
+        for server_name, tool_name, tool in tool_catalog.enabled_tools():
+            if bound >= TOOL_BUDGET:
+                break
+            if server_name not in servers or tool.get("risk") != "read" or tool["fn_name"] in seen:
+                continue
+            declarations.append(_catalog_declaration(server_name, tool_name, tool))
+            handlers[tool["fn_name"]] = _mcp_handler(server_name, tool_name)
+            seen.add(tool["fn_name"])
+            bound += 1
+        return bound
+    except Exception as e:
+        print(f"[ToolResolver] Could not read the tool catalogue: {e}")
+        return 0
+
+
+def _bind_mcp_server(server_name: str, declarations: list, handlers: dict, seen: set) -> int | None:
+    """Add every approved tool a running MCP server offers.
+
+    Returns how many were added, or None if the server isn't running. A new or
+    changed tool list is recorded in the catalogue on the way, which opens its
+    review; only tools the catalogue has enabled are bound.
+    """
+    try:
+        from connectors.mcp_client import ensure_server_running
+        from agents import tool_onboarding
     except Exception as e:
         print(f"[ToolResolver] MCP client unavailable: {e}")
-        return False
+        return None
 
     info = ensure_server_running(server_name)
     if not info or info.get("status") != "up":
-        return False
+        return None
 
-    for tool in info.get("tools", []):
-        fn_name = _mcp_function_name(server_name, tool["name"])
-        if fn_name in seen:
+    entry = tool_onboarding.observe_mcp(server_name, info.get("tools", []))
+    bound = 0
+    for tool_name, tool in (entry.get("tools") or {}).items():
+        if tool.get("status") != "enabled" or tool["fn_name"] in seen:
             continue
-        declarations.append({
-            "name": fn_name,
-            "description": f"[MCP:{server_name}] {tool.get('description') or tool['name']}",
-            "parameters": _sanitize_schema(tool.get("input_schema")),
-        })
-
-        def _make_handler(srv=server_name, tname=tool["name"]):
-            def _handler(project_name: str, agent_id: str, **kwargs):
-                return call_mcp_tool(srv, tname, kwargs)
-            return _handler
-
-        handlers[fn_name] = _make_handler()
-        seen.add(fn_name)
-    return True
+        declarations.append(_catalog_declaration(server_name, tool_name, tool))
+        handlers[tool["fn_name"]] = _mcp_handler(server_name, tool_name)
+        seen.add(tool["fn_name"])
+        bound += 1
+    return bound
 
 
 def classify_requested_tools(names, context: str | None = None) -> dict:
@@ -976,6 +1037,12 @@ def describe_connectable(key: str) -> dict:
             info = ensure_server_running(server)
         except Exception as e:
             info = {"status": "down", "tools": [], "error": str(e)}
+        if info.get("status") == "up":
+            try:
+                from agents import tool_onboarding
+                tool_onboarding.observe_mcp(server, info.get("tools", []))
+            except Exception as e:
+                print(f"[ToolResolver] Could not record {server}'s tools: {e}")
         return {
             "kind": "mcp",
             "service": server,

@@ -36,7 +36,8 @@ import webview
 import db
 import sections as section_store
 import command_gate
-from agents import tool_review, tool_requests, agent_questions
+import control_room
+from agents import tool_review, tool_requests, agent_questions, tool_onboarding
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -1571,6 +1572,11 @@ coordinator.register_state_provider("start_pipeline", start_pipeline_local)
 tool_review.set_notifier(lambda text: push_message("system", text))
 tool_requests.set_notifier(lambda text: push_message("system", text))
 agent_questions.set_notifier(lambda text: push_message("system", text))
+tool_onboarding.set_notifier(lambda text: push_message("system", text))
+control_room.set_notifier(lambda text: push_message("system", text))
+# Reviews of newly connected tools approve themselves when their wait runs out,
+# even with no page open to notice.
+tool_onboarding.start_sweeper()
 coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
 coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
 coordinator.register_state_provider("get_pipelines", get_pipelines_local)
@@ -1835,6 +1841,11 @@ def provider_comparison_page():
 @app.route("/commands.html")
 def commands_page():
     return send_from_directory(BASE_DIR, "commands.html")
+
+
+@app.route("/control_room.html")
+def control_room_page():
+    return send_from_directory(BASE_DIR, "control_room.html")
 
 
 @app.route("/library.html")
@@ -2183,6 +2194,65 @@ def tool_requests_decide():
         return jsonify({"error": "request_id is required — without it the wrong request could be "
                                  "answered when more than one is waiting."}), 400
     result = tool_requests.decide(request_id, data.get("decision") or "", reason=data.get("reason") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/tool_onboarding/pending", methods=["GET"])
+def tool_onboarding_pending():
+    """Newly connected services whose tools wait for a review on the Commands page."""
+    return jsonify({"pending": tool_onboarding.pending(), "log": tool_onboarding.log(),
+                    "wait_seconds": tool_onboarding.WAIT_SECONDS})
+
+
+@app.route("/tool_onboarding/decide", methods=["POST"])
+def tool_onboarding_decide():
+    """Approve all, approve read-only, pick some, or reject one service's new tools."""
+    data = request.get_json(force=True) or {}
+    service = (data.get("service") or "").strip()
+    if not service:
+        return jsonify({"error": "service is required."}), 400
+    tools = data.get("tools") if isinstance(data.get("tools"), list) else None
+    result = tool_onboarding.decide(service, data.get("decision") or "", tools=tools,
+                                    reason=data.get("reason") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/control/pending", methods=["GET"])
+def control_pending():
+    """Everything waiting in the Control room: risky tools to decide, and held calls."""
+    return jsonify({"calls": control_room.pending_calls(), "tools": control_room.held_tools()})
+
+
+@app.route("/control/tools", methods=["GET"])
+def control_tools():
+    """Every tool that costs money or is destructive, with its rule, and the call log."""
+    return jsonify({"tools": control_room.risky_tools(), "log": control_room.call_log()})
+
+
+@app.route("/control/tool", methods=["POST"])
+def control_tool_decide():
+    """Set a risky tool to always ask, always allow, or block."""
+    data = request.get_json(force=True) or {}
+    result = control_room.decide_tool((data.get("service") or "").strip(), (data.get("tool") or "").strip(),
+                                      data.get("decision") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/control/call", methods=["POST"])
+def control_call_decide():
+    """Allow one held call once, or deny it."""
+    data = request.get_json(force=True) or {}
+    request_id = (data.get("request_id") or "").strip()
+    if not request_id:
+        return jsonify({"error": "request_id is required — without it the wrong call could be "
+                                 "answered when more than one is waiting."}), 400
+    result = control_room.decide_call(request_id, data.get("decision") or "", reason=data.get("reason") or "")
     if "error" in result:
         return jsonify(result), 400
     return jsonify(result)
@@ -4661,7 +4731,9 @@ def mcp_toggle_route():
 
     info = ensure_server_running(name)
     if info["status"] == "up":
-        push_message("system", f"MCP server '{name}' connected — {len(info['tools'])} tool(s) available.")
+        push_message("system", f"MCP server '{name}' connected — {len(info['tools'])} tool(s) found.")
+        # Records the tools and opens their review (Commands page) or holds them (Control room).
+        tool_onboarding.observe_mcp(name, info.get("tools", []))
     else:
         push_message("system", f"MCP server '{name}' could not start: {info.get('error')}")
     return jsonify({
