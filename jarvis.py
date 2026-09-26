@@ -880,6 +880,12 @@ def _intake_context_text(draft: dict) -> str:
                 "THE SECTION ALREADY HAS THESE AGENTS. Never ask the user who should do "
                 "the work \u2014 this is settled:\n" + crew_text
             )
+        plan_text = section_store.plan_seed_text(section, draft.get("part_id"), max_chars=2500)
+        if plan_text:
+            lines.append(
+                "THE SECTION'S PLAN IS SETTLED. Never ask the user what the parts are or "
+                "which part this is:\n" + plan_text
+            )
     lines.append(f"ORIGINAL REQUEST:\n{draft.get('task', '')}")
     details = (draft.get("details") or "").strip()
     lines.append(f"\nDETAILS THE USER WROTE:\n{details if details else '(none given)'}")
@@ -1156,6 +1162,11 @@ def _intake_brief_markdown(draft: dict, include_plan: bool = True) -> str:
         crew_text = section_store.crew_seed_text(section)
         if crew_text:
             out += ["---", "", crew_text, ""]
+        # The whole plan, and which part of it this pipeline is, so a pipeline
+        # run for one part neither redoes its neighbours nor drops its own asks.
+        plan_text = section_store.plan_seed_text(section, draft.get("part_id"))
+        if plan_text:
+            out += ["---", "", plan_text, ""]
 
     out += ["---", "", "## How to use this brief", _INTAKE_BRIEF_RULE, ""]
     return "\n".join(out)
@@ -1183,7 +1194,7 @@ def _intake_discard(draft: dict):
 
 
 def create_intake_draft(task: str, section_id: str | None = None,
-                        user_words: str | None = None) -> dict:
+                        user_words: str | None = None, part_id: str | None = None) -> dict:
     """Start a draft. No pipeline, no DB row, nothing persistent yet.
 
     `task` is what the caller asked for — from chat or voice that is the model's
@@ -1199,6 +1210,8 @@ def create_intake_draft(task: str, section_id: str | None = None,
         # A pipeline started inside a section belongs to it: its folder, its
         # knowledge, its tasks. None means the pipeline stands on its own.
         "section_id": section_id,
+        # Which part of the section's plan this pipeline is for, if any.
+        "part_id": part_id if section_id else None,
         "project_name": None,          # derived lazily by _draft_project_name()
         "details": "",
         "files": [],
@@ -1359,6 +1372,7 @@ def start_pipeline_local(settings_dict):
         return {"error": "task is required"}
 
     section_id = (settings_dict.get("section_id") or "").strip() or None
+    part_id = (settings_dict.get("part_id") or "").strip() or None
 
     if settings_dict.get("skip_intake"):
         # Even without the gate, work started inside a section belongs to it.
@@ -1367,11 +1381,11 @@ def start_pipeline_local(settings_dict):
             task, project_name=section["folder"] if section else None
         )
         if section:
-            attach_pipeline_to_section(section, plan_id)
+            attach_pipeline_to_section(section, plan_id, part_id)
         return {"status": "pipeline_started", "task": task, "plan_id": plan_id}
 
     draft = create_intake_draft(task, section_id=section_id,
-                                user_words=settings_dict.get("user_words"))
+                                user_words=settings_dict.get("user_words"), part_id=part_id)
     with STATE_LOCK:
         UI_ACTION = {
             "type": "pipeline_intake_ask",
@@ -3350,11 +3364,13 @@ def intake_start_route():
     task = (data.get("task") or "").strip()
     if not task:
         return jsonify({"error": "task is required"}), 400
-    draft = create_intake_draft(task, section_id=(data.get("section_id") or "").strip() or None)
+    draft = create_intake_draft(task, section_id=(data.get("section_id") or "").strip() or None,
+                                part_id=(data.get("part_id") or "").strip() or None)
     return jsonify({
         "draft_id": draft["draft_id"],
         "task": draft["task"],
         "section_id": draft.get("section_id"),
+        "part_id": draft.get("part_id"),
         # Deliberately not resolved here: naming the project costs a model call
         # and the UI does not need it until files are attached.
         "project_name": draft.get("project_name"),
@@ -3580,7 +3596,7 @@ def intake_approve_route():
 
     section = _section_for_draft(draft)
     if section:
-        attach_pipeline_to_section(section, plan_id)
+        attach_pipeline_to_section(section, plan_id, draft.get("part_id"))
 
     with INTAKE_DRAFTS_LOCK:
         draft["approved"] = True
@@ -3679,8 +3695,11 @@ def refresh_section_knowledge(section: dict):
         print(f"[Sections] Could not refresh knowledge for {section.get('id')}: {e}")
 
 
-def attach_pipeline_to_section(section: dict, plan_id: str):
-    """File a newly started pipeline under the section it was started inside."""
+def attach_pipeline_to_section(section: dict, plan_id: str, part_id: str | None = None):
+    """File a newly started pipeline under the section it was started inside.
+
+    `part_id` is the part of the section plan it was started for, if any.
+    """
     conn = db.get_connection(DB_PATH)
     try:
         db.add_pipeline_to_section(conn, section["id"], plan_id)
@@ -3689,6 +3708,12 @@ def attach_pipeline_to_section(section: dict, plan_id: str):
         return
     finally:
         conn.close()
+    if part_id:
+        try:
+            section_store.set_part_pipeline(section["folder"], part_id, plan_id,
+                                            section.get("name", ""))
+        except Exception as e:
+            print(f"[Sections] Could not mark part {part_id} as started: {e}")
     # Refreshing here keeps Section.md listing every pipeline, but the knowledge
     # itself cannot change until the new pipeline has actually produced anything.
     try:
@@ -4040,6 +4065,592 @@ def _section_draft_crew(draft: dict) -> dict:
     return {"crew": crew}
 
 
+# ---------------------------------------------------------------------------
+# Planning a whole section
+#
+# A section is where one pipeline becomes an entire operation, so before it is
+# created Jarvis works out the whole of it:
+#   1. understand it — the goal, what kind of undertaking it is, and EVERY ask
+#      the owner made, each one tied to the words it came from;
+#   2. research it — everything a project of this kind needs to work end to
+#      end, including the parts the owner never mentioned;
+#   3. plan it — every part, in order, each with as many agents as it needs,
+#      and where the founding pipeline fits: the beginning, or one part;
+#   4. audit it — re-read the owner's words for anything the asks missed and
+#      give every uncovered ask an agent; whatever still has nobody gets a part
+#      of its own, so nothing the owner asked for is ever dropped.
+#
+# It runs in the background because deep research takes minutes; the create
+# window and the dashboard poll its progress.
+# ---------------------------------------------------------------------------
+
+SECTION_PLAN_JOBS: dict[str, dict] = {}
+SECTION_PLAN_JOBS_LOCK = threading.Lock()
+SECTION_PLAN_SYNC = False           # tests run the job inline
+SECTION_PLAN_ON_CREATE = True       # a section created without the gate is planned right after
+SECTION_RESEARCH_MAX_QUESTIONS = 14
+SECTION_AUDIT_ROUNDS = 2
+
+
+def _section_web_search(folder: str, query: str) -> dict:
+    """One grounded web search, with its sources. Swappable in tests."""
+    from agents.tool_executor import web_search_impl
+    return web_search_impl(folder, "section_planner", query)
+
+
+def _section_plan_inputs_from_draft(draft: dict) -> dict:
+    conn = db.get_connection(DB_PATH)
+    try:
+        founding = next((p for p in db.get_pipelines(conn) if p["id"] == draft["plan_id"]), None)
+    finally:
+        conn.close()
+    return {
+        "folder": draft["folder"],
+        "name": draft.get("name") or draft["folder"],
+        "task": draft.get("task", ""),
+        "brief_text": (draft.get("brief_text") or "").strip(),
+        "typed": (draft.get("brief") or "").strip(),
+        "qa": list(draft.get("qa") or []),
+        "file_names": [f["name"] for f in draft.get("files", [])],
+        "file_parts": _intake_file_parts(draft),
+        "founding_plan_id": draft["plan_id"],
+        "founding_status": (founding or {}).get("status", ""),
+    }
+
+
+def _section_plan_inputs_from_section(section: dict) -> dict:
+    conn = db.get_connection(DB_PATH)
+    try:
+        founding = next((p for p in db.get_pipelines(conn)
+                         if p["id"] == section.get("founding_plan_id")), None)
+    finally:
+        conn.close()
+    brief = (section.get("brief") or "").strip()
+    return {
+        "folder": section["folder"],
+        "name": section.get("name") or section["folder"],
+        "task": (founding or {}).get("task_summary") or (founding or {}).get("task") or "",
+        "brief_text": brief,
+        "typed": brief,
+        "qa": [],
+        "file_names": [],
+        "file_parts": [],
+        "founding_plan_id": section.get("founding_plan_id") or "",
+        "founding_status": (founding or {}).get("status", ""),
+    }
+
+
+def _section_owner_words(inputs: dict) -> str:
+    out = []
+    if inputs.get("typed"):
+        out.append("What they typed:\n" + inputs["typed"])
+    for item in inputs.get("qa") or []:
+        if (item.get("answer") or "").strip():
+            out.append(f"Asked: {item['question']}\nThey answered: {item['answer']}")
+    if inputs.get("file_names"):
+        out.append("Files they dropped (readable ones are attached): " + ", ".join(inputs["file_names"]))
+    return "\n\n".join(out) or "(nothing written)"
+
+
+def _section_plan_context(inputs: dict, *extra: str) -> str:
+    folder = inputs["folder"]
+    lines = [
+        f"THE SECTION: {inputs['name']}",
+        "",
+        "THE FOUNDING PIPELINE — the finished work this section grows from:",
+        inputs.get("task") or "(unknown)",
+        "",
+        "WHAT THE SECTION IS FOR (the brief settled with the owner):",
+        inputs.get("brief_text") or "(not written)",
+        "",
+        "THE OWNER'S OWN WORDS — the source of every ask:",
+        _section_owner_words(inputs),
+        "",
+        "WHAT THE FOUNDING PIPELINE ALREADY FOUND:",
+        section_store.pipeline_material(folder, max_chars=4000) or "(nothing on disk)",
+        "",
+        "THE AGENTS THAT ACTUALLY RAN, with their real agent_ids:",
+        section_store.crew_material(folder, max_chars=5000) or "(no agent plan survives on disk)",
+    ]
+    for block in extra:
+        if block:
+            lines += ["", block]
+    return "\n".join(lines)
+
+
+def _section_asks_text(asks: list[dict]) -> str:
+    return "\n".join(f"- {a['id']}: {a['text']}" for a in asks) or "(none)"
+
+
+def _section_research_text(research: list[dict], per_item: int = 1500) -> str:
+    out = []
+    for r in research:
+        out.append(f"### {r['question']}\n{(r.get('summary') or '(nothing found)')[:per_item]}")
+    return "\n\n".join(out)
+
+
+def _section_outline_text(parts: list[dict], crew: dict) -> str:
+    agents_by_part = {d["id"]: d.get("agents", []) for d in crew.get("departments", [])}
+    out = []
+    for p in parts:
+        out.append(f"- Part \"{p['title']}\" ({p['status']}): {p.get('goal', '')}")
+        for a in agents_by_part.get(p["id"], []):
+            out.append(f"    - {a['role']} covers {', '.join(a.get('covers') or []) or 'nothing'}")
+    return "\n".join(out) or "(no parts)"
+
+
+def _plan_job_step(job: dict, label: str, state: str = "running", detail: str = ""):
+    """Add or update one line of the progress the create window shows."""
+    with SECTION_PLAN_JOBS_LOCK:
+        for step in job["steps"]:
+            if step["label"] == label:
+                step["state"] = state
+                if detail:
+                    step["detail"] = detail
+                return
+        job["steps"].append({"label": label, "state": state, "detail": detail})
+
+
+_SECTION_PLAN_RULES = (
+    "- A part is one workstream or stage of the whole section (a 'baby section'). Plan EVERY "
+    "part this undertaking needs to actually work end to end, as the research shows — not only "
+    "the parts the founding pipeline covered, and not only the ones the owner named.\n"
+    "- There is no limit on parts or agents: give each part as many agents as its work needs, "
+    "the way a pipeline does. But every part and every agent must be justified by an ask or by "
+    "the research. Nothing decorative.\n"
+    "- STRICT SINGLE-PURPOSE ROLES. One agent, one job. Never bundle two jobs into one role.\n"
+    "- Role names are unique across the whole section.\n"
+    "- Every agent needs a brief saying what it OWNS in this section for good.\n"
+    "- Every ask must be covered by at least one agent: put the ask ids in that agent's "
+    "\"covers\" and in its part's \"covers\". An ask with nobody covering it is a failure.\n"
+    "- Place the founding pipeline. The part (or parts) it already did get status \"done\", and "
+    "keep its agents with their exact role names, listing their real agent_ids in "
+    "from_agent_ids. Never invent an agent_id; leave it empty for new agents.\n"
+    "- If the founding pipeline is the BEGINNING, its part is order 1. If it is one PART of a "
+    "larger whole, put it where it belongs and plan the parts that come before it as well as "
+    "after it.\n"
+    "- \"order\" is the order parts should run; \"depends_on\" lists titles of parts that must "
+    "finish first; \"deliverables\" are the concrete outputs of the part.\n"
+    "- \"services\": the APIs or MCP servers the work will need, each with why. Jarvis "
+    "researches how each one works before any agent uses it.\n"
+)
+
+
+SECTION_DEEP_DIVE_MAX = 8
+
+
+def _section_requirements(inputs: dict, understanding: dict, asks: list[dict],
+                          research: list[dict], files: list) -> dict:
+    """What doing this fully and correctly requires, beyond what the owner said."""
+    try:
+        data = _ask_model_json(
+            "You are Jarvis. SECTION REQUIREMENTS. The owner said what they want; the research "
+            "below says what it actually takes. List every REQUIREMENT this section must meet to "
+            "be done FULLY and CORRECTLY that the owner's asks do not already cover: stages, "
+            "legal and regulatory steps, technical pieces, money, people, quality checks, risks "
+            "to handle. One requirement per item, concrete, each with \"why\" (what in the "
+            "research shows it is needed). Never repeat an ask or a requirement already listed. "
+            "Never invent a need the research and the goal do not support.\n"
+            "Also give \"deep_dive_questions\": up to " + str(SECTION_DEEP_DIVE_MAX) + " "
+            "follow-up web searches for the requirements the research only touched on, so they "
+            "can be planned correctly. Empty when the research is already deep enough.\n\n"
+            "Reply with JSON only: {\"requirements\": [{\"text\": \"...\", \"why\": \"...\"}], "
+            "\"deep_dive_questions\": [\"...\"]}",
+            _section_plan_context(
+                inputs,
+                "GOAL: " + str(understanding.get("goal") or "(unknown)"),
+                "ALREADY LISTED:\n" + _section_asks_text(asks),
+                "THE RESEARCH:\n" + _section_research_text(research),
+            ), files) or {}
+    except Exception as e:
+        print(f"[Sections] Working out the requirements failed: {e}")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _section_question_list(raw, limit: int) -> list[str]:
+    """Search questions from a model reply: strings, or objects with a question."""
+    out = []
+    for q in raw if isinstance(raw, list) else []:
+        if isinstance(q, dict):
+            q = q.get("question") or q.get("query") or ""
+        q = str(q or "").strip()
+        if q and q not in out:
+            out.append(q)
+    return out[:limit]
+
+
+def _section_add_needs(asks: list[dict], raw) -> int:
+    """Add research requirements to the list every part must cover. Returns how many."""
+    known = {section_store._norm(a["text"]) for a in asks}
+    added = 0
+    for item in section_store.normalise_asks(raw):
+        if section_store._norm(item["text"]) in known:
+            continue
+        n = sum(1 for a in asks if a.get("origin") == "research") + 1
+        item["id"] = f"need_{n}"
+        while any(a["id"] == item["id"] for a in asks):
+            item["id"] += "b"
+        item["origin"] = "research"
+        asks.append(item)
+        known.add(section_store._norm(item["text"]))
+        added += 1
+    return added
+
+
+def _run_section_plan(inputs: dict, job: dict) -> dict:
+    """Understand, research, plan and audit a whole section. Never raises."""
+    folder = inputs["folder"]
+    files = inputs.get("file_parts") or []
+    degraded = []
+
+    # ---- 1. understand it, and list every ask ----
+    step = "Understanding the section and listing every ask"
+    _plan_job_step(job, step)
+    understanding = {}
+    try:
+        understanding = _ask_model_json(
+            "You are Jarvis. SECTION UNDERSTANDING. The owner is turning finished work into a "
+            "SECTION: a whole project (a company, a product, a research article, a campaign...) "
+            "that will take many pipelines and many agents. Before anything is planned, "
+            "understand it deeply.\n\n"
+            "Return:\n"
+            "- \"goal\": the end result of the whole section, one or two sentences.\n"
+            "- \"kind\": what kind of undertaking this is, in a few words.\n"
+            "- \"asks\": EVERY distinct thing the owner asked for, required or constrained, from "
+            "their words, the brief and the files. One ask per item, never two merged into one. "
+            "Constraints (budget, deadline, place, audience, tone, counts) are asks too. Each "
+            "with \"quote\": the owner's words it comes from. Add nothing they did not ask.\n"
+            "- \"research_questions\": between 6 and " + str(SECTION_RESEARCH_MAX_QUESTIONS) + " "
+            "web-search-sized questions that, answered, tell you what it takes to create this "
+            "FULLY and CORRECTLY: every stage, workstream, legal or technical requirement, cost "
+            "and risk a project of this kind has. Aim them above all at what the owner did NOT "
+            "mention — that is where a plan goes wrong. Do not re-research what the founding "
+            "pipeline already found.\n"
+            "- \"position\": {\"kind\": \"beginning\" or \"part\", \"why\": one sentence} — is "
+            "the founding pipeline the first step of this section, or one part of a larger whole?\n\n"
+            "Reply with JSON only: {\"goal\": \"...\", \"kind\": \"...\", \"asks\": [{\"text\": "
+            "\"...\", \"quote\": \"...\"}], \"research_questions\": [\"...\"], \"position\": "
+            "{\"kind\": \"beginning\", \"why\": \"...\"}}",
+            _section_plan_context(inputs), files) or {}
+    except Exception as e:
+        print(f"[Sections] Understanding the section failed: {e}")
+        understanding = {}
+    if not isinstance(understanding, dict):
+        understanding = {}
+
+    asks = section_store.normalise_asks(understanding.get("asks"))
+    if not asks:
+        asks = section_store.asks_from_words(
+            [inputs.get("typed", "")] + [q.get("answer", "") for q in inputs.get("qa") or []]
+            + [inputs.get("brief_text", "")])
+        degraded.append("Jarvis could not list the asks himself, so every sentence you wrote "
+                        "is treated as one.")
+    _plan_job_step(job, step, "done", f"{len(asks)} asks")
+
+    # ---- 2. research everything the section needs ----
+    questions = _section_question_list(understanding.get("research_questions"),
+                                       SECTION_RESEARCH_MAX_QUESTIONS)
+    research = []
+
+    def _one(question, prefix="Researching what it takes"):
+        label = f"{prefix}: {question}"
+        _plan_job_step(job, label)
+        try:
+            found = _section_web_search(folder, question) or {}
+        except Exception as e:
+            found = {"status": "error", "error": str(e)}
+        ok = found.get("status") == "ok" and (found.get("summary") or "").strip()
+        _plan_job_step(job, label, "done" if ok else "failed",
+                       f"{len(found.get('sources') or [])} sources" if ok else "no answer")
+        return {"question": question, "summary": (found.get("summary") or "").strip() if ok else "",
+                "sources": [{"title": s.get("title", ""), "url": s.get("url", "")}
+                            for s in (found.get("sources") or []) if isinstance(s, dict)][:8]}
+
+    if questions:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            research = list(pool.map(_one, questions))
+        if not any(r["summary"] for r in research):
+            degraded.append("The web research returned nothing, so the plan rests on what "
+                            "Jarvis already knows about projects like this.")
+    else:
+        degraded.append("Jarvis could not work out what to research, so the plan was made "
+                        "without new research.")
+
+    # ---- 2b. what it needs that the owner never said, then a deeper dive ----
+    # The owner names what they want; the research says what it takes. Every
+    # requirement found here is covered by a part exactly like an ask, so the
+    # section is built fully and correctly, not just as asked.
+    if research and any(r["summary"] for r in research):
+        step = "Working out everything it needs that you did not mention"
+        _plan_job_step(job, step)
+        needs = _section_requirements(inputs, understanding, asks, research, files)
+        added = _section_add_needs(asks, needs.get("requirements"))
+        _plan_job_step(job, step, "done", f"{added} requirements")
+
+        dive = [q for q in _section_question_list(needs.get("deep_dive_questions"), 50)
+                if q not in questions][:SECTION_DEEP_DIVE_MAX]
+        if dive:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                deeper = list(pool.map(lambda q: _one(q, "Deep dive"), dive))
+            research += deeper
+            if any(r["summary"] for r in deeper):
+                step = "Checking the deep dive for anything else it needs"
+                _plan_job_step(job, step)
+                more = _section_requirements(inputs, understanding, asks, research, files)
+                added = _section_add_needs(asks, more.get("requirements"))
+                _plan_job_step(job, step, "done", f"{added} more")
+
+    # ---- 3. plan every part and its agents ----
+    step = "Planning every part and the agents each one needs"
+    _plan_job_step(job, step)
+    services_note = ""
+    try:
+        services_note = tool_onboarding.connected_services_note()
+    except Exception:
+        services_note = ""
+    position_guess = understanding.get("position") or {}
+    plan_data = None
+    try:
+        plan_data = _ask_model_json(
+            "You are the Brain of the Jarvis multi-agent system. SECTION PLAN. Plan the WHOLE "
+            "section below: every part it needs, in order, and the agents each part needs.\n\n"
+            "RULES:\n" + _SECTION_PLAN_RULES + "\n"
+            "Reply with JSON only:\n"
+            "{\"position\": {\"kind\": \"beginning\" or \"part\", \"founding_part\": \"title of "
+            "the part the founding pipeline did\", \"why\": \"one sentence\"}, "
+            "\"parts\": [{\"title\": \"...\", \"goal\": \"...\", \"order\": 1, \"status\": "
+            "\"done\" or \"todo\", \"depends_on\": [\"title\"], \"deliverables\": [\"...\"], "
+            "\"covers\": [\"ask_1\"], \"agents\": [{\"role\": \"...\", \"brief\": \"...\", "
+            "\"is_lead\": true, \"tools_needed\": [\"...\"], \"covers\": [\"ask_1\"], "
+            "\"from_agent_ids\": [], \"why\": \"one line: which asks or research it exists "
+            "for\"}]}], \"services\": [{\"name\": \"...\", \"why\": \"...\"}]}",
+            _section_plan_context(
+                inputs,
+                "UNDERSTANDING:\nGoal: " + str(understanding.get("goal") or "(unknown)") +
+                "\nKind: " + str(understanding.get("kind") or "(unknown)") +
+                "\nFirst read of where the founding pipeline fits: " + json.dumps(position_guess),
+                "EVERY ASK (ask_*) AND EVERY REQUIREMENT THE RESEARCH FOUND (need_*) — each must "
+                "be covered by at least one agent. The requirements are what makes the section "
+                "complete and correct; plan parts for them exactly as for the owner's asks:\n"
+                + _section_asks_text(asks),
+                ("WHAT THE RESEARCH FOUND about everything this section needs:\n" +
+                 _section_research_text(research)) if research else "",
+                ("CONNECTED SERVICES:\n" + services_note) if services_note else "",
+            ), files)
+    except Exception as e:
+        print(f"[Sections] Planning the section failed: {e}")
+        plan_data = None
+
+    parts, crew_raw = section_store.split_plan(plan_data or {}, asks)
+    if not parts:
+        # The floor: the founding pipeline's own cycles, done, and every ask
+        # given a part of its own below. A dead model costs the judgement,
+        # never an ask.
+        mech = section_store.crew_from_agent_plans(folder)
+        crew_raw = mech
+        parts = [{"id": d["id"], "title": d["domain"], "goal": d.get("goal", ""), "order": n,
+                  "status": "done", "depends_on": [], "deliverables": [], "covers": [],
+                  "plan_ids": [inputs.get("founding_plan_id")] if inputs.get("founding_plan_id") else []}
+                 for n, d in enumerate(mech.get("departments", []), 1)]
+        degraded.append("Jarvis could not plan the parts, so this is the founding pipeline's own "
+                        "work plus one part for each ask. Re-plan when the model is back.")
+    _plan_job_step(job, step, "done", f"{len(parts)} parts")
+
+    crew = section_store.normalise_crew(crew_raw)
+    kept = {d["id"] for d in crew["departments"]}
+    parts = [p for p in parts if p["id"] in kept]
+
+    # ---- 4. audit: nothing the owner asked for is left out ----
+    step = "Checking every ask is covered by an agent"
+    _plan_job_step(job, step)
+    for round_no in range(SECTION_AUDIT_ROUNDS):
+        plan_now = {"asks": asks, "parts": parts}
+        uncovered = section_store.plan_coverage(plan_now, crew)["uncovered"]
+        # The first round always runs: it is also where missed asks are found.
+        if round_no > 0 and not uncovered:
+            break
+        if not plan_data:
+            break
+        try:
+            audit = _ask_model_json(
+                "You are Jarvis. SECTION AUDIT. Check this plan against the owner's own words, "
+                "because nothing they asked for may be forgotten.\n"
+                "1. \"missed_asks\": anything the owner asked for, required or constrained that "
+                "the ASKS list below does not have. Each with \"quote\". Empty if none.\n"
+                "2. \"parts\": the agents that cover every UNCOVERED ask or requirement, and "
+                "every missed ask. "
+                "To add agents to an existing part, repeat its exact title with only the new "
+                "agents; to add a new part, give it in full. In \"covers\" use ask ids, or the "
+                "exact text of a missed ask. Same rules as the plan:\n" + _SECTION_PLAN_RULES +
+                "\nReply with JSON only: {\"missed_asks\": [{\"text\": \"...\", \"quote\": "
+                "\"...\"}], \"parts\": [{\"title\": \"...\", \"goal\": \"...\", \"order\": 9, "
+                "\"depends_on\": [], \"deliverables\": [], \"covers\": [], \"agents\": [{\"role\": "
+                "\"...\", \"brief\": \"...\", \"is_lead\": false, \"covers\": [\"...\"], "
+                "\"why\": \"...\"}]}]}",
+                _section_plan_context(
+                    inputs,
+                    "ASKS:\n" + _section_asks_text(asks),
+                    "THE PLAN SO FAR:\n" + _section_outline_text(parts, crew),
+                    "UNCOVERED ASKS:\n" + (_section_asks_text(
+                        [a for a in asks if a["id"] in uncovered]) if uncovered else "(none)"),
+                ), files) or {}
+        except Exception as e:
+            print(f"[Sections] Auditing the plan failed: {e}")
+            break
+        if not isinstance(audit, dict):
+            break
+        missed = section_store.normalise_asks(audit.get("missed_asks"))
+        known = {section_store._norm(a["text"]) for a in asks}
+        for m in missed:
+            if section_store._norm(m["text"]) not in known:
+                m["id"] = f"ask_{len(asks) + 1}"
+                while any(a["id"] == m["id"] for a in asks):
+                    m["id"] += "b"
+                asks.append(m)
+        extra_parts, extra_crew = section_store.split_plan(audit, asks)
+        by_id = {d["id"]: d for d in crew["departments"]}
+        next_order = max([p["order"] for p in parts] + [0])
+        for part, dept in zip(extra_parts, extra_crew["departments"]):
+            if part["id"] in by_id:
+                by_id[part["id"]]["agents"].extend(dept["agents"])
+                existing = next(p for p in parts if p["id"] == part["id"])
+                existing["covers"] = list(dict.fromkeys(existing["covers"] + part["covers"]))
+            else:
+                next_order += 1
+                part["order"] = max(part.get("order") or 0, next_order)
+                parts.append(part)
+                crew["departments"].append(dept)
+        crew = section_store.normalise_crew(crew)
+        kept = {d["id"] for d in crew["departments"]}
+        parts = [p for p in parts if p["id"] in kept]
+
+    plan = {"understanding": {"goal": understanding.get("goal") or "",
+                              "kind": understanding.get("kind") or ""},
+            "asks": asks, "research": research, "parts": parts,
+            "services": (plan_data or {}).get("services") if isinstance(plan_data, dict) else []}
+    plan, crew, gaps = section_store.close_coverage_gaps(plan, crew)
+    crew = section_store.normalise_crew(crew)
+    crew = section_store.verify_crew_provenance(folder, crew)
+    _plan_job_step(job, step, "done",
+                   f"{len(gaps)} asks given a part of their own" if gaps else "all covered")
+
+    # ---- 5. where the founding pipeline fits ----
+    pos = (plan_data or {}).get("position") if isinstance(plan_data, dict) else None
+    pos = pos if isinstance(pos, dict) else (position_guess if isinstance(position_guess, dict) else {})
+    founding_part = str(pos.get("founding_part") or "").strip()
+    part_id = section_store.part_id_for(founding_part) if founding_part else ""
+    founding_id = inputs.get("founding_plan_id")
+    for part in plan["parts"]:
+        if part["status"] == "done" or part["id"] == part_id:
+            part["status"] = "done"
+            if founding_id and founding_id not in part["plan_ids"]:
+                part["plan_ids"].append(founding_id)
+    plan["position"] = {"kind": pos.get("kind"), "part_id": part_id, "why": pos.get("why") or ""}
+    plan = section_store.normalise_plan(plan, crew)
+
+    return {"plan": plan, "crew": crew,
+            "coverage": section_store.plan_coverage(plan, crew),
+            "gaps_closed": gaps,
+            "degraded": " ".join(degraded) or None}
+
+
+def _start_section_plan_job(key: str, inputs: dict, on_done=None) -> dict:
+    """Run the planning in the background, or return the run already going."""
+    import time as _time
+    with SECTION_PLAN_JOBS_LOCK:
+        job = SECTION_PLAN_JOBS.get(key)
+        if job and job["state"] == "running":
+            return job
+        job = {"key": key, "state": "running", "steps": [], "result": None,
+               "error": None, "started": _time.time()}
+        SECTION_PLAN_JOBS[key] = job
+
+    def work():
+        try:
+            result = _run_section_plan(inputs, job)
+            if on_done:
+                result = on_done(result) or result
+            with SECTION_PLAN_JOBS_LOCK:
+                job["result"] = result
+                job["state"] = "done"
+        except Exception as e:
+            print(f"[Sections] Planning run failed: {e}")
+            with SECTION_PLAN_JOBS_LOCK:
+                job["error"] = str(e)
+                job["state"] = "failed"
+
+    if SECTION_PLAN_SYNC:
+        work()
+    else:
+        threading.Thread(target=work, daemon=True).start()
+    return job
+
+
+def _section_plan_job_view(job: dict | None) -> dict:
+    if not job:
+        return {"state": "none", "steps": []}
+    with SECTION_PLAN_JOBS_LOCK:
+        view = {"state": job["state"], "steps": [dict(s) for s in job["steps"]],
+                "error": job.get("error")}
+        if job["state"] == "done" and job.get("result"):
+            view.update(job["result"])
+    return view
+
+
+def _apply_plan_to_section(section: dict, result: dict) -> dict:
+    """Stand a finished plan up in an existing section, keeping its hand edits.
+
+    The crew grows the way it always does — additively, with anything retired
+    staying out — and the plan's parts are re-keyed to the departments they
+    landed in.
+    """
+    folder = section["folder"]
+    standing = section_store.read_crew(folder)
+    crew = section_store.merge_crew(standing, result["crew"]) if standing.get("departments") \
+        else result["crew"]
+    by_domain = {section_store._norm(d["domain"]): d["id"] for d in crew["departments"]}
+    plan = dict(result["plan"])
+    # Progress already made survives a re-plan: a part that ran keeps its
+    # pipelines, and the pipelines say whether it is done.
+    before = {p["id"]: p for p in section_store.read_plan(folder).get("parts", [])}
+    for part in plan.get("parts", []):
+        part["id"] = by_domain.get(section_store._norm(part["title"]), part["id"])
+        old = before.get(part["id"])
+        if old:
+            part["plan_ids"] = list(dict.fromkeys(part.get("plan_ids", []) + old.get("plan_ids", [])))
+            if old.get("status") in ("done", "in_progress") and part.get("status") != "done":
+                part["status"] = old["status"]
+    plan = section_store.sync_part_statuses(plan, _section_pipelines(section["id"]))
+    # A requirement the owner chose not to add stays out after a re-plan.
+    was_skipped = {section_store._norm(a["text"]) for a in section_store.read_plan(folder).get("asks", [])
+                   if a.get("skipped")}
+    if was_skipped:
+        plan["asks"] = [dict(a) for a in plan.get("asks", [])]
+        plan, crew = section_store.choose_needs(
+            plan, crew, [a["id"] for a in plan["asks"] if a.get("origin") == "research"
+                         and section_store._norm(a["text"]) in was_skipped])
+    # Standing departments the plan did not mention are the founding work.
+    planned = {p["id"] for p in plan.get("parts", [])}
+    for d in crew["departments"]:
+        if d["id"] not in planned and d.get("origin") in ("founding", "merged"):
+            plan["parts"].insert(0, {"id": d["id"], "title": d["domain"], "goal": d.get("goal", ""),
+                                     "order": 0, "status": "done", "depends_on": [],
+                                     "deliverables": [], "covers": [],
+                                     "plan_ids": [section.get("founding_plan_id") or ""]})
+    plan, crew, gaps = section_store.close_coverage_gaps(plan, crew)
+    crew = section_store.normalise_crew(crew)
+    section_store.write_crew(folder, crew, section.get("name", ""))
+    section_store.write_plan(folder, plan, section.get("name", ""), crew)
+    coordinator.clear_section_chat(section["id"])
+    plan = section_store.read_plan(folder)
+    return dict(result, plan=plan, crew=crew,
+                coverage=section_store.plan_coverage(plan, crew),
+                gaps_closed=list(result.get("gaps_closed") or []) + gaps)
+
+
 def _section_draft_record(draft: dict, final_brief: str) -> str | None:
     """Write the full clarification record into the section's Brief/ folder.
 
@@ -4176,9 +4787,27 @@ def sections_create_route():
     except Exception as e:
         print(f"[Sections] Could not write the crew: {e}")
 
+    # The whole-section plan the user just reviewed. Without one (the skip
+    # path, or a plan never run) Jarvis researches and plans the section now,
+    # in the background, and the dashboard shows it arrive.
+    plan = (draft or {}).get("plan")
+    planning = False
+    if plan and plan.get("parts"):
+        try:
+            section_store.write_plan(folder, plan, name, crew)
+        except Exception as e:
+            print(f"[Sections] Could not write the section plan: {e}")
+    elif SECTION_PLAN_ON_CREATE:
+        planning = True
+
     # The founding pipeline's memory becomes the section's first knowledge.
     refresh_section_knowledge(section)
+    if planning:
+        _start_section_plan_job(
+            "section:" + section_id, _section_plan_inputs_from_section(section),
+            lambda result: _apply_plan_to_section(section, result))
     return jsonify({"status": "created", "section": _section_card(section),
+                    "planning": planning,
                     "brief_path": record_path,
                     "crew": section_store.crew_counts(crew)})
 
@@ -4368,6 +4997,43 @@ def section_intake_crew_route():
                     "counts": section_store.crew_counts(result["crew"])})
 
 
+@app.route("/sections/intake/plan", methods=["POST"])
+def section_intake_plan_route():
+    """Research and plan the whole section, after the brief is settled.
+
+    Runs in the background because it researches; poll the status route. It
+    writes nothing: the plan and its crew live on the draft until Create section.
+    """
+    data = request.get_json(force=True) or {}
+    draft = _get_section_draft(data.get("draft_id", ""))
+    if not draft:
+        return jsonify({"error": "draft not found"}), 404
+    with SECTION_DRAFTS_LOCK:
+        if (data.get("brief_text") or "").strip():
+            draft["brief_text"] = data["brief_text"].strip()
+        draft["stage"] = "plan"
+
+    def on_done(result):
+        with SECTION_DRAFTS_LOCK:
+            draft["crew"] = result["crew"]
+            draft["plan"] = result["plan"]
+        return result
+
+    job = _start_section_plan_job("draft:" + draft["draft_id"],
+                                  _section_plan_inputs_from_draft(draft), on_done)
+    return jsonify(_section_plan_job_view(job))
+
+
+@app.route("/sections/intake/plan/status", methods=["GET"])
+def section_intake_plan_status_route():
+    draft_id = (request.args.get("draft_id") or "").strip()
+    if not _get_section_draft(draft_id):
+        return jsonify({"error": "draft not found"}), 404
+    with SECTION_PLAN_JOBS_LOCK:
+        job = SECTION_PLAN_JOBS.get("draft:" + draft_id)
+    return jsonify(_section_plan_job_view(job))
+
+
 @app.route("/sections/intake/crew/set", methods=["POST"])
 def section_intake_crew_set_route():
     """The user's edits to the proposed crew. Still nothing on disk."""
@@ -4384,8 +5050,22 @@ def section_intake_crew_set_route():
     crew = section_store.mark_retired(
         crew, section_store.crew_from_agent_plans(draft["folder"]))
     with SECTION_DRAFTS_LOCK:
+        plan = draft.get("plan")
+    if plan and isinstance(data.get("skipped_needs"), list):
+        # The owner's choice of which research requirements to add: the ones
+        # left out stay listed as skipped, and agents there only for them go.
+        import copy
+        plan, crew = section_store.choose_needs(copy.deepcopy(plan), crew, data["skipped_needs"])
+        crew = section_store.normalise_crew(crew)
+    with SECTION_DRAFTS_LOCK:
         draft["crew"] = crew
-    return jsonify({"crew": crew, "counts": section_store.crew_counts(crew)})
+        if plan:
+            draft["plan"] = plan
+    out = {"crew": crew, "counts": section_store.crew_counts(crew)}
+    if plan:
+        # An edit can leave an ask with nobody on it; the window says so.
+        out["coverage"] = section_store.plan_coverage(plan, crew)
+    return jsonify(out)
 
 
 @app.route("/sections/intake/edit", methods=["POST"])
@@ -4438,9 +5118,19 @@ def section_detail_route(section_id):
     finally:
         conn.close()
 
+    crew = section_store.read_crew(section["folder"])
+    plan = section_store.read_plan(section["folder"])
+    if plan.get("parts"):
+        plan = section_store.sync_part_statuses(plan, _section_pipelines(section_id))
+    with SECTION_PLAN_JOBS_LOCK:
+        job = SECTION_PLAN_JOBS.get("section:" + section_id)
     return jsonify({
         "section": _section_card(section),
-        "crew": section_store.read_crew(section["folder"]),
+        "crew": crew,
+        "plan": plan,
+        "coverage": section_store.plan_coverage(plan, crew),
+        "next_parts": [p["id"] for p in section_store.next_parts(plan)],
+        "planning": {"state": job["state"]} if job else {"state": "none"},
         "summary": section_store.summary_body(section["folder"]),
         "knowledge": [
             {"name": n["name"], "preview": n["preview"]}
@@ -4563,10 +5253,63 @@ def section_refresh_route(section_id):
         return jsonify({"error": "section not found"}), 404
     refresh_section_knowledge(section)
     crew = grow_section_crew(section)
+    plan = section_store.read_plan(section["folder"])
+    if plan.get("parts"):
+        plan = section_store.sync_part_statuses(plan, _section_pipelines(section_id))
+        section_store.write_plan(section["folder"], plan, section.get("name", ""), crew)
     coordinator.clear_section_chat(section_id)
     return jsonify({"status": "refreshed",
                     "summary": section_store.summary_body(section["folder"]),
                     "crew": crew})
+
+
+@app.route("/sections/<section_id>/plan", methods=["POST"])
+def section_plan_route(section_id):
+    """Research and (re-)plan the whole section. Hand edits to the crew survive."""
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+    job = _start_section_plan_job(
+        "section:" + section_id, _section_plan_inputs_from_section(section),
+        lambda result: _apply_plan_to_section(section, result))
+    return jsonify(_section_plan_job_view(job))
+
+
+@app.route("/sections/<section_id>/needs", methods=["POST"])
+def section_needs_route(section_id):
+    """Change which of the research's requirements this section adds.
+
+    `skipped` lists the requirement ids to leave out. Agents there only for a
+    skipped requirement are dropped; a requirement added back that nobody
+    covers gets a part and an agent of its own.
+    """
+    section = load_section(section_id)
+    if not section:
+        return jsonify({"error": "section not found"}), 404
+    data = request.get_json(force=True) or {}
+    folder = section["folder"]
+    plan = section_store.read_plan(folder)
+    if not plan.get("parts"):
+        return jsonify({"error": "this section has no plan yet"}), 409
+    plan, crew = section_store.choose_needs(plan, section_store.read_crew(folder),
+                                            data.get("skipped") or [])
+    plan, crew, gaps = section_store.close_coverage_gaps(plan, crew)
+    crew = section_store.normalise_crew(crew)
+    section_store.write_crew(folder, crew, section.get("name", ""))
+    section_store.write_plan(folder, plan, section.get("name", ""), crew)
+    coordinator.clear_section_chat(section_id)
+    plan = section_store.read_plan(folder)
+    plan = section_store.sync_part_statuses(plan, _section_pipelines(section_id))
+    return jsonify({"plan": plan, "crew": crew, "gaps_closed": gaps,
+                    "coverage": section_store.plan_coverage(plan, crew),
+                    "next_parts": [p["id"] for p in section_store.next_parts(plan)]})
+
+
+@app.route("/sections/<section_id>/plan/status", methods=["GET"])
+def section_plan_status_route(section_id):
+    with SECTION_PLAN_JOBS_LOCK:
+        job = SECTION_PLAN_JOBS.get("section:" + section_id)
+    return jsonify(_section_plan_job_view(job))
 
 
 @app.route("/sections/<section_id>/crew", methods=["POST"])
@@ -4582,9 +5325,15 @@ def section_crew_route(section_id):
     crew = section_store.mark_retired(
         crew, section_store.crew_from_agent_plans(section["folder"]))
     section_store.write_crew(section["folder"], crew, section.get("name", ""))
+    plan = section_store.read_plan(section["folder"])
+    if plan.get("parts"):
+        # A dropped department takes its part with it; a new one becomes a part.
+        section_store.write_plan(section["folder"], plan, section.get("name", ""), crew)
+        plan = section_store.read_plan(section["folder"])
     # The crew is part of what Jarvis is told about the section it is working in.
     coordinator.clear_section_chat(section_id)
-    return jsonify({"status": "saved", "crew": crew,
+    return jsonify({"status": "saved", "crew": crew, "plan": plan,
+                    "coverage": section_store.plan_coverage(plan, crew),
                     "counts": section_store.crew_counts(crew)})
 
 

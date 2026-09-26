@@ -612,3 +612,78 @@ two cycles, because those are the cases the rules exist for.
   *Re-read pipelines*, as ruled.
 - **Re-planning a crew from scratch after creation.** The crew grows and is
   edited; there is no "throw it away and re-derive" button.
+
+---
+
+# The plan — a section is a whole project
+
+**Status:** Implemented
+
+## 19. The problem this part solves
+
+A crew built only from the agents the founding pipeline ran is that pipeline
+again, with a dashboard. The point of a section is the opposite: one pipeline
+(competitive research, say) is either the beginning of something much larger or
+one part of it (a company, a research article), and the section has to plan
+all of it. The crew was also capped at 8 departments of 6 agents.
+
+## 20. What Jarvis does before a section is created
+
+After the brief is painted, **Research and plan** (`/sections/intake/plan`)
+runs `_run_section_plan` in the background and the window shows each step:
+
+1. **Understand** — the goal, what kind of undertaking it is, and every ask the
+   owner made (constraints included), each tied to the words it came from.
+2. **Research** — 6 to 14 grounded web searches covering everything a project
+   of this kind needs to work end to end, including parts the owner never named.
+3. **Plan** — every part in order, with `depends_on`, deliverables and as many
+   agents as each part needs. The founding pipeline is placed as the beginning
+   or as one part, and the part it did is marked done and credited to it.
+   Then **what it needs that the owner did not mention**: a requirements pass
+   (`_section_requirements`) reads the research and lists everything the section
+   must meet to be done fully and correctly (stages, legal steps, technical
+   pieces, money, people, risks), asks for up to 8 deep-dive searches where the
+   research was thin, runs them, and checks again. Each requirement becomes a
+   `need_*` item that a part must cover exactly like an owner's `ask_*`.
+   The owner **chooses which requirements to add**: each has a checkbox in the
+   create window and on the dashboard's plan card. An unticked one stays listed
+   as `skipped`, is not counted as missing, and the agents there only for it
+   are left out (`choose_needs`); an agent that also covers an ask stays.
+   Ticking it again on the dashboard gives it a part of its own if nobody still
+   covers it (`/sections/<id>/needs`). The owner's own asks cannot be unticked.
+4. **Audit** — the owner's words are re-read for asks the first pass missed, and
+   every uncovered ask is given an agent (up to two rounds).
+5. **Close the gaps** — any ask still without an agent gets a part and an agent
+   of its own (`close_coverage_gaps`), labelled "Added for an ask". Nothing the
+   owner asked for is ever dropped, even with the model down: then every
+   sentence the owner wrote becomes an ask.
+
+The window shows where the pipeline fits, every ask with who covers it
+(recomputed as agents are dropped), the research questions, and the parts with
+their agents and what each covers. Nothing is written until **Create section**.
+
+## 21. On disk
+
+```
+Section plan.json               ← asks, research, parts (ids shared with Crew.json departments)
+Knowledge/The plan.md           ← readable plan and every ask with who covers it
+Knowledge/Section research.md   ← the research, with sources
+```
+
+Agents live only in `Crew.json`, so dashboard edits and the plan cannot
+disagree. Dropping a department drops its part; the dashboard then shows the
+ask it leaves uncovered. The caps are now 40 parts and 25 agents per part, as
+runaway guards only.
+
+## 22. Running the parts
+
+The dashboard's **The plan** card lists every part with its status. A part whose
+dependencies are done gets **Start**; it opens the normal pipeline gate with
+`part_id`, and the pipeline's brief carries `plan_seed_text`: which part it is,
+the asks it answers for, its standing agents, and the whole plan. The part goes
+to in progress when the pipeline starts and to done when it completes.
+**Research and re-plan** re-runs the planning for an existing section; standing
+agents, hand edits and finished parts are kept. A section made with *Create
+section without questions* is planned right after creation.
+
+Tests: `scripts/test_section_plan.py` (81 checks).

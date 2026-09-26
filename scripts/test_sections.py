@@ -73,6 +73,8 @@ def fake_model(instruction, context_text, parts=None):
 
 
 jarvis._ask_model_json = fake_model
+# Planning a section researches in the background; tests plan explicitly.
+jarvis.SECTION_PLAN_ON_CREATE = False
 
 # A throwaway database so the real second brain is never touched.
 fd, TMP_DB = tempfile.mkstemp(suffix=".db")

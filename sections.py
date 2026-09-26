@@ -421,11 +421,11 @@ def pipeline_material(folder: str, max_chars: int = 5000) -> str:
 CREW_FILE = "Crew.json"
 CREW_NOTE = "The crew.md"
 
-# The constellation colours the frontend cycles through. More departments than
-# this and two of them would share a colour, which is what makes a constellation
-# unreadable — so this is the cap, not a display detail.
-MAX_DEPARTMENTS = 8
-MAX_AGENTS_PER_DEPARTMENT = 6
+# A section is a whole project, and it gets as many parts and agents as the
+# work needs. These are only guards against a runaway model reply, far above
+# anything a real plan reaches; the constellation cycles its colours past 16.
+MAX_DEPARTMENTS = 40
+MAX_AGENTS_PER_DEPARTMENT = 25
 
 
 def _norm(text: str) -> str:
@@ -683,6 +683,7 @@ def normalise_crew(data, keep_ids: bool = True) -> dict:
     departments = []
     seen_domains: set[str] = set()
     seen_roles: set[str] = set()
+    kept_by_role: dict[str, dict] = {}
     holder = data if isinstance(data, dict) else {}
     source = holder.get("departments") if isinstance(data, dict) else data
     for raw in (source or []):
@@ -700,7 +701,16 @@ def normalise_crew(data, keep_ids: bool = True) -> dict:
                 continue
             role = str(a.get("role") or "").strip()
             brief = str(a.get("brief") or "").strip()
-            if not role or not brief or _norm(role) in seen_roles:
+            if not role or not brief:
+                continue
+            if _norm(role) in seen_roles:
+                # The same job twice is one agent, but what it answers for is
+                # kept, or folding the duplicate would silently drop an ask.
+                standing = kept_by_role.get(_norm(role))
+                if standing is not None:
+                    for c in (a.get("covers") or []):
+                        if c and str(c) not in standing["covers"]:
+                            standing["covers"].append(str(c))
                 continue
             if len(agents) >= MAX_AGENTS_PER_DEPARTMENT:
                 break
@@ -717,7 +727,11 @@ def normalise_crew(data, keep_ids: bool = True) -> dict:
                 "from_plan_ids": [str(i) for i in (a.get("from_plan_ids") or []) if i],
                 "evidence": [str(e) for e in (a.get("evidence") or []) if e][:8],
                 "why": str(a.get("why") or "").strip(),
+                # Which of the section's asks this agent answers for. It is what
+                # lets the plan prove nothing the user asked was forgotten.
+                "covers": [str(c) for c in (a.get("covers") or []) if c],
             })
+            kept_by_role[_norm(role)] = agents[-1]
         if not agents:
             # A department with nobody in it is a label, not a baby section.
             continue
@@ -838,7 +852,7 @@ def merge_crew(existing: dict, incoming: dict) -> dict:
         for agent in dept["agents"]:
             standing = by_role.get(_norm(agent["role"]))
             if standing:
-                for field in ("from_agent_ids", "from_plan_ids", "evidence"):
+                for field in ("from_agent_ids", "from_plan_ids", "evidence", "covers"):
                     for value in agent.get(field, []):
                         if value not in standing[field]:
                             standing[field].append(value)
@@ -979,3 +993,504 @@ def crew_counts(crew: dict | None) -> dict:
         "departments": len(departments),
         "agents": sum(len(d.get("agents") or []) for d in departments),
     }
+
+
+# ---------------------------------------------------------------------------
+# The section plan — the whole project, not just the pipeline it grew from
+#
+# A section is where one pipeline turns into an entire operation: competitive
+# research that is one part of building a company, or the first step of a
+# research article. So a section is planned as a whole. Jarvis lists every ask,
+# researches what a project of this kind needs to work end to end, decides
+# whether the founding pipeline is the beginning or one part of it, and lays
+# out every part with the agents it needs.
+#
+#   Section plan.json         ← the parts, the asks, the research
+#   Crew.json                 ← the agents (each department is one part)
+#   Knowledge/The plan.md     ← the same plan, readable
+#   Knowledge/Section research.md
+#
+# The agents live only in the crew, so the dashboard's edits and the plan never
+# disagree about who exists. A part and its department share one id.
+# ---------------------------------------------------------------------------
+
+PLAN_FILE = "Section plan.json"
+PLAN_NOTE = "The plan.md"
+RESEARCH_NOTE = "Section research.md"
+PART_STATUSES = ("done", "in_progress", "todo")
+POSITIONS = ("beginning", "part")
+
+
+def plan_path(folder: str) -> str:
+    return os.path.join(section_dir(folder), PLAN_FILE)
+
+
+def empty_plan() -> dict:
+    return {"version": 1, "updated": _now(), "understanding": {}, "position": {},
+            "asks": [], "research": [], "parts": [], "services": []}
+
+
+def part_id_for(title: str) -> str:
+    """The id a part shares with its department in the crew."""
+    return "dept_" + (slugify(title, "dept").lower().replace(" ", "_") or "dept")
+
+
+def normalise_asks(raw) -> list[dict]:
+    """Every ask once, with a stable id and the words it came from."""
+    asks, seen = [], set()
+    for item in (raw or []):
+        if isinstance(item, str):
+            item = {"text": item}
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text or _norm(text) in seen:
+            continue
+        seen.add(_norm(text))
+        asks.append({
+            "id": str(item.get("id") or "").strip() or f"ask_{len(asks) + 1}",
+            "text": text,
+            "quote": str(item.get("quote") or "").strip(),
+            # "owner": the owner asked for it. "research": the research showed the
+            # section needs it to be done fully and correctly. Both must be covered.
+            "origin": "research" if item.get("origin") == "research" else "owner",
+            "why": str(item.get("why") or "").strip(),
+            # A requirement the owner chose not to add. Only research requirements
+            # can be skipped: what the owner asked for is always planned.
+            "skipped": bool(item.get("skipped")) and item.get("origin") == "research",
+        })
+    # Ids must be unique even when a model repeats one.
+    used = set()
+    for n, ask in enumerate(asks, 1):
+        if ask["id"] in used:
+            ask["id"] = f"ask_{n}"
+            while ask["id"] in used:
+                ask["id"] += "b"
+        used.add(ask["id"])
+    return asks
+
+
+def asks_from_words(texts: list[str]) -> list[dict]:
+    """The asks, read mechanically out of what the user wrote.
+
+    Used when the model is unreachable: one ask per sentence or line of the
+    user's own words, so nothing they wrote goes unplanned just because the
+    model that would have phrased it better was down.
+    """
+    asks = []
+    for text in texts or []:
+        for piece in re.split(r"(?<=[.!?])\s+|\n+", text or ""):
+            piece = piece.strip(" -*\t")
+            if len(piece.split()) >= 3:
+                asks.append({"text": piece, "quote": piece})
+    return normalise_asks(asks)
+
+
+def resolve_covers(covers, asks: list[dict]) -> list[str]:
+    """Turn what a model or user wrote in `covers` into ask ids.
+
+    A model may cite an ask by its id or by its wording, so both are accepted;
+    anything that names no real ask is dropped rather than counted as cover.
+    """
+    by_id = {a["id"]: a["id"] for a in asks}
+    by_text = {_norm(a["text"]): a["id"] for a in asks}
+    out = []
+    for c in covers or []:
+        c = str(c or "").strip()
+        aid = by_id.get(c) or by_text.get(_norm(c))
+        if aid and aid not in out:
+            out.append(aid)
+    return out
+
+
+def split_plan(data: dict, asks: list[dict]) -> tuple[list[dict], dict]:
+    """A model's parts-with-agents, split into plan parts and a crew.
+
+    Returns (parts, crew). Every department id is the part's id, and every
+    `covers` list is resolved to real ask ids on both sides.
+    """
+    raw_parts = (data or {}).get("parts") if isinstance(data, dict) else None
+    departments, parts = [], []
+    titles = {}
+    for n, raw in enumerate(raw_parts or [], 1):
+        if not isinstance(raw, dict):
+            continue
+        title = str(raw.get("title") or raw.get("domain") or "").strip()
+        if not title or _norm(title) in titles:
+            continue
+        pid = part_id_for(title)
+        titles[_norm(title)] = pid
+        agents = []
+        for a in (raw.get("agents") or []):
+            if isinstance(a, dict):
+                a = dict(a)
+                a["covers"] = resolve_covers(a.get("covers"), asks)
+                agents.append(a)
+        departments.append({"id": pid, "domain": title,
+                            "goal": str(raw.get("goal") or "").strip(),
+                            "origin": raw.get("origin") or "brief", "agents": agents})
+        status = raw.get("status") if raw.get("status") in PART_STATUSES else "todo"
+        try:
+            order = int(raw.get("order") or n)
+        except (TypeError, ValueError):
+            order = n
+        parts.append({
+            "id": pid,
+            "title": title,
+            "goal": str(raw.get("goal") or "").strip(),
+            "order": order,
+            "status": status,
+            "depends_on": [str(d) for d in (raw.get("depends_on") or []) if d],
+            "deliverables": [str(d).strip() for d in (raw.get("deliverables") or []) if str(d).strip()],
+            "covers": resolve_covers(raw.get("covers"), asks),
+            "plan_ids": [str(i) for i in (raw.get("plan_ids") or []) if i],
+        })
+    # depends_on is written by title; keep it as part ids from here on.
+    for part in parts:
+        part["depends_on"] = [titles.get(_norm(d), d) for d in part["depends_on"]
+                              if titles.get(_norm(d), d) != part["id"]]
+    return parts, {"departments": departments}
+
+
+def plan_coverage(plan: dict, crew: dict) -> dict:
+    """Which agents answer for each ask, and which asks nobody answers for.
+
+    An ask counts as covered only when a standing agent lists it: a part that
+    mentions an ask without anyone to do the work has not covered it.
+    """
+    by_ask: dict[str, list[str]] = {a["id"]: [] for a in (plan or {}).get("asks", [])
+                                     if not a.get("skipped")}
+    for dept in (crew or {}).get("departments", []):
+        for agent in dept.get("agents", []):
+            for aid in agent.get("covers") or []:
+                if aid in by_ask and agent["role"] not in by_ask[aid]:
+                    by_ask[aid].append(agent["role"])
+    return {"covered": by_ask, "uncovered": [aid for aid, roles in by_ask.items() if not roles]}
+
+
+def close_coverage_gaps(plan: dict, crew: dict) -> tuple[dict, dict, list[str]]:
+    """Give every ask still uncovered a part and an agent of its own.
+
+    This is the last line of the rule that nothing the user asked for is
+    forgotten. It runs after Jarvis has had his chances to plan the ask
+    properly, so what it adds is plain and labelled for what it is — easy to
+    spot, and easy to rename or fold into another part.
+    """
+    uncovered = plan_coverage(plan, crew)["uncovered"]
+    if not uncovered:
+        return plan, crew, []
+    asks = {a["id"]: a for a in plan.get("asks", [])}
+    roles = {_norm(a["role"]) for d in crew.get("departments", []) for a in d.get("agents", [])}
+    order = max([p.get("order", 0) for p in plan.get("parts", [])] + [0])
+    added = []
+    for aid in uncovered:
+        text = asks[aid]["text"]
+        what = "requirement" if asks[aid].get("origin") == "research" else "ask"
+        title = slugify(text, "Ask")[:60].strip()
+        pid = part_id_for(title)
+        role = f"{title} Owner"
+        if _norm(role) in roles:
+            role = f"{title} Owner ({aid})"
+        roles.add(_norm(role))
+        agent = {
+            "role": role, "is_lead": True, "origin": "brief", "covers": [aid],
+            "brief": f"Owns this {what} until it is planned properly: {text}",
+            "why": f"Added so this {what} is not forgotten. Nothing else in the plan covered it.",
+        }
+        # A part already named like this ask takes the agent, because a second
+        # department with the same name would be merged away, and the ask with it.
+        same = next((d for d in crew.get("departments", [])
+                     if _norm(d.get("domain")) == _norm(title) or d.get("id") == pid), None)
+        if same:
+            agent["is_lead"] = False
+            same.setdefault("agents", []).append(agent)
+            part = next((p for p in plan["parts"] if p["id"] == same.get("id")), None)
+            if part is not None and aid not in part.setdefault("covers", []):
+                part["covers"].append(aid)
+            added.append(aid)
+            continue
+        if any(p["id"] == pid for p in plan["parts"]):
+            pid = part_id_for(f"{title} {aid}")
+        order += 1
+        plan["parts"].append({
+            "id": pid, "title": title, "goal": text, "order": order, "status": "todo",
+            "depends_on": [], "deliverables": [], "covers": [aid], "plan_ids": [],
+            "gap": True,
+        })
+        crew.setdefault("departments", []).append({
+            "id": pid, "domain": title, "goal": text, "origin": "brief", "agents": [agent],
+        })
+        added.append(aid)
+    return plan, crew, added
+
+
+def normalise_plan(data, crew: dict | None = None) -> dict:
+    """Clean a plan from anywhere, and keep it consistent with the crew.
+
+    Parts whose department is gone from the crew (dropped on the dashboard)
+    are dropped too, and parts are ordered the way they should run.
+    """
+    data = data if isinstance(data, dict) else {}
+    plan = empty_plan()
+    plan["understanding"] = {k: str(v).strip() for k, v in (data.get("understanding") or {}).items()
+                             if isinstance(v, (str, int, float)) and str(v).strip()}
+    pos = data.get("position") or {}
+    plan["position"] = {
+        "kind": pos.get("kind") if pos.get("kind") in POSITIONS else "beginning",
+        "part_id": str(pos.get("part_id") or "").strip(),
+        "why": str(pos.get("why") or "").strip(),
+    }
+    plan["asks"] = normalise_asks(data.get("asks"))
+    plan["research"] = [
+        {"question": str(r.get("question") or "").strip(),
+         "summary": str(r.get("summary") or "").strip(),
+         "sources": [s for s in (r.get("sources") or []) if isinstance(s, dict)][:8]}
+        for r in (data.get("research") or []) if isinstance(r, dict) and r.get("question")
+    ]
+    plan["services"] = [
+        {"name": str(s.get("name") or "").strip(), "why": str(s.get("why") or "").strip()}
+        for s in (data.get("services") or []) if isinstance(s, dict) and s.get("name")
+    ]
+    dept_ids = None
+    if crew is not None:
+        dept_ids = {d["id"] for d in crew.get("departments", [])}
+    parts, seen = [], set()
+    for p in (data.get("parts") or []):
+        if not isinstance(p, dict) or not p.get("id") or p["id"] in seen:
+            continue
+        if dept_ids is not None and p["id"] not in dept_ids:
+            continue
+        seen.add(p["id"])
+        part = dict(p)
+        part["status"] = p.get("status") if p.get("status") in PART_STATUSES else "todo"
+        part.setdefault("order", len(parts) + 1)
+        for key in ("depends_on", "deliverables", "covers", "plan_ids"):
+            part[key] = [str(x) for x in (p.get(key) or []) if x]
+        parts.append(part)
+    # A department the user added on the dashboard is a part too.
+    if crew is not None:
+        for d in crew.get("departments", []):
+            if d["id"] not in seen:
+                # Work that really ran is done; anything else is still to do.
+                ran = d.get("origin") in ("founding", "merged")
+                parts.append({"id": d["id"], "title": d["domain"], "goal": d.get("goal", ""),
+                              "order": len(parts) + 1, "status": "done" if ran else "todo",
+                              "depends_on": [],
+                              "deliverables": [], "covers": [], "plan_ids": []})
+        titles = {d["id"]: d["domain"] for d in crew.get("departments", [])}
+        for part in parts:
+            part["title"] = titles.get(part["id"], part.get("title", ""))
+    kept = {p["id"] for p in parts}
+    for part in parts:
+        part["depends_on"] = [d for d in part["depends_on"] if d in kept]
+    parts.sort(key=lambda p: (p.get("order") or 0))
+    for n, part in enumerate(parts, 1):
+        part["order"] = n
+    plan["parts"] = parts
+    if plan["position"]["part_id"] not in kept:
+        plan["position"]["part_id"] = next(
+            (p["id"] for p in parts if p["status"] == "done"), "")
+    return plan
+
+
+def read_plan(folder: str) -> dict:
+    path = os.path.join(SECTIONS_ROOT, folder, PLAN_FILE)
+    if not os.path.exists(path):
+        return empty_plan()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else empty_plan()
+    except Exception as e:
+        print(f"[Sections] Could not read the section plan: {e}")
+        return empty_plan()
+
+
+def has_plan(folder: str) -> bool:
+    return bool(read_plan(folder).get("parts"))
+
+
+def write_plan(folder: str, plan: dict, section_name: str = "", crew: dict | None = None) -> str:
+    """Save the plan, with a readable copy and the research beside the knowledge."""
+    crew = read_crew(folder) if crew is None else crew
+    plan = normalise_plan(plan, crew)
+    plan["updated"] = _now()
+    path = plan_path(folder)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(plan, f, indent=2, ensure_ascii=False)
+    try:
+        _write_plan_note(folder, plan, crew, section_name)
+        if plan.get("research"):
+            _write_research_note(folder, plan, section_name)
+    except Exception as e:
+        print(f"[Sections] Could not write the plan notes: {e}")
+    return path
+
+
+def _write_plan_note(folder: str, plan: dict, crew: dict, section_name: str = "") -> str:
+    agents_by_part = {d["id"]: d.get("agents", []) for d in crew.get("departments", [])}
+    asks = {a["id"]: a for a in plan.get("asks", [])}
+    pos = plan.get("position") or {}
+    out = [
+        _frontmatter({"type": "section-plan", "section": section_name or folder,
+                      "updated": plan.get("updated")}),
+        "",
+        "# The plan",
+        "",
+        "Every part this section needs to work, in order, with the agents that do it. "
+        "Written from `Section plan.json` and `Crew.json`; edit the plan from the section "
+        "dashboard.",
+        "",
+    ]
+    goal = (plan.get("understanding") or {}).get("goal")
+    if goal:
+        out += ["## Goal", "", goal, ""]
+    if pos.get("why"):
+        where = "the beginning of this section" if pos.get("kind") == "beginning" \
+            else "one part of this section"
+        out += ["## Where the founding pipeline fits", "", f"It is {where}. {pos['why']}", ""]
+    out += ["## Parts", ""]
+    for part in plan.get("parts", []):
+        out.append(f"### {part['order']}. {part['title']} ({part['status'].replace('_', ' ')})")
+        if part.get("goal"):
+            out.append(part["goal"])
+        for d in part.get("deliverables", []):
+            out.append(f"- Deliverable: {d}")
+        for agent in agents_by_part.get(part["id"], []):
+            lead = " (lead)" if agent.get("is_lead") else ""
+            out.append(f"- **{agent['role']}**{lead}: {agent.get('brief', '')}")
+        out.append("")
+    if asks:
+        coverage = plan_coverage(plan, crew)["covered"]
+        out += ["## Every ask and requirement, and who covers it", ""]
+        for aid, ask in asks.items():
+            if ask.get("skipped"):
+                continue
+            if ask.get("origin") == "research":
+                ask = dict(ask, text="(needed) " + ask["text"])
+            who = ", ".join(coverage.get(aid) or []) or "NOBODY YET"
+            out.append(f"- {ask['text']} — {who}")
+        out.append("")
+    path = os.path.join(knowledge_dir(folder), PLAN_NOTE)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out))
+    return path
+
+
+def _write_research_note(folder: str, plan: dict, section_name: str = "") -> str:
+    out = [
+        _frontmatter({"type": "section-research", "section": section_name or folder,
+                      "updated": plan.get("updated")}),
+        "",
+        "# Section research",
+        "",
+        "What Jarvis researched to understand everything this section needs. "
+        "Overwritten each time the section is re-planned.",
+        "",
+    ]
+    for item in plan.get("research", []):
+        out += [f"## {item['question']}", "", item.get("summary") or "_(no answer found)_", ""]
+        for src in item.get("sources", []):
+            title = src.get("title") or src.get("url") or "source"
+            url = src.get("url") or src.get("uri") or ""
+            out.append(f"- [{title}]({url})" if url else f"- {title}")
+        out.append("")
+    path = os.path.join(knowledge_dir(folder), RESEARCH_NOTE)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out))
+    return path
+
+
+def set_part_pipeline(folder: str, part_id: str, plan_id: str, section_name: str = "") -> bool:
+    """Record that a pipeline was started for one part of the plan."""
+    plan = read_plan(folder)
+    part = next((p for p in plan.get("parts", []) if p["id"] == part_id), None)
+    if not part:
+        return False
+    if plan_id not in part.setdefault("plan_ids", []):
+        part["plan_ids"].append(plan_id)
+    if part.get("status") != "done":
+        part["status"] = "in_progress"
+    write_plan(folder, plan, section_name)
+    return True
+
+
+def sync_part_statuses(plan: dict, pipelines: list[dict]) -> dict:
+    """A part is done when a pipeline run for it completed, and running while one runs."""
+    status_of = {p["id"]: (p.get("status") or "") for p in pipelines or []}
+    for part in plan.get("parts", []):
+        states = [status_of.get(pid, "") for pid in part.get("plan_ids", [])]
+        if any(s in ("complete", "completed", "done") for s in states):
+            part["status"] = "done"
+        elif any(s == "running" for s in states) and part.get("status") != "done":
+            part["status"] = "in_progress"
+    return plan
+
+
+def next_parts(plan: dict) -> list[dict]:
+    """The parts that can start now: not done, and everything they wait on is done."""
+    done = {p["id"] for p in plan.get("parts", []) if p.get("status") == "done"}
+    return [p for p in plan.get("parts", [])
+            if p.get("status") == "todo" and all(d in done for d in p.get("depends_on", []))]
+
+
+def plan_seed_text(section: dict, part_id: str | None = None, max_chars: int = 5000) -> str:
+    """The whole plan, as the Brain sees it when a pipeline starts in the section.
+
+    A pipeline run for one part must know it is one part of something larger:
+    what came before it, what comes after, and exactly which asks it answers
+    for, so it neither redoes a neighbouring part nor leaves its own asks out.
+    """
+    folder = section["folder"]
+    plan = read_plan(folder)
+    if not plan.get("parts"):
+        return ""
+    crew = read_crew(folder)
+    agents_by_part = {d["id"]: d.get("agents", []) for d in crew.get("departments", [])}
+    asks = {a["id"]: a["text"] for a in plan.get("asks", []) if not a.get("skipped")}
+    name = section.get("name") or folder
+    out = [f"## The plan of section — {name}", ""]
+    goal = (plan.get("understanding") or {}).get("goal")
+    if goal:
+        out += [f"Goal of the whole section: {goal}", ""]
+    this = next((p for p in plan["parts"] if p["id"] == part_id), None) if part_id else None
+    if this:
+        out += [f"### THIS PIPELINE IS PART {this['order']}: {this['title']}", this.get("goal", ""), ""]
+        if this.get("deliverables"):
+            out += ["It must deliver:"] + [f"- {d}" for d in this["deliverables"]] + [""]
+        mine = sorted({aid for a in agents_by_part.get(this["id"], []) for aid in a.get("covers", [])}
+                      | set(this.get("covers", [])))
+        if mine:
+            out += ["What this part answers for — the owner's asks and what the research showed "
+                    "the section needs. Every one must be delivered:"]
+            out += [f"- {asks[a]}" for a in mine if a in asks] + [""]
+        roles = [a["role"] for a in agents_by_part.get(this["id"], [])]
+        if roles:
+            out += ["Its standing agents (reuse these exact role names): " + ", ".join(roles), ""]
+    out.append("### All parts")
+    for part in plan["parts"]:
+        mark = " ← this pipeline" if this and part["id"] == this["id"] else ""
+        out.append(f"{part['order']}. {part['title']} [{part['status'].replace('_', ' ')}]{mark}")
+    out += ["", "Do not redo work a part marked done already produced; its findings are in "
+            "the section's knowledge. Stay inside this pipeline's part.", ""]
+    return "\n".join(out)[:max_chars]
+
+
+def choose_needs(plan: dict, crew: dict, skipped_ids) -> tuple[dict, dict]:
+    """Apply the owner's choice of which research requirements to add.
+
+    A requirement left out is kept on the list, marked skipped, so it can be
+    added back later. Agents that exist only for skipped requirements go, and
+    so does a part left with nobody in it. A requirement added back that
+    nobody covers any more gets a part of its own when the gaps are closed.
+    """
+    skipped = {str(i) for i in (skipped_ids or [])}
+    for ask in plan.get("asks", []):
+        if ask.get("origin") == "research":
+            ask["skipped"] = ask["id"] in skipped
+    gone = {a["id"] for a in plan.get("asks", []) if a.get("skipped")}
+    for dept in crew.get("departments", []):
+        dept["agents"] = [a for a in dept.get("agents", [])
+                          if not (a.get("covers") and set(a["covers"]) <= gone)]
+    crew["departments"] = [d for d in crew.get("departments", []) if d.get("agents")]
+    return plan, crew

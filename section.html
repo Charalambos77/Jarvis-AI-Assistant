@@ -186,6 +186,18 @@
         .badge.running { background: rgba(52,211,153,0.15); color: #34D399; }
         .badge.founding { background: rgba(167,139,250,0.15); color: #A78BFA; }
         .empty { font-size: 12px; color: var(--dim); padding: 10px 2px; }
+        /* The plan: every part of the section in order, and every ask covered. */
+        .badge.done { background: rgba(52,211,153,0.15); color: #34D399; }
+        .badge.gap { background: rgba(248,113,113,0.15); color: #F87171; }
+        .plan-line { font-size: 12px; color: var(--muted); line-height: 1.7; margin-bottom: 10px; }
+        .plan-line b { color: #E2E8F0; font-weight: 600; }
+        .plan-asks { font-size: 12px; margin-bottom: 12px; }
+        .plan-asks summary { cursor: pointer; color: #93C5FD; }
+        .plan-asks ul { list-style: none; padding: 0; margin: 8px 0 0; }
+        .plan-asks li { padding: 3px 0; color: var(--muted); line-height: 1.6; }
+        .plan-asks .ok { color: #34D399; margin-right: 6px; }
+        .plan-asks .miss { color: #F87171; margin-right: 6px; }
+        .plan-steps { font-size: 11.5px; color: var(--muted); line-height: 1.8; }
 
         .chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
         .chip {
@@ -303,6 +315,14 @@
         </div>
 
         <div class="rail left" id="rail-left">
+            <div class="card">
+                <div class="card-head">
+                    <span class="card-title">The plan</span>
+                    <button class="mini" id="btn-replan" onclick="runPlan()">Research and re-plan</button>
+                </div>
+                <div id="plan"></div>
+            </div>
+
             <div class="card">
                 <div class="card-head">
                     <span class="card-title">The crew</span>
@@ -532,8 +552,195 @@
 
         renderChat(sectionData.messages || []);
 
+        renderPlan();
         renderCrewList();
         buildConstellation();
+    }
+
+    /* ====================================================================
+       The plan — the whole section, not just the pipeline it grew from.
+       Every part in order with its status, whether the founding pipeline is
+       the beginning or one part, and every ask with who covers it. A part
+       that can start now has a Start button that runs its pipeline here.
+       ==================================================================== */
+
+    let planPoll = null;
+
+    function renderPlan() {
+        const box = document.getElementById("plan");
+        const plan = sectionData.plan || {};
+        const parts = plan.parts || [];
+        const planning = (sectionData.planning || {}).state === "running";
+        document.getElementById("btn-replan").disabled = planning;
+        document.getElementById("btn-replan").textContent =
+            parts.length ? "Research and re-plan" : "Research and plan";
+
+        if (planning) {
+            box.innerHTML = '<div class="plan-steps" id="plan-steps">Jarvis is researching ' +
+                'everything this section needs, then planning every part and its agents…</div>';
+            watchPlan();
+            return;
+        }
+        if (!parts.length) {
+            box.innerHTML = '<div class="empty">No plan yet. Press <b>Research and plan</b> and ' +
+                'Jarvis will research the whole section, work out every part it needs and give ' +
+                'each part its agents.</div>';
+            return;
+        }
+
+        let html = "";
+        const goal = (plan.understanding || {}).goal;
+        if (goal) html += '<div class="plan-line"><b>Goal:</b> ' + esc(goal) + '</div>';
+        const pos = plan.position || {};
+        const founding = parts.find(p => p.id === pos.part_id);
+        html += '<div class="plan-line"><b>' +
+            (pos.kind === "part" ? "The founding pipeline is one part" :
+                                   "The founding pipeline is the beginning") +
+            '</b>' + (founding ? ': ' + esc(founding.title) : '') + '. ' + esc(pos.why || '') + '</div>';
+
+        const cov = sectionData.coverage || { covered: {}, uncovered: [] };
+        const listHtml = (label, items, choosable) => {
+            if (!items.length) return "";
+            const skipped = items.filter(a => a.skipped).length;
+            const counted = items.length - skipped;
+            const missing = items.filter(a => !a.skipped && !(cov.covered[a.id] || []).length).length;
+            // The requirements stay open: that is where you choose which to add.
+            let out = '<details class="plan-asks"' + (missing || choosable ? ' open' : '') + '><summary>' +
+                label + ': ' + (counted - missing) + ' of ' + counted + ' covered' +
+                (skipped ? ' · ' + skipped + ' not added' : '') +
+                (missing ? ' · ' + missing + ' need an agent' : '') + '</summary><ul>';
+            items.forEach(a => {
+                const who = cov.covered[a.id] || [];
+                if (choosable) {
+                    // Untick to leave it out; tick to add it back, with a part for it.
+                    out += '<li' + (a.skipped ? ' style="opacity:.5"' : '') + '><label>' +
+                        '<input type="checkbox" class="need-box" data-need="' + esc(a.id) + '"' +
+                        (a.skipped ? '' : ' checked') + '> ' + esc(a.text) + '</label>' +
+                        (a.skipped ? ' <span style="color:var(--dim)">— not added</span>'
+                            : who.length ? ' <span style="color:var(--dim)">— ' + esc(who.join(", ")) + '</span>'
+                            : ' <span class="miss">— nobody covers this</span>') + '</li>';
+                    return;
+                }
+                out += '<li>' + (who.length ? '<span class="ok">✓</span>' : '<span class="miss">✕</span>') +
+                    esc(a.text) + (who.length ? ' <span style="color:var(--dim)">— ' +
+                    esc(who.join(", ")) + '</span>' : '') + '</li>';
+            });
+            return out + '</ul></details>';
+        };
+        const asks = plan.asks || [];
+        html += listHtml("Your asks", asks.filter(a => a.origin !== "research"));
+        html += listHtml("What it needs that you did not mention",
+                         asks.filter(a => a.origin === "research"), true);
+        box.innerHTML = html;
+        box.querySelectorAll(".need-box").forEach(el => {
+            el.addEventListener("change", () => chooseNeeds());
+        });
+
+        const ready = new Set(sectionData.next_parts || []);
+        const titles = Object.fromEntries(parts.map(p => [p.id, p.title]));
+        parts.forEach(p => {
+            const row = document.createElement("div");
+            row.className = "row";
+            const waits = (p.depends_on || []).filter(d => {
+                const dep = parts.find(x => x.id === d);
+                return dep && dep.status !== "done";
+            });
+            let sub = p.goal || "";
+            if (p.status === "todo" && waits.length) {
+                sub = "Waits on " + waits.map(d => titles[d] || d).join(", ");
+            }
+            const badge = p.status === "done" ? '<span class="badge done">Done</span>'
+                : p.status === "in_progress" ? '<span class="badge running">Running</span>'
+                : p.gap ? '<span class="badge gap">Added so nothing is missed</span>' : '';
+            row.innerHTML =
+                '<div class="row-main">' +
+                    '<div class="row-title">' + esc(p.order + ". " + p.title) + '</div>' +
+                    '<div class="row-sub">' + esc(sub) + '</div>' +
+                '</div>' + badge;
+            if (p.status === "todo") {
+                const btn = document.createElement("button");
+                btn.className = "mini";
+                btn.textContent = ready.has(p.id) ? "Start" : "Start anyway";
+                btn.onclick = (e) => { e.stopPropagation(); startPart(p); };
+                row.appendChild(btn);
+            }
+            box.appendChild(row);
+        });
+    }
+
+    function chooseNeeds() {
+        const skipped = [...document.querySelectorAll(".need-box")]
+            .filter(el => !el.checked).map(el => el.getAttribute("data-need"));
+        document.querySelectorAll(".need-box").forEach(el => { el.disabled = true; });
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/needs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ skipped })
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (d.plan) sectionData.plan = d.plan;
+                if (d.crew) sectionData.crew = d.crew;
+                if (d.coverage) sectionData.coverage = d.coverage;
+                if (d.next_parts) sectionData.next_parts = d.next_parts;
+            })
+            .catch(() => {})
+            .then(() => render());
+    }
+
+    function runPlan() {
+        fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/plan", { method: "POST" })
+            .then(r => r.json())
+            .then(() => {
+                sectionData.planning = { state: "running" };
+                renderPlan();
+            });
+    }
+
+    // While Jarvis plans, show his steps; reload the page's data when he is done.
+    function watchPlan() {
+        if (planPoll) return;
+        planPoll = setInterval(async () => {
+            let view;
+            try {
+                const res = await fetch("/sections/" + encodeURIComponent(SECTION_ID) + "/plan/status");
+                view = await res.json();
+            } catch (e) { return; }
+            const steps = document.getElementById("plan-steps");
+            if (steps && view.steps && view.steps.length) {
+                steps.innerHTML = view.steps.map(st =>
+                    (st.state === "done" ? "✓ " : st.state === "failed" ? "✕ " : "● ") +
+                    esc(st.label) + (st.detail ? ' <span style="color:var(--dim)">(' +
+                    esc(st.detail) + ')</span>' : '')).join("<br>");
+            }
+            if (view.state !== "running") {
+                clearInterval(planPoll);
+                planPoll = null;
+                const res = await fetch("/sections/" + encodeURIComponent(SECTION_ID));
+                if (res.ok) {
+                    sectionData = await res.json();
+                    render();
+                }
+            }
+        }, 2000);
+    }
+
+    function startPart(part) {
+        const task = prompt("What should this pipeline do? It is part " + part.order + " of the " +
+                            "section and will start knowing the whole plan.", part.goal || part.title);
+        if (!task || !task.trim()) return;
+        fetch("/pipeline/intake/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ task: task.trim(), section_id: SECTION_ID, part_id: part.id })
+        })
+            .then(r => r.json())
+            .then(d => {
+                if (d.draft_id) {
+                    sessionStorage.setItem("jarvis_intake_draft", d.draft_id);
+                    go("command_center.html?intake=" + encodeURIComponent(d.draft_id));
+                }
+            });
     }
 
     /* ====================================================================
@@ -974,9 +1181,15 @@
             body: JSON.stringify({ crew: crew() })
         })
         .then(r => r.json())
-        .then(d => { if (d.crew) sectionData.crew = d.crew; })
+        .then(d => {
+            if (d.crew) sectionData.crew = d.crew;
+            // Dropping a department drops its part; the asks it covered show up.
+            if (d.plan) sectionData.plan = d.plan;
+            if (d.coverage) sectionData.coverage = d.coverage;
+        })
         .catch(() => { /* the local edit still stands until the next load */ })
         .then(() => {
+            renderPlan();
             renderCrewList();
             buildConstellation();
             // Indexes move when something is dropped, so a stale panel would be
