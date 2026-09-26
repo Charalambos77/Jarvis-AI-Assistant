@@ -4,8 +4,10 @@ Before planning, the Brain writes down what the task really needs: its goal,
 deliverables, constraints, success criteria and the unknowns to research. The
 plan is built from that, sized to the task, and never skips research: a plan
 with no cycles gets one on the task's unknowns, and a plan that uses an API or
-MCP service no cycle covers gets a cycle on how that service works. Execution
-and the quality checker see the success criteria. Checked without a real model.
+MCP service no cycle covers gets a cycle on how that service works. When the
+Brain judges a task simple, Jarvis asks the user whether to research it first or
+skip research. Execution and the quality checker see the success criteria.
+Checked without a real model.
 """
 import asyncio, json, os, sys, tempfile
 
@@ -83,6 +85,13 @@ u = brain.understand_task("Write my launch video script.")
 check("the understanding is cleaned up", u["constraints"] == ["2 minutes long", "5"] and u["goal"].startswith("Get more"))
 check("an unknown depth falls back to standard", u["research_depth"] == "standard")
 
+check("a task is not simple unless the Brain says so", u["simple"] is False)
+use_model(json.dumps({**UNDERSTANDING, "simple": True, "simple_reason": "Short and clear."}))
+check("a task the Brain calls simple is marked simple", brain.understand_task("x")["simple"] is True)
+use_model(json.dumps({**UNDERSTANDING, "simple": True, "services": ["Gmail"]}))
+check("a task that uses a service is never simple", brain.understand_task("x")["simple"] is False)
+check("the Brain is told what simple means", "`simple` is true only for a small, self-contained task" in brain.UNDERSTAND_SYSTEM_PROMPT)
+
 use_model(RuntimeError("model unavailable"))
 check("if understanding fails, planning goes ahead from the task alone", brain.understand_task("x") == {})
 
@@ -142,6 +151,14 @@ models = use_model(json.dumps({"cycles": [cycle(2)]}))
 brain.build_agent_plan("THE TASK", redirect_note="Dig deeper.", cycle_id=2, approved_blueprints=[{}])
 check("a single-cycle re-plan doesn't re-run the understanding", len(models.contents) == 1)
 
+models = use_model(json.dumps({"execution_agents": [writer()]}))
+brain.plan_execution_agents("THE TASK", [writer()], {"research": "skipped"}, researched=False)
+check("execution planning after skipped research doesn't claim research happened",
+      "Research is now COMPLETE" not in models.contents[0] and "chose to skip research" in models.contents[0])
+models = use_model(RuntimeError("model unavailable"))
+check("if that planning fails, the roster is kept as is",
+      brain.plan_execution_agents("THE TASK", [writer()], {}, researched=False) == [writer()] and len(models.contents) == 1)
+
 # ---- 5. the pipeline carries it through ------------------------------------------------------
 tmp = tempfile.mkdtemp()
 mac.BASE_DIR = tmp
@@ -188,13 +205,34 @@ async def deploy(*a, **k):
     return {"status": "ok", "message": "done"}
 
 
+gates, answers = [], {}
+
+
 async def approve(gate_id, data):
-    return {"approved": True}
+    gates.append(gate_id)
+    seen.setdefault("gate_data", {})[gate_id] = data
+    return {"approved": answers.get(gate_id, True)}
 
 
-mac.build_agent_plan = lambda *a, **k: {"task_summary": "Launch script", "task_type": "content",
-                                        "research_depth": "focused", "task_understanding": UNDERSTANDING,
-                                        "cycles": [cycle(1)], "execution_agents": [writer()]}
+def run(plan_id, understanding, tools=()):
+    gates.clear()
+    seen.clear()
+    calls["research"] = 0
+    mac.build_agent_plan = lambda *a, **k: {"task_summary": "Launch script", "task_type": "content",
+                                            "research_depth": "focused", "task_understanding": understanding,
+                                            "cycles": [cycle(1)], "execution_agents": [writer(tools)]}
+    return asyncio.run(mac.run_full_pipeline("Write my launch video script.", approve, plan_id=plan_id,
+                                             project_name="Test"))
+
+
+calls = {"research": 0}
+_research = research
+
+
+async def research(agents, *a, **k):
+    calls["research"] += 1
+    return await _research(agents, *a, **k)
+
 mac.refresh_cycle_briefs = lambda *a, **k: None
 mac.run_research_phase_for_cycle = research
 mac.run_lead_review = lead_review
@@ -206,8 +244,10 @@ mac.run_execution_phase = execution
 mac.run_quality_checker = qa
 mac.run_deployment_agent = deploy
 
-result = asyncio.run(mac.run_full_pipeline("Write my launch video script.", approve, plan_id="p1", project_name="Test"))
+result = run("p1", UNDERSTANDING)
 check("the pipeline completes", result.get("status") == "complete")
+check("a task that isn't simple is researched without asking",
+      calls["research"] == 1 and "research_choice" not in gates)
 check("execution is planned from the understanding", "Ends with a sign-up call to action" in seen["exec_planning_task"])
 check("execution agents and the quality checker see the success criteria",
       seen["blueprint"]["task_understanding"]["success_criteria"] == UNDERSTANDING["success_criteria"]
@@ -216,5 +256,31 @@ saved = open(os.path.join(tmp, "Let Jarvis Handle It", "Test", "Implementation p
                           "agent_plan_p1.md"), encoding="utf-8").read()
 check("the saved plan shows the understanding and the depth",
       "## Task Understanding" in saved and "Reads in under 2 minutes" in saved and "**Research Depth:** focused" in saved)
+
+SIMPLE = {**UNDERSTANDING, "simple": True, "simple_reason": "The user gave everything needed."}
+answers["research_choice"] = True
+result = run("p2", SIMPLE)
+check("a simple task asks first, before any research",
+      gates[0] == "research_choice" and result.get("status") == "complete")
+asked = seen["gate_data"]["research_choice"]
+check("the question shows why it looks simple and what research is planned",
+      asked["simple_reason"] == "The user gave everything needed." and asked["planned_cycles"][0]["domain"] == "Step 1")
+check("answering 'research first' runs the research", calls["research"] == 1)
+
+answers["research_choice"] = False
+result = run("p3", SIMPLE)
+check("answering 'skip research' completes without research",
+      result.get("status") == "complete" and calls["research"] == 0
+      and not any(g.startswith("cycle_") for g in gates))
+check("execution is then planned knowing research was skipped, from a task blueprint",
+      seen["blueprint"]["research"] == "skipped by the user" and seen["blueprint"]["task_understanding"] == SIMPLE)
+saved = open(os.path.join(tmp, "Let Jarvis Handle It", "Test", "Implementation plan", "Agents",
+                          "agent_plan_p3.md"), encoding="utf-8").read()
+check("the saved plan records the choice, so a restart doesn't ask again",
+      "**Research:** skipped by the user" in saved and '"research_choice": "skipped"' in saved)
+
+result = run("p4", SIMPLE, tools=("youtube_api",))
+check("a simple-looking task that uses a service is researched without asking",
+      "research_choice" not in gates and calls["research"] == 1)
 
 print("\nAll task understanding checks passed.")

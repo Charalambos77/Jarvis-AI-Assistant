@@ -125,7 +125,9 @@ Output a JSON object with exactly these keys:
   "assumptions": ["what you are assuming where the task is silent, so the user can correct it"],
   "services": ["any API, MCP server or external platform the work will read from or act on"],
   "research_depth": "focused|standard|deep",
-  "depth_reason": "one sentence: why that much research"
+  "depth_reason": "one sentence: why that much research",
+  "simple": false,
+  "simple_reason": "one sentence: why the task is or isn't simple"
 }
 
 Rules:
@@ -133,6 +135,7 @@ Rules:
 2. Even a task that looks simple has unknowns worth researching (best practice for the format, the audience, examples of excellent results, pitfalls). List at least two.
 3. Success criteria are specific and checkable ("20 competitors from each of the 5 countries, each with a website"), never vague ("high quality").
 4. "focused" suits a small, clear task, "standard" most tasks, "deep" a large, open-ended or high-stakes one.
+5. `simple` is true only for a small, self-contained task where the user already gave everything needed and no API, MCP or external platform is involved (e.g. "turn these notes into a bullet list"). Jarvis then asks the user whether to research it anyway or go straight to the work. When in doubt, it is not simple.
 """
 
 _UNDERSTANDING_LIST_KEYS = ("deliverables", "constraints", "success_criteria", "unknowns", "assumptions", "services")
@@ -168,7 +171,9 @@ def understand_task(task: str, event_logger=None) -> dict:
     if not isinstance(raw, dict):
         return {}
 
-    understanding = {k: str(raw.get(k) or "").strip() for k in ("goal", "task_type", "audience", "depth_reason")}
+    understanding = {k: str(raw.get(k) or "").strip()
+                     for k in ("goal", "task_type", "audience", "depth_reason", "simple_reason")}
+    understanding["simple"] = raw.get("simple") is True and not raw.get("services")
     for key in _UNDERSTANDING_LIST_KEYS:
         items = raw.get(key) if isinstance(raw.get(key), list) else []
         understanding[key] = [str(i).strip() for i in items if str(i).strip()]
@@ -575,6 +580,7 @@ def plan_execution_agents(
     redirect_note: str | None = None,
     rejected_steps: list[str] | None = None,
     event_logger=None,
+    researched: bool = True,
 ) -> list[dict]:
     """Plan the execution agents from the finished research.
 
@@ -584,6 +590,9 @@ def plan_execution_agents(
     whole roster — roles, briefs, tools and output specs — from the master
     blueprint and the user's brief. On a rejection at the execution blueprint gate
     it re-plans the roster with the user's note, leaving the research cycles alone.
+
+    With `researched=False` the user chose to skip research for a simple task, so
+    the prompt says there is none and the blueprint only restates the task.
 
     Falls back to the draft with only its tools revised if the model fails or
     returns no usable agents; it never blocks the pipeline.
@@ -604,14 +613,26 @@ def plan_execution_agents(
             "reject unless the note says otherwise.\n\n"
         )
 
+    if researched:
+        status = "Research is now COMPLETE. Plan the execution agents that will produce what the user asked for."
+        draft_label = "DRAFT ROSTER (written before any research; a starting point only — add, drop, merge or rewrite agents)"
+        blueprint_label = "COMPLETED RESEARCH — MASTER BLUEPRINT (the source of truth)"
+        no_research_rule = "Do not plan research. Research is finished."
+    else:
+        status = ("The user chose to skip research for this simple task. Plan the execution agents that will "
+                  "do the work and produce what the user asked for, straight from the task.")
+        draft_label = "DRAFT ROSTER (a starting point — add, drop, merge or rewrite agents)"
+        blueprint_label = "TASK BLUEPRINT (no research was run)"
+        no_research_rule = "Do not plan research agents. Each agent does its part of the work directly."
+
     user_input = f"""ORIGINAL TASK: {task}
 
-{brief_block}Research is now COMPLETE. Plan the execution agents that will produce what the user asked for.
+{brief_block}{status}
 
-DRAFT ROSTER (written before any research; a starting point only — add, drop, merge or rewrite agents):
+{draft_label}:
 {json.dumps(draft_agents, indent=2)}
 
-COMPLETED RESEARCH — MASTER BLUEPRINT (the source of truth):
+{blueprint_label}:
 {json.dumps(master_blueprint, indent=2)}
 
 {_connected_services()}
@@ -621,7 +642,7 @@ COMPLETED RESEARCH — MASTER BLUEPRINT (the source of truth):
 3. `output_spec` reflects what the research actually found: for example, require one section per competitor only if the blueprint covers those competitors. `required_keys` are keys of the agent's final JSON; set `min_word_count` only where length matters.
 4. One focused purpose per agent. Role-first ids ending in `_exec_N` (e.g. `report_writer_exec_1`), and `role` is the human-readable name.
 5. `tools_needed` uses the exact service names from the blueprint's tool_recommendations, or of a connected service listed above when it fits the agent's job better. Don't just keyword-match the brief: read each tool's "purpose" and "cons" for dependencies — if uploading a file and editing a document's content are separate tools, an agent that must do both needs both. Leave it empty if the agent needs no external tool.
-6. Do not plan research. Research is finished.
+6. {no_research_rule}
 
 Return JSON: {{"execution_agents": [{{"agent_id": "...", "role": "...", "brief": "...", "tools_needed": [], "output_spec": {{"required_keys": [], "min_word_count": 0}}}}]}}"""
 
@@ -652,6 +673,8 @@ Return JSON: {{"execution_agents": [{{"agent_id": "...", "role": "...", "brief":
         print("[Brain] Execution planning returned no usable agents; keeping the draft roster.")
     except Exception as e:
         print(f"[Brain] Execution planning failed, keeping the draft roster: {e}")
+    if not researched:
+        return draft_agents
     return _revise_draft_tools(task, draft_agents, master_blueprint, event_logger=event_logger)
 
 
