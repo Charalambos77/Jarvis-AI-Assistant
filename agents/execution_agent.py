@@ -194,8 +194,12 @@ RULES:
                             "icon": "🛠️"
                         }
                     })
-                result = run_tool(handlers, project_name, agent_id, fc.name, tool_args,
-                                  event_logger=event_logger)
+                # Off the event loop: execution agents run side by side under
+                # asyncio.gather, and a coding task can take minutes. Called
+                # inline, it would freeze every other agent until it finished.
+                result = await loop.run_in_executor(
+                    None, lambda n=fc.name, a=tool_args: run_tool(
+                        handlers, project_name, agent_id, n, a, event_logger=event_logger))
                 artifact = _extract_artifact(fc.name, tool_args, result)
                 if artifact:
                     collected_artifacts.append(artifact)

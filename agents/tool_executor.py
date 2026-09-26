@@ -135,8 +135,8 @@ ALWAYS_ON_TOOLS = {
 
 
 # ---------------------------------------------------------------------------
-# CODE TOOLS — real software work, bound only when the optional Claude Agent
-# SDK is installed and keyed. Absent, nothing here binds and the pipeline runs
+# CODE TOOLS — real software work, bound only when the optional coding agent has
+# a usable backend (Claude Agent SDK + key, or the Claude CLI). Absent, nothing here binds and the pipeline runs
 # exactly as it did before.
 # ---------------------------------------------------------------------------
 
@@ -434,8 +434,9 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str,
 
     A tool is bound for real only if:
       - it's an always-on tool (write_file/read_file/list_deliverables), or
-      - it's the coding agent AND the optional Claude Agent SDK is installed and
-        keyed (see agents/code_agent.py) AND include_code_agent is set — research
+      - it's the coding agent AND it has a usable backend — the Claude Agent SDK
+        with ANTHROPIC_API_KEY, or the Claude CLI (see agents/code_agent.py) —
+        AND include_code_agent is set — research
         agents pass False, since research reads and summarizes, it doesn't build, or
       - its backing service is configured/up in api_registry.json (i.e. the
         user approved it at the API/MCP Plugging Gate) AND a real handler
