@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Suggestions</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #05070A;
+            --panel: rgba(255,255,255,0.025);
+            --line: rgba(255,255,255,0.08);
+            --text: #E2E8F0;
+            --muted: #9CA3AF;
+            --dim: #4B5563;
+            --accent: #60A5FA;
+            --go: #34D399;
+            --no: #F87171;
+            --warn: #FBBF24;
+            --idea: #C084FC;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        .shell { display: flex; flex-direction: column; height: 100vh; }
+
+        header {
+            flex: 0 0 auto; padding: 22px 34px;
+            border-bottom: 1px solid var(--line);
+            display: flex; align-items: flex-start; gap: 24px;
+            background: rgba(8,10,14,0.9);
+        }
+        .id-block { flex: 1 1 auto; min-width: 0; }
+        .eyebrow {
+            font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin-bottom: 8px;
+        }
+        h1 { margin: 0; font-size: 22px; font-weight: 700; color: #FFF; }
+        .sub { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.7; max-width: 780px; }
+        .top-right-nav { display: flex; gap: 10px; flex: 0 0 auto; }
+        .nav-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit;
+            font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+            text-transform: uppercase; padding: 12px 20px; border-radius: 8px;
+            cursor: pointer; transition: all .25s ease;
+        }
+        .nav-btn:hover { background: rgba(255,255,255,0.07); color: #FFF; border-color: rgba(255,255,255,0.25); }
+        .nav-btn.active { background: #FFF; color: #000; border-color: #FFF; }
+
+        .main { flex: 1 1 auto; min-height: 0; display: flex; }
+        aside {
+            flex: 0 0 290px; border-right: 1px solid var(--line); overflow-y: auto; padding: 22px 16px;
+        }
+        .body { flex: 1 1 auto; min-width: 0; overflow-y: auto; padding: 26px 34px 70px; }
+        .body::-webkit-scrollbar, aside::-webkit-scrollbar { width: 10px; }
+        .body::-webkit-scrollbar-thumb, aside::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 6px; }
+        @media (max-width: 900px) {
+            .main { flex-direction: column; }
+            aside { flex: 0 0 auto; max-height: 200px; border-right: none; border-bottom: 1px solid var(--line); }
+            .body { padding: 20px 16px 60px; }
+            header { flex-direction: column; padding: 18px 16px; }
+        }
+
+        .pick {
+            padding: 12px 13px; border-radius: 10px; border: 1px solid transparent;
+            cursor: pointer; margin-bottom: 6px; transition: all .2s ease;
+        }
+        .pick:hover { background: rgba(255,255,255,0.04); }
+        .pick.on { background: rgba(255,255,255,0.06); border-color: var(--line); }
+        .pick .t { font-size: 12.5px; color: #FFF; line-height: 1.5; font-weight: 500;
+                   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .pick .m { font-size: 11px; color: var(--dim); margin-top: 6px; }
+        .pick .m .live { color: var(--warn); }
+
+        .section-title {
+            font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin: 32px 0 14px; display: flex; align-items: center; gap: 10px;
+        }
+        .section-title:first-child { margin-top: 0; }
+        .count-pill {
+            background: rgba(255,255,255,0.06); border-radius: 20px; padding: 2px 9px;
+            font-size: 10px; letter-spacing: 1px; color: var(--muted);
+        }
+        .banner {
+            border-radius: 12px; padding: 15px 18px; font-size: 12.5px; line-height: 1.7; margin-bottom: 18px;
+            border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+            display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+        }
+        .banner .grow { flex: 1 1 300px; }
+        .banner.live { border-color: rgba(251,191,36,0.42); background: rgba(251,191,36,0.05); }
+        .banner.live b { color: var(--warn); }
+        .banner.bad { border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.05); }
+
+        .card {
+            background: var(--panel); border: 1px solid var(--line);
+            border-radius: 12px; padding: 20px 22px; margin-bottom: 14px;
+        }
+        .part { border-left: 3px solid rgba(96,165,250,0.5); }
+        .part.swapped { border-left-color: var(--idea); }
+        .part-head { display: flex; align-items: flex-start; gap: 14px; }
+        .part-num {
+            flex: 0 0 auto; width: 28px; height: 28px; border-radius: 8px; background: rgba(255,255,255,0.06);
+            display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #FFF;
+        }
+        h2 { margin: 0; font-size: 16px; color: #FFF; font-weight: 600; }
+        h3 { margin: 0; font-size: 14px; color: #FFF; font-weight: 600; line-height: 1.5; }
+        .goal { font-size: 12.5px; color: var(--muted); margin-top: 5px; line-height: 1.6; }
+        .text { font-size: 12.5px; color: var(--text); line-height: 1.75; margin-top: 12px; white-space: pre-wrap; }
+
+        .badges { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 11px; }
+        .badge {
+            font-size: 10.5px; letter-spacing: .6px; padding: 4px 10px; border-radius: 6px;
+            background: rgba(255,255,255,0.05); color: var(--muted); border: 1px solid var(--line);
+        }
+        .badge.best { background: rgba(52,211,153,0.13); color: var(--go); border-color: rgba(52,211,153,0.25); }
+        .badge.cheapest { background: rgba(251,191,36,0.14); color: var(--warn); border-color: rgba(251,191,36,0.28); }
+        .badge.best_result { background: rgba(192,132,252,0.14); color: var(--idea); border-color: rgba(192,132,252,0.3); }
+        .badge.fastest { background: rgba(96,165,250,0.14); color: var(--accent); border-color: rgba(96,165,250,0.3); }
+        .badge.applied { background: #FFF; color: #000; border-color: #FFF; font-weight: 600; }
+        .badge.src { background: rgba(192,132,252,0.10); color: var(--idea); border-color: rgba(192,132,252,0.25); }
+
+        .est { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+        .est > div { background: rgba(0,0,0,0.3); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; min-width: 0; }
+        .est .k { font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--dim); }
+        .est .v { font-size: 12px; color: var(--text); margin-top: 4px; line-height: 1.5; overflow-wrap: anywhere; }
+        @media (max-width: 700px) { .est { grid-template-columns: 1fr; } }
+
+        .alts { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 16px; }
+        .alt {
+            border: 1px solid var(--line); border-radius: 10px; padding: 16px 17px; background: rgba(0,0,0,0.25);
+            display: flex; flex-direction: column; min-width: 0;
+        }
+        .alt.applied { border-color: rgba(255,255,255,0.45); }
+        .alt.outdated { opacity: .45; }
+        .alt .text { margin-top: 8px; }
+        .pc { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; font-size: 12px; line-height: 1.6; }
+        .pc ul { margin: 4px 0 0; padding-left: 16px; color: var(--muted); }
+        .pc .k { font-size: 9.5px; letter-spacing: 1.4px; text-transform: uppercase; }
+        .pc .pro .k { color: var(--go); } .pc .con .k { color: var(--no); }
+        @media (max-width: 700px) { .pc { grid-template-columns: 1fr; } }
+        .services { font-size: 11.5px; color: var(--dim); margin-top: 10px; }
+        .services span { font-family: 'JetBrains Mono', monospace; color: var(--accent); }
+        .alt .actions { margin-top: auto; padding-top: 14px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+        .agents { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+        .agent { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12px; line-height: 1.6; }
+        .agent:last-child { border-bottom: none; }
+        .agent .r { color: #FFF; font-weight: 500; }
+        .agent .id { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--dim); margin-left: 6px; }
+        .agent .b { color: var(--muted); margin-top: 3px; }
+        .agent .tools { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--accent); margin-top: 3px; }
+        .sub-part { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: rgba(255,255,255,0.025); }
+        .sub-part .n { font-size: 12.5px; color: #FFF; font-weight: 500; }
+
+        .btn {
+            border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text);
+            font-family: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: .8px;
+            padding: 9px 15px; border-radius: 8px; cursor: pointer; transition: all .2s ease; white-space: nowrap;
+        }
+        .btn:hover { background: rgba(255,255,255,0.08); }
+        .btn:disabled { opacity: .4; cursor: default; }
+        .btn.go { border-color: rgba(52,211,153,0.4); color: var(--go); }
+        .btn.go:hover { background: rgba(52,211,153,0.13); }
+        .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); padding-left: 4px; padding-right: 4px; }
+        .btn.ghost:hover { background: transparent; color: #FFF; }
+        .empty {
+            border: 1px dashed var(--line); border-radius: 12px; padding: 26px;
+            font-size: 12.5px; color: var(--dim); line-height: 1.8;
+        }
+        .toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            background: #111827; border: 1px solid var(--line); color: var(--text); font-size: 12.5px;
+            padding: 11px 18px; border-radius: 10px; opacity: 0; transition: opacity .25s ease; pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div class="id-block">
+            <div class="eyebrow">Jarvis · Suggestions</div>
+            <h1>Suggestions</h1>
+            <div class="sub">
+                Once Jarvis has researched how to do a job, he splits the plan into parts and shows you the other ways
+                each part could be done: the <em>best way</em>, the <em>cheapest</em> and the one with the
+                <em>best result</em>. Swap one in for a single part or for the whole plan. You can change your mind
+                until the execution agents start; the plan waiting on the Brain's approval is the one shown here.
+            </div>
+        </div>
+        <!-- Filled in by nav_ui.js, which gives every page the same set. -->
+        <div class="top-right-nav"></div>
+    </header>
+    <div class="main">
+        <aside id="plans"></aside>
+        <div class="body" id="view"></div>
+    </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const LABELS = { best: "Best way", cheapest: "Cheapest", best_result: "Best result", fastest: "Fastest", other: "Another way" };
+const ORDER = ["best", "cheapest", "best_result", "fastest", "other"];
+
+let plans = [];
+let selected = null;
+try { selected = new URLSearchParams(location.search).get("plan") || localStorage.getItem("jarvis_active_pipeline_id"); } catch (e) {}
+let state = null;
+let busy = false;
+// Which agent lists are open, kept across the repaint.
+const open = {};
+
+function ago(t) {
+    if (!t) return "";
+    const s = Math.floor(Date.now() / 1000 - t);
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+}
+function toast(msg) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => el.classList.remove("show"), 3200);
+}
+
+function renderPlans() {
+    const host = document.getElementById("plans");
+    if (!plans.length) {
+        host.innerHTML = `<div class="eyebrow" style="padding:0 6px">Pipelines</div>
+            <div class="empty" style="padding:16px">No pipeline has suggestions yet.</div>`;
+        return;
+    }
+    host.innerHTML = `<div class="eyebrow" style="padding:0 6px 6px">Pipelines</div>` + plans.map(p => `
+        <div class="pick ${p.plan_id === selected ? "on" : ""}" onclick="choose('${esc(p.plan_id)}')">
+            <div class="t">${esc(p.task || p.plan_id)}</div>
+            <div class="m">${p.gate_open && !p.locked ? `<span class="live">Waiting for you</span> · ` : ""}
+                ${p.locked ? "Running or done · " : ""}${p.parts} part(s) · ${p.suggestions} idea(s)
+                ${p.swapped ? ` · ${p.swapped} swapped` : ""}</div>
+        </div>`).join("");
+}
+
+function estimate(e) {
+    e = e || {};
+    if (!e.cost && !e.time && !e.quality) return "";
+    return `<div class="est">
+        <div><div class="k">Cost</div><div class="v">${esc(e.cost || "—")}</div></div>
+        <div><div class="k">Time</div><div class="v">${esc(e.time || "—")}</div></div>
+        <div><div class="k">Result</div><div class="v">${esc(e.quality || "—")}</div></div>
+    </div>`;
+}
+function agentList(agents) {
+    return (agents || []).map(a => `
+        <div class="agent"><span class="r">${esc(a.role || a.agent_id)}</span><span class="id">${esc(a.agent_id)}</span>
+            <div class="b">${esc(a.brief)}</div>
+            ${(a.tools_needed || []).length ? `<div class="tools">${a.tools_needed.map(esc).join(" · ")}</div>` : ""}
+        </div>`).join("");
+}
+function toggle(key) {
+    open[key] = !open[key];
+    render();
+}
+function toggleLink(key, label) {
+    return `<button class="btn ghost" onclick="toggle('${esc(key)}')">${open[key] ? "Hide" : "Show"} ${label}</button>`;
+}
+function kindBadges(kinds) {
+    return (kinds || []).map(k => `<span class="badge ${esc(k)}">${esc(LABELS[k] || k)}</span>`).join("");
+}
+function sortByKind(list) {
+    return list.slice().sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
+}
+
+function suggestionCard(s, canChange, partName) {
+    const detailKey = "s:" + s.id;
+    const status = s.status === "applied" ? `<span class="badge applied">In the plan</span>`
+                 : s.status === "outdated" ? `<span class="badge">No longer fits the plan</span>` : "";
+    const inside = s.scope === "plan"
+        ? (s.parts || []).map((p, i) => `<div class="sub-part"><div class="n">${i + 1}. ${esc(p.name)}</div>
+              ${p.goal ? `<div class="goal">${esc(p.goal)}</div>` : ""}
+              ${open[detailKey] ? agentList(p.agents) : ""}</div>`).join("")
+        : (open[detailKey] ? `<div class="agents">${agentList(s.agents)}</div>` : "");
+    const agentCount = s.scope === "plan"
+        ? (s.parts || []).reduce((n, p) => n + (p.agents || []).length, 0) : (s.agents || []).length;
+    const useLabel = s.scope === "plan" ? "Use for the whole plan" : `Use for ${partName ? "“" + partName + "”" : "this part"}`;
+    return `<div class="alt ${s.status === "applied" ? "applied" : ""} ${s.status === "outdated" ? "outdated" : ""}">
+        <div class="badges">${kindBadges(s.kinds && s.kinds.length ? s.kinds : [s.kind])}${status}</div>
+        <h3>${esc(s.title)}</h3>
+        ${s.summary ? `<div class="text">${esc(s.summary)}</div>` : ""}
+        ${s.how && open[detailKey] ? `<div class="text" style="color:var(--muted)">${esc(s.how)}</div>` : ""}
+        ${estimate(s.estimate)}
+        ${(s.pros || []).length || (s.cons || []).length ? `<div class="pc">
+            <div class="pro"><div class="k">Good</div><ul>${(s.pros || []).map(p => `<li>${esc(p)}</li>`).join("")}</ul></div>
+            <div class="con"><div class="k">Watch out</div><ul>${(s.cons || []).map(p => `<li>${esc(p)}</li>`).join("")}</ul></div>
+        </div>` : ""}
+        ${(s.services || []).length ? `<div class="services">Needs: ${s.services.map(x => `<span>${esc(x)}</span>`).join(", ")}</div>` : ""}
+        ${inside}
+        <div class="actions">
+            ${canChange && s.status === "open"
+                ? `<button class="btn go" ${busy ? "disabled" : ""} onclick="useSuggestion('${esc(s.id)}')">${esc(useLabel)}</button>` : ""}
+            ${toggleLink(detailKey, `details · ${agentCount} agent(s)`)}
+        </div>
+    </div>`;
+}
+
+function render() {
+    renderPlans();
+    const host = document.getElementById("view");
+    if (!selected || !state) {
+        host.innerHTML = plans.length
+            ? `<div class="empty">Pick a pipeline on the left.</div>`
+            : `<div class="empty">Suggestions appear here once a pipeline finishes its research. Jarvis splits the plan
+                into parts and, for each part and for the whole plan, shows the best way, the cheapest and the one with
+                the best result, whether or not you told him how to do it.</div>`;
+        return;
+    }
+    if (state.error_page) {
+        host.innerHTML = `<div class="empty">${esc(state.error_page)}</div>`;
+        return;
+    }
+    const canChange = !state.locked && state.status !== "working";
+    const parts = state.parts || [];
+    const all = state.suggestions || [];
+    const whole = sortByKind(all.filter(s => s.scope === "plan"));
+    const cur = state.current_plan || {};
+
+    let banner = "";
+    if (state.status === "working") {
+        banner = `<div class="banner live"><div class="grow"><b>Jarvis is looking for other ways again…</b> This takes a minute.</div></div>`;
+    } else if (state.locked) {
+        banner = `<div class="banner"><div class="grow">The execution agents have started, so this plan is final. It shows what ran and the ways you could have chosen.</div></div>`;
+    } else if (state.gate_open) {
+        banner = `<div class="banner live"><div class="grow"><b>The execution plan is waiting for your approval.</b>
+            Anything you swap in here is what runs when you approve it on the Brain.</div>
+            <button class="btn" onclick="location.href='command_center.html'">Go to the approval</button></div>`;
+    } else {
+        banner = `<div class="banner"><div class="grow">You can still swap ways in: the execution agents have not started.</div></div>`;
+    }
+    if (state.status === "failed") {
+        banner += `<div class="banner bad"><div class="grow">Jarvis could not write the suggestions this time
+            (${esc(state.error || "the model did not answer")}). The plan below still runs as it is.</div>
+            <button class="btn" onclick="askAgain()">Try again</button></div>`;
+    }
+
+    const tools = canChange ? `<div class="banner" style="padding:10px 14px">
+        <div class="grow" style="font-size:12px">Changed your mind?</div>
+        <button class="btn" ${state.can_undo && !busy ? "" : "disabled"} onclick="post('undo')">Undo last swap</button>
+        <button class="btn" ${state.can_undo && !busy ? "" : "disabled"} onclick="post('reset')">Back to Jarvis's plan</button>
+        <button class="btn" ${busy ? "disabled" : ""} onclick="askAgain()">Ask for new ideas</button>
+    </div>` : "";
+
+    const summary = `<div class="card">
+        <div class="badges">
+            ${cur.followed_owner ? `<span class="badge">Follows how you asked for it</span>` : ""}
+            ${(cur.kinds || []).length ? `<span class="badge">Jarvis's plan is already:</span>${kindBadges(cur.kinds)}` : ""}
+            <span class="badge">${parts.length} part(s)</span>
+            <span class="badge">updated ${esc(ago(state.updated_at))}</span>
+        </div>
+        <h2>${esc(state.task || state.plan_id)}</h2>
+        ${cur.note ? `<div class="text" style="color:var(--muted)">${esc(cur.note)}</div>` : ""}
+        ${estimate(cur.estimate)}
+    </div>`;
+
+    const wholeHtml = `<div class="section-title">Other ways to do the whole plan <span class="count-pill">${whole.length}</span></div>
+        ${whole.length ? `<div class="alts" style="margin-top:0">${whole.map(s => suggestionCard(s, canChange)).join("")}</div>`
+                       : `<div class="empty">No different way to do the whole plan. The ideas are per part, below.</div>`}`;
+
+    // Ideas for parts the plan no longer has (after a whole-plan swap) are hidden, not shown under new parts.
+    const hidden = all.filter(s => s.scope !== "plan" && s.status === "outdated").length;
+    const partsHtml = `<div class="section-title">The plan, part by part <span class="count-pill">${parts.length}</span></div>` +
+        (hidden ? `<div class="goal" style="margin:-4px 0 14px">${hidden} idea(s) for the old parts are hidden while
+            the whole plan is swapped. Undo or go back to Jarvis's plan to see them again.</div>` : "") +
+        parts.map((p, i) => {
+            const mine = sortByKind(all.filter(s => s.scope === p.part_id && s.status !== "outdated"));
+            const swapped = String(p.source || "").startsWith("suggestion:");
+            const k = "p:" + p.part_id;
+            return `<div class="card part ${swapped ? "swapped" : ""}">
+                <div class="part-head">
+                    <div class="part-num">${i + 1}</div>
+                    <div style="flex:1;min-width:0">
+                        <div class="badges" style="margin-bottom:6px">
+                            ${swapped ? `<span class="badge src">Your choice</span>` : `<span class="badge">Jarvis's plan</span>`}
+                            <span class="badge">${(p.agents || []).length} agent(s)</span>
+                        </div>
+                        <h2>${esc(p.name)}</h2>
+                        ${p.goal ? `<div class="goal">${esc(p.goal)}</div>` : ""}
+                    </div>
+                </div>
+                ${p.approach ? `<div class="text">${esc(p.approach)}</div>` : ""}
+                ${estimate(p.estimate)}
+                <div style="margin-top:8px">${toggleLink(k, "who does it")}</div>
+                ${open[k] ? `<div class="agents">${agentList(p.agents)}</div>` : ""}
+                ${mine.length ? `<div class="alts">${mine.map(s => suggestionCard(s, canChange, p.name)).join("")}</div>`
+                              : `<div class="goal" style="margin-top:12px">No other way worth suggesting for this part.</div>`}
+            </div>`;
+        }).join("");
+
+    host.innerHTML = banner + tools + summary + wholeHtml + partsHtml;
+}
+
+async function loadPlans() {
+    try {
+        const data = await (await fetch("/suggestions")).json();
+        plans = data.plans || [];
+        if (!selected || !plans.some(p => p.plan_id === selected)) {
+            const waiting = plans.find(p => p.gate_open && !p.locked);
+            selected = (waiting || plans[0] || {}).plan_id || null;
+        }
+    } catch (e) { /* Jarvis restarting; the next tick retries. */ }
+}
+async function loadState() {
+    if (!selected) { state = null; return; }
+    try {
+        const res = await fetch("/suggestions/" + encodeURIComponent(selected));
+        const data = await res.json();
+        state = res.ok ? data : { error_page: data.error || "Could not load the suggestions." };
+    } catch (e) { /* keep what is shown */ }
+}
+async function refresh() {
+    if (busy) return;
+    await loadPlans();
+    await loadState();
+    render();
+}
+function choose(planId) {
+    selected = planId;
+    state = null;
+    refresh();
+}
+async function post(action, body) {
+    if (busy) return;
+    busy = true;
+    render();
+    try {
+        const res = await fetch(`/suggestions/${encodeURIComponent(selected)}/${action}`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {})
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || "That didn't work."); }
+        else if (data.plan_id) { state = data; }
+        return res.ok ? data : null;
+    } catch (e) {
+        toast("Jarvis isn't answering. Try again in a moment.");
+        return null;
+    } finally {
+        busy = false;
+        render();
+    }
+}
+async function useSuggestion(id) {
+    const s = (state.suggestions || []).find(x => x.id === id);
+    if (s && s.scope === "plan" && (state.parts || []).some(p => String(p.source || "").startsWith("suggestion:")) &&
+        !confirm("This replaces the whole plan, including the parts you already swapped. Go ahead?")) return;
+    const done = await post("apply", { suggestion_id: id });
+    if (done) toast(s && s.scope === "plan" ? "The whole plan now uses this way." : "This part now uses this way.");
+}
+async function askAgain() {
+    if ((state.parts || []).some(p => String(p.source || "").startsWith("suggestion:")) &&
+        !confirm("Jarvis will look for new ideas starting from the plan as it is now, with your swaps kept in. Go ahead?")) return;
+    const done = await post("refresh");
+    if (done) { toast("Jarvis is looking for other ways."); refresh(); }
+}
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+  <script src="nav_ui.js"></script>
+  <script src="questions_ui.js"></script>
+  <script src="sections_ui.js"></script>
+</body>
+</html>

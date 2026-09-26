@@ -27,6 +27,8 @@
           aliases: ["brain", "execution"] },
         { key: "plan", label: "Plan", href: "plan.html", aliases: ["plan"] },
         { key: "library", label: "Library", href: "library.html", aliases: ["library"] },
+        // Other ways to do a pipeline's plan (best, cheapest, best result), by part.
+        { key: "suggestions", label: "Suggestions", href: "suggestions.html", aliases: ["suggestions"] },
         { key: "commands", label: "Commands", href: "commands.html", aliases: ["commands"] },
         // APIs and MCP servers are managed in the Control room now, so a page's
         // old "APIs/MCPs" button is taken over and relabelled rather than kept.
@@ -60,6 +62,7 @@
         "execution.html": "home",
         "plan.html": "plan",
         "library.html": "library",
+        "suggestions.html": "suggestions",
         "commands.html": "commands",
         "control_room.html": "control",
         "provider_comparison.html": "control"
@@ -100,11 +103,11 @@
         if (document.getElementById("jarvis-nav-style")) return;
         var style = document.createElement("style");
         style.id = "jarvis-nav-style";
-        // Six buttons in a row does not fit every header, and a nav that runs
+        // Seven buttons in a row does not fit every header, and a nav that runs
         // off the edge of the page is worse than one that takes two lines.
         style.textContent =
             // Only the bars that run across a header need this. Left alone,
-            // six buttons in a row take the whole width and crush the page
+            // seven buttons in a row take the whole width and crush the page
             // title next to them; wrapped and capped, they fold onto a second
             // line instead. The Brain and execution screens stack their
             // buttons in a column, where none of this applies.
@@ -190,7 +193,7 @@
             if (dest.key === CURRENT && !found.classList.contains("active")) {
                 found.classList.add("active");
             }
-            // Re-appending puts the six into the same order everywhere, rather
+            // Re-appending puts the seven into the same order everywhere, rather
             // than leaving the new ones tacked on after whatever the page
             // already had. Anything else in the bar (a session dropdown, Task
             // Logs) keeps its place in front of them.
@@ -233,6 +236,22 @@
         }
         tickControl();
         setInterval(tickControl, 3000);
+
+        /* Plans whose execution gate is open with other ways still to look at. */
+        function tickSuggestions() {
+            fetch("/suggestions")
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var count = data.waiting || 0;
+                    var btn = document.querySelector('[data-nav="suggestions"]');
+                    if (!btn) return;
+                    btn.textContent = count ? "Suggestions (" + count + ")" : "Suggestions";
+                    btn.classList.toggle("jarvis-nav-waiting", count > 0);
+                })
+                .catch(function () { /* Jarvis restarting; the next tick retries. */ });
+        }
+        tickSuggestions();
+        setInterval(tickSuggestions, 5000);
     }
 
     function start() {

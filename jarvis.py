@@ -38,7 +38,7 @@ import sections as section_store
 import command_gate
 import control_room
 import run_control
-from agents import tool_review, tool_requests, agent_questions, tool_onboarding
+from agents import tool_review, tool_requests, agent_questions, tool_onboarding, plan_suggestions
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -1920,6 +1920,11 @@ def library_page():
     return send_from_directory(BASE_DIR, "library.html")
 
 
+@app.route("/suggestions.html")
+def suggestions_page():
+    return send_from_directory(BASE_DIR, "suggestions.html")
+
+
 @app.route("/api/console_logs", methods=["GET"])
 def get_console_logs():
     with CONSOLE_LOGS_LOCK:
@@ -2995,6 +3000,138 @@ def get_plans():
         decorated_plans.append(p_copy)
 
     return jsonify({"plans": decorated_plans})
+
+
+# ---------------------------------------------------------------------------
+# Suggestions — the other ways to do a pipeline's plan (best, cheapest, best
+# result), split by part, and swapping one in. The pipeline writes them after
+# research and reads the owner's choices back at the execution blueprint gate.
+# ---------------------------------------------------------------------------
+
+def _plan_project(plan_id: str) -> tuple[dict | None, str]:
+    with PLAN_STORE_LOCK:
+        plan = next((p for p in PLAN_STORE if p.get("id") == plan_id), None)
+        plan = dict(plan) if plan else None
+    return plan, (plan or {}).get("project_name") or "Default Project"
+
+
+def _suggestion_view(state: dict, plan: dict | None) -> dict:
+    view = dict(state)
+    view["gate_open"] = bool(plan and plan.get("current_gate") == "execution_blueprint")
+    view["phase"] = (plan or {}).get("phase")
+    view["kind_labels"] = plan_suggestions.KIND_LABELS
+    view.pop("original_parts", None)
+    view["can_undo"] = bool(state.get("history")) and not state.get("locked")
+    view.pop("history", None)
+    return view
+
+
+def _push_chosen_plan_to_gate(plan_id: str, state: dict):
+    """Show the swapped-in plan on the open gate and the plan page straight away.
+
+    The pipeline itself only reads the choice when the gate is answered.
+    """
+    agents = plan_suggestions.execution_agents(state)
+    with PIPELINE_LOCK:
+        gate = _get_gate_state(plan_id)
+        if gate.get("current_gate") == "execution_blueprint" and isinstance(gate.get("gate_data"), dict):
+            gate["gate_data"] = dict(gate["gate_data"], execution_agents=agents)
+    with PLAN_STORE_LOCK:
+        for plan in PLAN_STORE:
+            if plan.get("id") == plan_id:
+                if isinstance(plan.get("agent_plan"), dict):
+                    plan["agent_plan"] = dict(plan["agent_plan"], execution_agents=agents)
+                if plan.get("current_gate") == "execution_blueprint" and isinstance(plan.get("gate_data"), dict):
+                    plan["gate_data"] = dict(plan["gate_data"], execution_agents=agents)
+                break
+
+
+@app.route("/suggestions", methods=["GET"])
+def suggestions_list():
+    """Every pipeline that has suggestions, newest first, for the page's list and the nav count."""
+    with PLAN_STORE_LOCK:
+        plans = [dict(p) for p in PLAN_STORE]
+    items = []
+    for plan in plans:
+        state = plan_suggestions.load(plan.get("id"), plan.get("project_name") or "Default Project")
+        if not state:
+            continue
+        item = plan_suggestions.summary(state)
+        item["gate_open"] = plan.get("current_gate") == "execution_blueprint"
+        item["task"] = plan.get("task_summary") or item.get("task") or plan.get("task")
+        items.append(item)
+    items.sort(key=lambda i: i.get("updated_at") or 0, reverse=True)
+    # What the nav counts: plans waiting on the owner with other ways still open.
+    waiting = sum(1 for i in items if i["gate_open"] and not i["locked"] and i["open"])
+    return jsonify({"plans": items, "waiting": waiting})
+
+
+@app.route("/suggestions/<plan_id>", methods=["GET"])
+def suggestions_get(plan_id):
+    plan, project = _plan_project(plan_id)
+    state = plan_suggestions.load(plan_id, project)
+    if not state:
+        return jsonify({"error": "No suggestions for this pipeline yet. Jarvis writes them once research is finished."}), 404
+    return jsonify(_suggestion_view(state, plan))
+
+
+@app.route("/suggestions/<plan_id>/apply", methods=["POST"])
+def suggestions_apply(plan_id):
+    data = request.get_json(force=True) or {}
+    plan, project = _plan_project(plan_id)
+    result = plan_suggestions.apply(plan_id, project, str(data.get("suggestion_id") or ""))
+    if "error" in result:
+        return jsonify(result), 400
+    _push_chosen_plan_to_gate(plan_id, result["state"])
+    s = next((x for x in result["state"]["suggestions"] if x["id"] == data.get("suggestion_id")), {})
+    push_message("system", f"Plan changed on the Suggestions page: using \"{s.get('title', 'a suggestion')}\" "
+                           f"for {'the whole plan' if s.get('scope') == 'plan' else 'one part'} of pipeline {plan_id}.")
+    return jsonify(_suggestion_view(result["state"], plan))
+
+
+@app.route("/suggestions/<plan_id>/undo", methods=["POST"])
+def suggestions_undo(plan_id):
+    plan, project = _plan_project(plan_id)
+    result = plan_suggestions.undo(plan_id, project)
+    if "error" in result:
+        return jsonify(result), 400
+    _push_chosen_plan_to_gate(plan_id, result["state"])
+    return jsonify(_suggestion_view(result["state"], plan))
+
+
+@app.route("/suggestions/<plan_id>/reset", methods=["POST"])
+def suggestions_reset(plan_id):
+    plan, project = _plan_project(plan_id)
+    result = plan_suggestions.reset(plan_id, project)
+    if "error" in result:
+        return jsonify(result), 400
+    _push_chosen_plan_to_gate(plan_id, result["state"])
+    return jsonify(_suggestion_view(result["state"], plan))
+
+
+@app.route("/suggestions/<plan_id>/refresh", methods=["POST"])
+def suggestions_refresh(plan_id):
+    """Ask Jarvis for the suggestions again (after a failure, or for fresh ideas).
+
+    Starts over from the plan as it stands now, swaps included.
+    """
+    plan, project = _plan_project(plan_id)
+    if not plan:
+        return jsonify({"error": f"No pipeline '{plan_id}'."}), 404
+    state = plan_suggestions.load(plan_id, project)
+    if state and state.get("locked"):
+        return jsonify({"error": "The execution agents have already started, so the plan can't change now."}), 400
+    agents = plan_suggestions.execution_agents(state) if state else \
+        ((plan.get("agent_plan") or {}).get("execution_agents") or [])
+    if not agents or not plan.get("master_blueprint"):
+        return jsonify({"error": "Jarvis writes suggestions once research is finished and the plan exists."}), 400
+    task = (state or {}).get("brief") or plan.get("task") or plan.get("task_summary") or ""
+    plan_suggestions.mark_working(plan_id, project)
+
+    def work():
+        plan_suggestions.build(plan_id, project, task, agents, plan.get("master_blueprint"))
+    threading.Thread(target=work, daemon=True).start()
+    return jsonify({"status": "started"})
 
 
 @app.route("/api/pipeline_status", methods=["GET"])
