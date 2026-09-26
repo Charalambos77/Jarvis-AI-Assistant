@@ -9,7 +9,8 @@ import os
 from google import genai
 from google.genai import types
 import db
-from agents.brain import build_agent_plan, plan_execution_agents, refresh_cycle_briefs
+from agents.brain import (build_agent_plan, format_understanding, plan_execution_agents, refresh_cycle_briefs,
+                          services_involved)
 from agents.research_agent import run_research_agent
 from agents.execution_agent import run_execution_agent
 from agents.synthesis import (run_synthesis_agent, run_master_synthesis, MERGE_FACT_RULES,
@@ -635,7 +636,22 @@ def save_agent_plan_file(plan_id: str, agent_plan: dict, project_name: str = "De
     
     content = f"# Agent Spawn Plan - Plan ID: {plan_id}\n"
     content += f"**Task Summary:** {agent_plan.get('task_summary', 'N/A')}\n"
-    content += f"**Task Type:** {agent_plan.get('task_type', 'N/A')}\n\n"
+    content += f"**Task Type:** {agent_plan.get('task_type', 'N/A')}\n"
+    content += f"**Research Depth:** {agent_plan.get('research_depth', 'N/A')}\n"
+    if agent_plan.get('research_choice'):
+        content += f"**Research:** {'skipped by the user' if agent_plan['research_choice'] == 'skipped' else 'the user chose to research first'}\n"
+    content += "\n"
+    understanding = agent_plan.get('task_understanding') or {}
+    if understanding:
+        content += "## Task Understanding\n"
+        if understanding.get('goal'):
+            content += f"- **Goal:** {understanding['goal']}\n"
+        for key, label in (('deliverables', 'Deliverables'), ('constraints', 'Constraints'),
+                           ('success_criteria', 'Success criteria'), ('unknowns', 'Unknowns to research'),
+                           ('assumptions', 'Assumptions')):
+            if understanding.get(key):
+                content += f"- **{label}:**\n" + "".join(f"  - {item}\n" for item in understanding[key])
+        content += "\n"
     content += "## Research Cycles\n"
     for cycle in agent_plan.get('cycles', []):
         content += f"### Cycle {cycle.get('cycle_id')}: {cycle.get('domain', 'N/A')}\n"
@@ -927,6 +943,53 @@ def save_final_report_file(plan_id: str, report: dict, project_name: str = "Defa
 MAX_RETRIES = 3  # Configurable loop guard for all retry loops
 
 
+async def ask_research_choice(gate_approve_fn, agent_plan: dict, event_logger=None) -> str:
+    """Ask the user whether a task the Brain judged simple should be researched anyway.
+
+    Approving the gate keeps the planned research; rejecting it skips research and goes
+    straight to planning the work. Returns "research" or "skipped".
+    """
+    understanding = agent_plan.get("task_understanding") or {}
+    cycles = agent_plan.get("cycles") or []
+    data = {
+        "question": "This task looks simple. Research it first, or go straight to the work?",
+        "simple_reason": understanding.get("simple_reason", ""),
+        "task_understanding": understanding,
+        "planned_cycles": [{"cycle_id": c.get("cycle_id"), "domain": c.get("domain"), "goal": c.get("goal")}
+                           for c in cycles if isinstance(c, dict)],
+        "approve_means": "Research first",
+        "reject_means": "Skip research",
+    }
+    if event_logger:
+        event_logger({"event_type": "gate_waiting", "source": "research_choice", "data": data})
+        event_logger({"event_type": "narrative", "data": {
+            "phase": "gate", "icon": "❓",
+            "message": "This task looks simple. Should Jarvis research it first or go straight to the work?"}})
+    result = await gate_approve_fn(gate_id="research_choice", data=data)
+    if event_logger:
+        event_logger({"event_type": "gate_resolved", "source": "research_choice", "data": result})
+    choice = "research" if result.get("approved") else "skipped"
+    print(f"[Pipeline] Research choice for a simple task: {choice}.")
+    return choice
+
+
+def task_blueprint(agent_plan: dict, tools_data: dict | None = None) -> dict:
+    """The blueprint execution agents work from when the user skipped research.
+
+    There are no cycle findings to synthesise, so it restates what the Brain
+    understood of the task, and carries the tool recommendations the same way
+    a master blueprint does.
+    """
+    tools_data = tools_data or {}
+    return {
+        "research": "skipped by the user",
+        "task_summary": agent_plan.get("task_summary", ""),
+        "task_type": agent_plan.get("task_type", "other"),
+        "note": "No research phase ran for this task. Work from the user's brief and your own brief.",
+        "tool_recommendations": (tools_data.get("brain") or []) + (tools_data.get("agents") or []),
+    }
+
+
 async def run_full_pipeline(
     task: str,
     gate_approve_fn,        # async fn(gate_id: str, data: dict) -> {approved, redirect_note}
@@ -1088,9 +1151,29 @@ async def run_full_pipeline(
                     t["recommended_by"] = ["Brain"]
                 save_apis_mcps_file(plan_id, {"brain": init_tools, "agents": []}, project_name)
 
+        # Every later planning step (re-plans, brief refreshes, execution planning) works
+        # from Jarvis's understanding of the task, not only the task's own words.
+        understanding = agent_plan.get("task_understanding") or {}
+        if understanding:
+            planning_task = f"{planning_task}\n\n{format_understanding(understanding)}"
+
+        # Every task is researched unless the user says otherwise. When the Brain judges a
+        # task simple (small, self-contained, no services), it asks once whether to research
+        # it anyway or go straight to the work. A task that uses an API or MCP always researches.
+        if (understanding.get("simple") and not agent_plan.get("research_choice")
+                and not approved_cycle_ids and not services_involved(agent_plan)):
+            choice = await ask_research_choice(gate_approve_fn, agent_plan, event_logger=event_logger)
+            agent_plan["research_choice"] = choice
+            if choice == "skipped":
+                agent_plan["cycles"] = []
+            save_agent_plan_file(plan_id, agent_plan, project_name)
+            if event_logger:
+                event_logger({"event_type": "agent_plan_compiled", "source": "Brain", "data": agent_plan})
+
         cycles = agent_plan.get("cycles", [])
         # As many cycles as the task needs — one is enough, and there is no ceiling.
-        if not cycles:
+        researched = bool(cycles)
+        if not researched and agent_plan.get("research_choice") != "skipped":
             return {"error": "Brain planned no research cycles"}
 
         # Phase 2: Ordered research cycle loop
@@ -1417,7 +1500,16 @@ async def run_full_pipeline(
                     tools_data = load_apis_mcps_file(plan_id, project_name)
                     master_blueprint["tool_recommendations"] = tools_data.get("brain", []) + tools_data.get("agents", [])
 
-        if not master_blueprint or not master_blueprint.get("tool_recommendations"):
+        if not researched and not master_blueprint:
+            # Research was skipped, so there is nothing to synthesise: the blueprint
+            # restates the task for the execution agents.
+            master_blueprint = task_blueprint(agent_plan, load_apis_mcps_file(plan_id, project_name))
+            save_master_blueprint_file(plan_id, master_blueprint, project_name)
+            if event_logger:
+                event_logger({"event_type": "blueprint_compiled", "source": "Brain", "data": master_blueprint})
+        elif not researched:
+            print("[Pipeline] Resuming: found the task blueprint of a plan that skipped research.")
+        elif not master_blueprint or not master_blueprint.get("tool_recommendations"):
             print("[Pipeline] Phase 3: Compiling Master Blueprint from all cycles...")
             master_blueprint = await run_master_synthesis(approved_blueprints, event_logger=event_logger)
             tools_data = load_apis_mcps_file(plan_id, project_name)
@@ -1432,6 +1524,11 @@ async def run_full_pipeline(
                 tools_data = load_apis_mcps_file(plan_id, project_name)
                 master_blueprint["tool_recommendations"] = tools_data.get("brain", []) + tools_data.get("agents", [])
 
+        # Execution agents and the quality checker read the blueprint, so they see the
+        # goal, constraints and success criteria the work is judged against.
+        if understanding and isinstance(master_blueprint, dict):
+            master_blueprint["task_understanding"] = understanding
+
         # Check if the execution blueprint gate was already approved
         skip_exec_gate = "execution_blueprint" in completed_stages
 
@@ -1440,10 +1537,10 @@ async def run_full_pipeline(
             # roster was only a draft written before any research existed. Only runs once
             # (guarded the same way the gate below is) — a resume after this gate was
             # already approved should never silently rewrite an already-reviewed plan.
-            print("[Pipeline] Phase 4: Planning execution agents from completed research...")
+            print("[Pipeline] Phase 4: Planning execution agents...")
             agent_plan["execution_agents"] = plan_execution_agents(
                 planning_task, agent_plan.get("execution_agents", []), master_blueprint,
-                user_brief=user_brief, event_logger=event_logger
+                user_brief=user_brief, event_logger=event_logger, researched=researched
             )
             agent_plan["execution_plan_final"] = True
             save_agent_plan_file(plan_id, agent_plan, project_name)
@@ -1477,7 +1574,7 @@ async def run_full_pipeline(
                 agent_plan["execution_agents"] = plan_execution_agents(
                     planning_task, agent_plan.get("execution_agents", []), master_blueprint,
                     user_brief=user_brief, redirect_note=redirect_note, rejected_steps=rejected_steps,
-                    event_logger=event_logger
+                    event_logger=event_logger, researched=researched
                 )
                 agent_plan["execution_plan_final"] = True
                 save_agent_plan_file(plan_id, agent_plan, project_name)

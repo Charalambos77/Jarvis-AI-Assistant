@@ -24,7 +24,8 @@ You do NOT execute tasks yourself. You decide who to hire.
 When given a task, output a JSON object with this exact structure:
 {
   "task_summary": "one sentence description",
-  "task_type": "video|code|marketing|research|other",
+  "task_type": "research|build|automation|content|code|marketing|video|operations|other",
+  "research_depth": "focused|standard|deep",
   "cycles": [
     {
       "cycle_id": 1,
@@ -90,6 +91,7 @@ When given a task, output a JSON object with this exact structure:
 }
 
 Enforce the following rules:
+0. EVERY TASK IS RESEARCHED BEFORE IT IS DONE. Jarvis does any kind of work (building, writing, automating, operating), not only research, but he always understands the task and researches it first. You are given Jarvis's TASK UNDERSTANDING: its goal, deliverables, constraints, success criteria and the unknowns to research. Plan research cycles that settle every unknown it lists and everything the success criteria depend on, then execution agents that meet those success criteria. Size the research to the task with `research_depth`: "focused" (2-3 cycles) for a small, clear task, "standard" (3-5) for most tasks, "deep" (6 or more) for large or open-ended ones. Never plan fewer than 2 cycles. When the task involves any API or MCP service, one cycle researches how each service and its tools work (authentication, the calls the task needs, their arguments, limits, costs, which calls spend money or delete, send or publish anything) before anything uses them.
 1. PLAN AS MANY RESEARCH CYCLES AS THE TASK NEEDS. There is no fixed number: a small task may need 2, a deep one 8 or more. Each cycle is ONE step with ONE clear outcome (e.g. "define what the business is", "choose the countries", "find the competitors", "analyse their ads", "analyse their SEO", "break down their websites").
 2. THE CYCLES ARE AN ORDERED FLOW. Put them in the order the work has to happen: first the cycles that settle definitions and choices, then the cycles that use them. Every cycle lists in `depends_on` the earlier cycle_ids whose results it needs, and may only depend on earlier cycles. Number cycle_id 1, 2, 3... in that order.
 3. Each cycle must have exactly 1 `lead_specialist` and at least 1 `advisory_agents`.
@@ -103,6 +105,102 @@ Enforce the following rules:
 11. RESEARCH CYCLES PRODUCE REAL FINDINGS. A cycle's outcome is actual results — the real competitors with their names and websites, their real ads, real inspected pages — never only a method, template, checklist or strategy for doing that work later. When the work is large (e.g. 20 competitors in each of 5 countries), split it across agents or cycles (e.g. one agent per country) instead of planning a method for it.
 12. WHEN A CYCLE MAKES A CHOICE (which niche, which countries, which competitors), its brief asks for real candidates to be compared against the user's criteria and the best ones chosen — never for a list picked in advance to be justified.
 """
+
+
+UNDERSTAND_SYSTEM_PROMPT = """
+You are the Central Brain of Jarvis, reading a task before anyone plans it. Jarvis does any kind of work:
+research, building software, writing, automating, running operations. Your job is to understand the task
+deeply, the way a senior specialist would before starting, so the plan that follows researches the right
+things and delivers what the user actually needs.
+
+Output a JSON object with exactly these keys:
+{
+  "goal": "what the user is ultimately trying to achieve, beyond the literal words",
+  "task_type": "research|build|automation|content|code|marketing|video|operations|other",
+  "deliverables": ["each concrete thing that must exist when the work is done"],
+  "audience": "who the result is for, or \"unspecified\"",
+  "constraints": ["every count, quota, place, deadline, format, tool, budget or style the user set"],
+  "success_criteria": ["checkable statements that are true only if the task was done well"],
+  "unknowns": ["each question that must be researched before the work can be done well"],
+  "assumptions": ["what you are assuming where the task is silent, so the user can correct it"],
+  "services": ["any API, MCP server or external platform the work will read from or act on"],
+  "research_depth": "focused|standard|deep",
+  "depth_reason": "one sentence: why that much research",
+  "simple": false,
+  "simple_reason": "one sentence: why the task is or isn't simple"
+}
+
+Rules:
+1. Read the whole task, including any brief and later details; later details override earlier ones. Keep every number and scope the user set.
+2. Even a task that looks simple has unknowns worth researching (best practice for the format, the audience, examples of excellent results, pitfalls). List at least two.
+3. Success criteria are specific and checkable ("20 competitors from each of the 5 countries, each with a website"), never vague ("high quality").
+4. "focused" suits a small, clear task, "standard" most tasks, "deep" a large, open-ended or high-stakes one.
+5. `simple` is true only for a small, self-contained task where the user already gave everything needed and no API, MCP or external platform is involved (e.g. "turn these notes into a bullet list"). Jarvis then asks the user whether to research it anyway or go straight to the work. When in doubt, it is not simple.
+"""
+
+_UNDERSTANDING_LIST_KEYS = ("deliverables", "constraints", "success_criteria", "unknowns", "assumptions", "services")
+RESEARCH_DEPTHS = ("focused", "standard", "deep")
+
+
+def understand_task(task: str, event_logger=None) -> dict:
+    """Jarvis's reading of the task before planning: goal, constraints, success criteria, unknowns.
+
+    The plan is built from this, so research covers every unknown and execution is judged
+    against the success criteria. Returns {} if the model fails; planning then goes ahead
+    from the task alone.
+    """
+    if event_logger:
+        event_logger({"event_type": "narrative", "source": "Brain", "data": {
+            "phase": "planning", "icon": "🔎",
+            "message": "Brain is working out what the task really needs: goal, constraints, success criteria and unknowns..."}})
+    user_input = task
+    connected = _connected_services()
+    if connected:
+        user_input += f"\n\n{connected}"
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash", contents=user_input,
+            config=types.GenerateContentConfig(
+                system_instruction=UNDERSTAND_SYSTEM_PROMPT, response_mime_type="application/json"),
+        )
+        raw = json.loads(response.text)
+    except Exception as e:
+        print(f"[Brain] Could not build a task understanding; planning from the task alone: {e}")
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    understanding = {k: str(raw.get(k) or "").strip()
+                     for k in ("goal", "task_type", "audience", "depth_reason", "simple_reason")}
+    understanding["simple"] = raw.get("simple") is True and not raw.get("services")
+    for key in _UNDERSTANDING_LIST_KEYS:
+        items = raw.get(key) if isinstance(raw.get(key), list) else []
+        understanding[key] = [str(i).strip() for i in items if str(i).strip()]
+    depth = str(raw.get("research_depth") or "").lower()
+    understanding["research_depth"] = depth if depth in RESEARCH_DEPTHS else "standard"
+    if event_logger:
+        event_logger({"event_type": "task_understood", "source": "Brain", "data": understanding})
+    return understanding
+
+
+def format_understanding(understanding: dict) -> str:
+    """The task understanding as a block for a prompt. Empty if there is none."""
+    if not understanding:
+        return ""
+    lines = ["JARVIS'S TASK UNDERSTANDING (plan from this; the user's own words still win where they differ):"]
+    for key, label in (("goal", "Goal"), ("audience", "Audience")):
+        if understanding.get(key):
+            lines.append(f"{label}: {understanding[key]}")
+    for key, label in (("deliverables", "Deliverables"), ("constraints", "Constraints"),
+                       ("success_criteria", "Success criteria"), ("unknowns", "Unknowns to research"),
+                       ("assumptions", "Assumptions"), ("services", "Services involved")):
+        if understanding.get(key):
+            lines.append(f"{label}:")
+            lines += [f"  - {item}" for item in understanding[key]]
+    if understanding.get("research_depth"):
+        lines.append(f"Research depth: {understanding['research_depth']}. {understanding.get('depth_reason', '')}".rstrip())
+    return "\n".join(lines)
 
 
 def _connected_services() -> str:
@@ -127,9 +225,17 @@ def build_agent_plan(
     Ask the Brain to produce an agent spawn plan for the given task.
     If redirect_note is provided, we adjust the plans based on the rejection feedback.
     """
+    # First understand the task, then plan from that understanding. Only for a fresh plan:
+    # re-plans after a rejection or conflict keep the understanding the plan already has.
+    understanding = {}
+    if redirect_note is None and cycle_id is None:
+        understanding = understand_task(task, event_logger=event_logger)
+
     client = genai.Client(api_key=GEMINI_API_KEY)
 
     user_input = task
+    if understanding:
+        user_input += f"\n\n{format_understanding(understanding)}"
     if approved_blueprints:
         user_input += f"\n\nAPPROVED BLUEPRINTS FROM PRIOR CYCLES:\n{json.dumps(approved_blueprints, indent=2)}"
 
@@ -238,7 +344,12 @@ def build_agent_plan(
 
     plan = _normalize_cycle_agent_ids(parsed)
     # A single-cycle re-plan keeps the flow it already sits in.
-    return order_cycles(plan) if cycle_id is None else plan
+    if cycle_id is not None:
+        return plan
+    if understanding:
+        plan["task_understanding"] = understanding
+        plan["research_depth"] = plan.get("research_depth") or understanding["research_depth"]
+    return ensure_research(order_cycles(plan))
 
 
 def _as_int(value):
@@ -246,6 +357,130 @@ def _as_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+# Tools every pipeline has without connecting anything. Using them doesn't make a task
+# "involve an API or MCP" whose workings need their own research.
+_BUILT_IN_TOOLS = {"google_search", "web_search", "arxiv_api", "arxiv_search", "search_memory_patterns"}
+
+
+def _key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_")
+
+
+def _cycle_agents(cycle: dict) -> list[dict]:
+    agents = [cycle.get("lead_specialist")] + list(cycle.get("advisory_agents") or [])
+    return [a for a in agents if isinstance(a, dict)]
+
+
+def services_involved(agent_plan: dict) -> list[str]:
+    """The APIs and MCP services this plan would use, built-in search aside.
+
+    Counts what the understanding and the Brain name as services, and whatever any agent
+    lists in `tools_needed` that resolves to a connectable service or names an API or MCP
+    the registry doesn't know yet (a new service still has to be researched).
+    """
+    names: list[str] = []
+    agents = list(agent_plan.get("execution_agents") or [])
+    for cycle in agent_plan.get("cycles") or []:
+        if isinstance(cycle, dict):
+            agents += _cycle_agents(cycle)
+    for a in agents:
+        if isinstance(a, dict):
+            names += [str(t) for t in (a.get("tools_needed") or []) if t]
+    try:
+        from agents.tool_executor import classify_requested_tools
+        buckets = classify_requested_tools(names)
+        found = list(buckets["connectable"]) + [
+            n for n in buckets["not_a_service"] if re.search(r"api|mcp", n, re.I)]
+    except Exception as e:
+        print(f"[Brain] Could not resolve the plan's tools; judging them by name: {e}")
+        found = [n for n in names if re.search(r"api|mcp", n, re.I)]
+    found += [str(r["service"]) for r in agent_plan.get("recommended_tools") or []
+              if isinstance(r, dict) and r.get("service")]
+    found += list((agent_plan.get("task_understanding") or {}).get("services") or [])
+
+    services, seen = [], set()
+    for name in found:
+        # Connected services resolve to keys like "api:youtube_api" or "mcp:notes"; name them plainly.
+        name = re.sub(r"^(api|mcp):", "", str(name).strip())
+        key = _key(name)
+        if key and key not in _BUILT_IN_TOOLS and key not in seen:
+            seen.add(key)
+            services.append(name)
+    return services
+
+
+def _service_core(name: str) -> str:
+    """A service's name without API/MCP wording, for spotting it in a brief ("youtube_api" -> "youtube")."""
+    words = [w for w in _key(name).split("_") if w not in ("api", "apis", "mcp", "server", "the")]
+    return " ".join(words)
+
+
+def _new_cycle(cycle_id: int, domain: str, goal: str, lead: tuple, advisor: tuple, memory: str) -> dict:
+    def agent(role, suffix, brief):
+        return {"agent_id": f"{_key(role)}_cycle{cycle_id}_{suffix}", "role": role, "brief": brief,
+                "tools_needed": ["google_search"], "memory_query": memory}
+    return {"cycle_id": cycle_id, "depends_on": [], "domain": domain, "goal": goal,
+            "lead_specialist": agent(lead[0], "lead", lead[1]),
+            "advisory_agents": [agent(advisor[0], "adv_1", advisor[1])]}
+
+
+def ensure_research(agent_plan: dict) -> dict:
+    """Every task is researched, and every service it uses is researched before it is used.
+
+    The Brain is told this, but it isn't left to the model. A plan with no research gets a
+    cycle on the unknowns the task understanding listed. A plan that uses an API or MCP
+    service no cycle mentions gets a cycle on how those services and their tools work.
+    Added cycles go last, still before any execution agent runs.
+    """
+    if "error" in agent_plan:
+        return agent_plan
+    cycles = [c for c in (agent_plan.get("cycles") or []) if isinstance(c, dict)]
+    understanding = agent_plan.get("task_understanding") or {}
+    added = []
+
+    if not cycles:
+        unknowns = understanding.get("unknowns") or []
+        goal = understanding.get("goal") or agent_plan.get("task_summary") or "the task"
+        questions = "; ".join(unknowns) if unknowns else (
+            "what an excellent result looks like, the best practices and examples for it, and the pitfalls to avoid")
+        cycles.append(_new_cycle(
+            1, "Understanding the task", f"Research what the work needs before it starts: {goal}",
+            ("Task Researcher", f"Research these questions for the task, with real sources: {questions}."),
+            ("Best Practice Analyst", "Find real examples of excellent results for this kind of task, and what "
+                                      "made them work, so the execution agents can meet the same standard."),
+            goal))
+        added.append("task research")
+
+    covered = " ".join(
+        json.dumps({k: c.get(k) for k in ("domain", "goal")}) + " "
+        + " ".join(f"{a.get('brief', '')} {' '.join(map(str, a.get('tools_needed') or []))}" for a in _cycle_agents(c))
+        for c in cycles
+    ).lower()
+    covered = re.sub(r"[^a-z0-9]+", " ", covered)
+    uncovered = [s for s in services_involved({**agent_plan, "cycles": cycles})
+                 if f" {_service_core(s)} " not in f" {covered} "]
+    if uncovered:
+        listed = ", ".join(uncovered)
+        next_id = max((_as_int(c.get("cycle_id")) or 0 for c in cycles), default=0) + 1
+        cycles.append(_new_cycle(
+            next_id, "How the services work", f"Learn how {listed} and their tools work before any agent uses them",
+            ("API Integration Researcher",
+             f"From each service's official documentation, find out how {listed} work for this task: how to "
+             "authenticate, which endpoints or MCP tools do what the task needs, their arguments, rate limits and "
+             "costs, and which calls spend money or delete, send or publish anything."),
+            ("Tool Usage Analyst",
+             f"For {listed}, work out the exact sequence of calls this task needs, with example arguments for "
+             "each, and what commonly goes wrong (errors, quotas, missing permissions)."),
+            f"how to use {listed}"))
+        added.append(f"service research for {listed}")
+
+    agent_plan["cycles"] = cycles
+    if added:
+        print(f"[Brain] Added to the plan: {'; '.join(added)}.")
+        agent_plan["research_added"] = added
+    return agent_plan
 
 
 def order_cycles(agent_plan: dict) -> dict:
@@ -354,6 +589,7 @@ def plan_execution_agents(
     redirect_note: str | None = None,
     rejected_steps: list[str] | None = None,
     event_logger=None,
+    researched: bool = True,
 ) -> list[dict]:
     """Plan the execution agents from the finished research.
 
@@ -363,6 +599,9 @@ def plan_execution_agents(
     whole roster — roles, briefs, tools and output specs — from the master
     blueprint and the user's brief. On a rejection at the execution blueprint gate
     it re-plans the roster with the user's note, leaving the research cycles alone.
+
+    With `researched=False` the user chose to skip research for a simple task, so
+    the prompt says there is none and the blueprint only restates the task.
 
     Falls back to the draft with only its tools revised if the model fails or
     returns no usable agents; it never blocks the pipeline.
@@ -383,14 +622,26 @@ def plan_execution_agents(
             "reject unless the note says otherwise.\n\n"
         )
 
+    if researched:
+        status = "Research is now COMPLETE. Plan the execution agents that will produce what the user asked for."
+        draft_label = "DRAFT ROSTER (written before any research; a starting point only — add, drop, merge or rewrite agents)"
+        blueprint_label = "COMPLETED RESEARCH — MASTER BLUEPRINT (the source of truth)"
+        no_research_rule = "Do not plan research. Research is finished."
+    else:
+        status = ("The user chose to skip research for this simple task. Plan the execution agents that will "
+                  "do the work and produce what the user asked for, straight from the task.")
+        draft_label = "DRAFT ROSTER (a starting point — add, drop, merge or rewrite agents)"
+        blueprint_label = "TASK BLUEPRINT (no research was run)"
+        no_research_rule = "Do not plan research agents. Each agent does its part of the work directly."
+
     user_input = f"""ORIGINAL TASK: {task}
 
-{brief_block}Research is now COMPLETE. Plan the execution agents that will produce what the user asked for.
+{brief_block}{status}
 
-DRAFT ROSTER (written before any research; a starting point only — add, drop, merge or rewrite agents):
+{draft_label}:
 {json.dumps(draft_agents, indent=2)}
 
-COMPLETED RESEARCH — MASTER BLUEPRINT (the source of truth):
+{blueprint_label}:
 {json.dumps(master_blueprint, indent=2)}
 
 {_connected_services()}
@@ -400,7 +651,7 @@ COMPLETED RESEARCH — MASTER BLUEPRINT (the source of truth):
 3. `output_spec` reflects what the research actually found: for example, require one section per competitor only if the blueprint covers those competitors. `required_keys` are keys of the agent's final JSON; set `min_word_count` only where length matters.
 4. One focused purpose per agent. Role-first ids ending in `_exec_N` (e.g. `report_writer_exec_1`), and `role` is the human-readable name.
 5. `tools_needed` uses the exact service names from the blueprint's tool_recommendations, or of a connected service listed above when it fits the agent's job better. Don't just keyword-match the brief: read each tool's "purpose" and "cons" for dependencies — if uploading a file and editing a document's content are separate tools, an agent that must do both needs both. Leave it empty if the agent needs no external tool.
-6. Do not plan research. Research is finished.
+6. {no_research_rule}
 
 Return JSON: {{"execution_agents": [{{"agent_id": "...", "role": "...", "brief": "...", "tools_needed": [], "output_spec": {{"required_keys": [], "min_word_count": 0}}}}]}}"""
 
@@ -431,6 +682,8 @@ Return JSON: {{"execution_agents": [{{"agent_id": "...", "role": "...", "brief":
         print("[Brain] Execution planning returned no usable agents; keeping the draft roster.")
     except Exception as e:
         print(f"[Brain] Execution planning failed, keeping the draft roster: {e}")
+    if not researched:
+        return draft_agents
     return _revise_draft_tools(task, draft_agents, master_blueprint, event_logger=event_logger)
 
 

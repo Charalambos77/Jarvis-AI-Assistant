@@ -115,7 +115,8 @@ check("the first cycle has nothing earlier to learn from, so no model call", mod
 # ---- 3. the pipeline runs the flow ---------------------------------------------------------
 source = inspect.getsource(mac.run_full_pipeline)
 check("the pipeline no longer demands three cycles",
-      "at least 3" not in source and "len(cycles) < 3" not in source and "if not cycles:" in source)
+      "at least 3" not in source and "len(cycles) < 3" not in source
+      and "Brain planned no research cycles" in source)  # only a user's skip allows none (test_task_understanding)
 check("each cycle's briefs are refreshed before its agents start",
       "refresh_cycle_briefs(" in source
       and source.index("refresh_cycle_briefs(") < source.index("research_output = await run_research_phase_for_cycle("))

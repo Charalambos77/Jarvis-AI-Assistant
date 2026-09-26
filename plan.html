@@ -1212,6 +1212,32 @@
             return "";
         }
 
+        // The research-choice gate: a task the Brain judged simple asks whether to research it
+        // first (approve) or go straight to the work (reject).
+        function researchChoiceHtml(data, compact) {
+            const u = data.task_understanding || {};
+            const cycles = data.planned_cycles || [];
+            const esc = v => htmlAttrEscape(String(v == null ? '' : v)).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const size = compact ? '11px' : '12px';
+            let html = `<div style="font-size: ${size}; line-height: 1.4; color: #FFF; text-align: left;">
+                <strong>${esc(data.question || 'Research this task first?')}</strong>`;
+            if (data.simple_reason) html += `<div style="color: var(--text-muted); margin-top: 4px;">${esc(data.simple_reason)}</div>`;
+            if (!compact && u.goal) html += `<div style="margin-top: 8px;"><strong>Goal:</strong> ${esc(u.goal)}</div>`;
+            if (!compact && (u.success_criteria || []).length) {
+                html += `<div style="margin-top: 6px;"><strong>Success criteria:</strong><ul style="margin: 4px 0 0 16px;">`
+                    + u.success_criteria.map(c => `<li>${esc(c)}</li>`).join('') + `</ul></div>`;
+            }
+            if (cycles.length) {
+                html += `<div style="margin-top: 6px; color: var(--text-muted);">Planned research: `
+                    + cycles.map(c => esc(c.domain || ('Cycle ' + c.cycle_id))).join(' · ') + `</div>`;
+            }
+            html += `<div style="display: flex; gap: 6px; margin-top: 10px;">
+                    <button class="action-button approve" style="flex: 1; padding: 6px; font-size: 11px;" onclick="submitApproval(true)">Research first</button>
+                    <button class="action-button" style="flex: 1; padding: 6px; font-size: 11px; background: rgba(255,255,255,0.05); color: #FFF; border: 1px solid rgba(255,255,255,0.1);" onclick="submitApproval(false)">Skip research</button>
+                </div></div>`;
+            return html;
+        }
+
         function htmlAttrEscape(s) {
             return String(s)
                 .replace(/&/g, '&amp;')
@@ -2188,7 +2214,9 @@
                     previouslyCheckedPanel.add(c.value);
                 });
 
-                if (gateId === "execution_blueprint") {
+                if (gateId === "research_choice") {
+                    itemsHtml += researchChoiceHtml(data, true);
+                } else if (gateId === "execution_blueprint") {
                     const agents = data.execution_agents || [];
                     agents.forEach((a, idx) => {
                         const isChecked = previouslyCheckedPanel.has(a.agent_id) ? "checked" : "";
@@ -2274,7 +2302,7 @@
                              ${itemsHtml}
                          </div>
  
-                         <div class="hitl-actions" style="display: flex; gap: 6px; justify-content: stretch;">
+                         <div class="hitl-actions" style="display: ${gateId === 'research_choice' ? 'none' : 'flex'}; gap: 6px; justify-content: stretch;">
                              <button class="action-button approve" style="flex: 1; padding: 6px; font-size: 11px;" onclick="submitApproval(true)">Quick Approve</button>
                              <button class="action-button" style="flex: 1; padding: 6px; font-size: 11px; background: rgba(255,255,255,0.05); color: #FFF; border: 1px solid rgba(255,255,255,0.1);" onclick="openApprovalModal()">Details</button>
                          </div>
@@ -2392,7 +2420,9 @@
             document.getElementById('modal-title').innerText = `HITL Verification Checklist // ${gateId}`;
 
             let html = "";
-            if (gateId === "execution_blueprint") {
+            if (gateId === "research_choice") {
+                html += researchChoiceHtml(data, false);
+            } else if (gateId === "execution_blueprint") {
                 const agents = data.execution_agents || [];
                 agents.forEach((a, idx) => {
                     const isChecked = currentlyChecked.has(a.agent_id) ? "checked" : "";
