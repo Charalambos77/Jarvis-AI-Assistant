@@ -80,6 +80,96 @@ def observe_mcp(server: str, tools: list[dict]) -> dict:
     return tool_catalog.get(server) or entry
 
 
+def observe_api(service: str, spec_url: str | None = None) -> dict:
+    """Read a connected API's published spec and record each operation as a tool.
+
+    Tries the spec URL given here, then the one saved for the service, a known
+    spec, the usual paths on its base URL and a web search (openapi_tools.find_spec).
+    If none is found the API stays connected with no tools, and the Control room
+    asks for the spec's address. A spec that can't be reached this time never
+    wipes tools that were already found.
+    """
+    from connectors import openapi_tools
+    from connectors.api_connector import get_service_config
+    from agents.tool_executor import _api_function_name
+
+    config = get_service_config(service) or {}
+    spec_url = spec_url or config.get("spec_url")
+    try:
+        found_url, spec = openapi_tools.find_spec(service, spec_url, config.get("base_url"))
+        ops = openapi_tools.operations(spec, found_url)
+        if not ops:
+            raise openapi_tools.SpecNotFound(f"The spec at {found_url} lists no operations.")
+    except openapi_tools.SpecNotFound as e:
+        told = {}
+
+        def _no_spec(catalog):
+            entry = catalog.setdefault(service, {"kind": "api", "tools": {}, "review": None})
+            entry["spec_error"] = str(e)
+            entry["spec_checked_at"] = tool_catalog.now_iso()
+            if not entry.get("tools"):
+                told["new"] = entry.get("state") != "no_spec"
+                entry["state"] = "no_spec"
+
+        tool_catalog.update(_no_spec)
+        if told.get("new"):
+            _notify(f"{service} is connected, but Jarvis found no API description for it, so agents can't "
+                    "use it yet. Paste the address of its OpenAPI or Swagger spec in the Control room.")
+        return tool_catalog.get(service) or {}
+
+    entry, changed = tool_catalog.record_inventory(service, "api", ops, _api_function_name)
+
+    def _spec(catalog):
+        current = catalog.get(service)
+        if current:
+            current["spec_url"] = found_url
+            current["spec_title"] = str((spec.get("info") or {}).get("title") or spec.get("title") or "")[:120]
+            current["spec_error"] = None
+            current["spec_checked_at"] = tool_catalog.now_iso()
+            if current.get("state") == "no_spec":
+                current["state"] = "ready"
+
+    tool_catalog.update(_spec)
+    if changed:
+        start_research(service)
+    sweep()
+    return tool_catalog.get(service) or entry
+
+
+def discover_connected_apis() -> list[str]:
+    """Read the spec of every connected API that has no tools of its own yet.
+
+    Skips services Jarvis already has a built-in handler for (arXiv, web search,
+    Google Docs...), MCP servers, and APIs already in the catalogue. Returns the
+    services it looked at.
+    """
+    from connectors.api_connector import get_all_configured_services
+    from agents.tool_executor import (_resolve_tool_key, REGISTRY_TOOLS, ALWAYS_ON_TOOLS,
+                                      MCP_KEY_PREFIX)
+
+    catalog = tool_catalog.load()
+    looked = []
+    for name in get_all_configured_services():
+        service = name.lower().replace("-", "_").replace(" ", "_")
+        # A service with no spec last time is tried again: the web may answer now.
+        if service in looked or (service in catalog and catalog[service].get("state") != "no_spec"):
+            continue
+        key = _resolve_tool_key(service, allow_llm=False)
+        if key in REGISTRY_TOOLS or key in ALWAYS_ON_TOOLS or key.startswith(MCP_KEY_PREFIX):
+            continue
+        looked.append(service)
+        try:
+            observe_api(service)
+        except Exception as e:
+            print(f"[Tool onboarding] Could not read {service}'s API description: {e}")
+    return looked
+
+
+def start_api_discovery() -> None:
+    """discover_connected_apis on its own thread, so startup never waits on the web."""
+    threading.Thread(target=discover_connected_apis, name="api-discovery", daemon=True).start()
+
+
 def start_research(server: str) -> None:
     """Research a service's new tools, then open their review."""
     with _research_lock:
@@ -338,17 +428,24 @@ RISK_WORDS = {"read": "reads", "write": "changes things", "destructive": "destru
 def connected_services_note(max_tools: int = 12) -> str:
     """What the Brain and the agents are told about connected services.
 
-    Only switched-on servers with at least one approved tool: planning around a
-    service nobody can use yet would only produce a blocked agent.
+    Only switched-on servers and connected APIs with at least one approved tool:
+    planning around a service nobody can use yet would only produce a blocked agent.
     """
     try:
         from connectors.mcp_client import enabled_servers
         on = set(enabled_servers())
     except Exception:
         on = set()
+    try:
+        from connectors.api_connector import get_service_status
+    except Exception:
+        get_service_status = lambda _name: "unknown"
     lines = []
     for name, entry in sorted(tool_catalog.load().items()):
-        if name not in on:
+        if entry.get("kind") == "api":
+            if get_service_status(name) == "unknown":
+                continue
+        elif name not in on:
             continue
         tools = [(n, t) for n, t in (entry.get("tools") or {}).items() if t.get("status") == "enabled"]
         if not tools:

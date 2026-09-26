@@ -514,17 +514,35 @@ function renderMcps(mcps) {
     }).join("") : `<div class="note">No MCP servers configured. Add one to mcp_registry.json.</div>`;
 }
 
+// What an API with tools read from its spec shows under its name.
+function apiCatalogNote(a) {
+    const cat = a.catalog;
+    if (!cat) return null;
+    if (cat.state === 'no_spec')
+        return { text: cat.spec_error || "No API description found yet.", bad: true };
+    const counts = `${cat.tools || 0} tools from its API description · ${cat.enabled || 0} in use · ` +
+        `${cat.pending || 0} to review · ${cat.held || 0} risky waiting`;
+    return { text: `${CATALOG_STATE[cat.state] || cat.state || ""} · ${counts}`, spec: cat.spec_url };
+}
+
 function renderApis(apis) {
     document.getElementById('apis').innerHTML = apis.length ? apis.map(a => {
         const on = a.configured;
-        const note = on && !a.has_handler ? "Connected, but Jarvis has no connector for it yet — agents can't call it."
+        const fromSpec = on && !a.has_handler ? apiCatalogNote(a) : null;
+        const note = fromSpec ? fromSpec.text
+            : on && !a.has_handler ? "Connected. Jarvis is looking for its API description to turn it into tools."
             : (a.has_handler ? `Agents call it as ${a.tool_name}${a.handled_by ? ` (via ${a.handled_by})` : ""}.` : "No connector yet.");
+        const spec = fromSpec && fromSpec.spec
+            ? `<div class="note" style="margin:2px 0 0">Spec: <a href="${esc(fromSpec.spec)}" target="_blank" rel="noopener" style="color:inherit">${esc(fromSpec.spec)}</a></div>` : "";
+        const specBtn = on && !a.has_handler
+            ? `<button class="btn tiny" onclick="openSpec('${esc(a.service)}')">${fromSpec && fromSpec.spec ? "Change spec" : "Add spec link"}</button>` : "";
         return `<div class="rule-row">
             <div style="flex:1 1 auto;min-width:0">
                 <span class="sig">${esc(a.service)}</span>
                 <span class="badge ${on ? "go" : ""}" style="margin-left:6px">${on ? "connected" : "not connected"}</span>
-                <div class="note" style="margin:4px 0 0">${esc(note)}</div>
+                <div class="note" style="margin:4px 0 0${fromSpec && fromSpec.bad ? ";color:var(--no)" : ""}">${esc(note)}</div>${spec}
             </div>
+            ${specBtn}
             ${on ? `<button class="btn tiny no" onclick="disconnectApi('${esc(a.service)}')">Disconnect</button>`
                  : `<button class="btn tiny go" onclick="openConnect('${esc(a.service)}','${esc(a.auth)}')">Connect</button>`}
         </div>`;
@@ -557,6 +575,28 @@ function openConnect(service, auth) {
         : `<input type="text" id="cf-key" placeholder="${esc(service)} API key">`) +
         `<button class="btn go" onclick="submitConnect('${esc(service)}','${esc(auth)}', this)">Connect</button>
          <button class="btn" onclick="closeConnect()">Cancel</button>`;
+}
+
+function openSpec(service) {
+    connectBusy = true;
+    const form = document.getElementById('connect-form');
+    form.style.display = 'flex';
+    form.innerHTML = `<input type="text" id="cf-spec" placeholder="Address of ${esc(service)}'s OpenAPI, Swagger or Google API description">
+        <button class="btn go" onclick="submitSpec('${esc(service)}', this)">Read tools</button>
+        <button class="btn" onclick="closeConnect()">Cancel</button>`;
+}
+
+async function submitSpec(service, btn) {
+    const spec_url = ((document.getElementById('cf-spec') || {}).value || "").trim();
+    if (!/^https?:\/\//.test(spec_url)) { alert("Paste a link starting with http:// or https://"); return; }
+    btn.disabled = true;
+    btn.textContent = "Reading…";
+    const res = await fetch('/control/api_spec', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service, spec_url }) });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    closeConnect();
+    refresh();
 }
 
 function closeConnect() {

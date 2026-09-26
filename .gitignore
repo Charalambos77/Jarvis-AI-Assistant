@@ -31,3 +31,8 @@ Let Jarvis Handle It/*
 
 # Generated voice audio, rebuilt on demand
 data/tts_cache/
+
+# Tool catalogue and spending: this machine's decisions, not source
+data/tool_catalog.json
+data/tool_catalog.json.tmp
+data/spending.json

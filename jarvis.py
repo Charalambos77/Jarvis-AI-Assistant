@@ -1577,6 +1577,8 @@ control_room.set_notifier(lambda text: push_message("system", text))
 # Reviews of newly connected tools approve themselves when their wait runs out,
 # even with no page open to notice.
 tool_onboarding.start_sweeper()
+# Connected APIs with no tools yet get them from their published spec.
+tool_onboarding.start_api_discovery()
 coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
 coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
 coordinator.register_state_provider("get_pipelines", get_pipelines_local)
@@ -4814,9 +4816,57 @@ def connect_tool_route():
 
     success = save_tool_credentials(service_name, credentials, method_id=method_id)
     if success:
+        _observe_api_later(service_name)
         return jsonify({"status": "success", "message": f"Successfully connected {service_name}"})
     else:
         return jsonify({"error": f"Failed to save credentials for {service_name}"}), 500
+
+
+def _observe_api_later(service_name: str) -> None:
+    """Turn a just-connected API's spec into tools, off the request thread.
+
+    Services Jarvis already has a built-in handler for, and MCP servers, are left alone.
+    """
+    from agents.tool_executor import _resolve_tool_key, REGISTRY_TOOLS, ALWAYS_ON_TOOLS, MCP_KEY_PREFIX
+
+    service = service_name.lower().replace("-", "_").replace(" ", "_")
+    key = _resolve_tool_key(service, allow_llm=False)
+    if key in REGISTRY_TOOLS or key in ALWAYS_ON_TOOLS or key.startswith(MCP_KEY_PREFIX):
+        return
+
+    def _run():
+        try:
+            tool_onboarding.observe_api(service)
+        except Exception as e:
+            print(f"[Tools] Could not read {service}'s API description: {e}")
+
+    threading.Thread(target=_run, name=f"api-observe-{service}", daemon=True).start()
+
+
+@app.route("/control/api_spec", methods=["POST"])
+def control_api_spec():
+    """Save where a connected API's spec lives, and read its tools from there."""
+    from connectors.api_connector import load_registry, save_registry
+    from connectors import openapi_tools
+
+    data = request.get_json(force=True) or {}
+    service = (data.get("service") or "").strip()
+    spec_url = (data.get("spec_url") or "").strip()
+    if not service or not spec_url.startswith(("http://", "https://")):
+        return jsonify({"error": "service and an http(s) spec_url are required."}), 400
+    if openapi_tools.fetch_spec(spec_url) is None:
+        return jsonify({"error": f"{spec_url} is not an OpenAPI, Swagger or Google API description."}), 400
+    registry = load_registry()
+    clean = service.lower().replace("-", "_").replace(" ", "_")
+    names = [n for n in dict.fromkeys((service, clean)) if n in registry]
+    if not names:
+        return jsonify({"error": f"'{service}' is not connected."}), 404
+    for name in names:
+        registry[name]["spec_url"] = spec_url
+    save_registry()
+    entry = tool_onboarding.observe_api(clean, spec_url)
+    return jsonify({"status": "ok", "service": clean, "state": entry.get("state"),
+                    "tools": len(entry.get("tools") or {}), "error": entry.get("spec_error")})
 
 
 @app.route("/api/open-artifact", methods=["POST"])
@@ -4898,6 +4948,22 @@ def tools_overview_route():
             "auth": "oauth" if name in OAUTH_PROVIDERS else "api_key",
             "tool_name": spec["declaration"]["name"] if spec else None,
         })
+
+    # APIs whose tools come from their spec: where they are in the catalogue.
+    try:
+        from connectors import tool_catalog
+        catalog = tool_catalog.load()
+        for a in apis:
+            entry = catalog.get(a["service"].lower().replace("-", "_").replace(" ", "_"))
+            if entry and entry.get("kind") == "api":
+                statuses = [t.get("status") for t in (entry.get("tools") or {}).values()]
+                a["catalog"] = {"state": entry.get("state"), "summary": entry.get("summary", ""),
+                                "spec_url": entry.get("spec_url"), "spec_error": entry.get("spec_error"),
+                                "tools": len(statuses), "enabled": statuses.count("enabled"),
+                                "pending": statuses.count("pending"), "held": statuses.count("held"),
+                                "research": (entry.get("research") or {}).get("status")}
+    except Exception as e:
+        print(f"[Tools] Could not read the tool catalogue: {e}")
 
     try:
         from connectors.mcp_connector import list_available_mcps

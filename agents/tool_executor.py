@@ -682,13 +682,19 @@ def _resolve_tool_key(raw_name: str, context: str | None = None, allow_llm: bool
     mcp_servers = _mcp_server_names()
     if key in mcp_servers:
         return MCP_KEY_PREFIX + key
-    # An agent may name one of a server's tools by the name it is called by.
-    if key.startswith("mcp_"):
+    # A connected API whose operations became tools (see openapi_tools).
+    api_services = _api_service_names()
+    if key in api_services:
+        return API_KEY_PREFIX + key
+    # An agent may name one of a service's tools by the name it is called by.
+    if key.startswith(("mcp_", "api_")):
         try:
             from connectors import tool_catalog
             found = tool_catalog.find_by_fn_name(key)
             if found and found[0] in mcp_servers:
                 return MCP_KEY_PREFIX + found[0]
+            if found and found[0] in api_services:
+                return API_KEY_PREFIX + found[0]
         except Exception:
             pass
     ruled = _token_rule_match(key)
@@ -705,6 +711,8 @@ def _resolve_tool_key(raw_name: str, context: str | None = None, allow_llm: bool
             return TOOL_ALIASES[stem]
         if stem in mcp_servers:          # "github_api" or "github_mcp" for a server called github
             return MCP_KEY_PREFIX + stem
+        if stem in api_services:
+            return API_KEY_PREFIX + stem
         ruled = _token_rule_match(stem)
         if ruled:
             return ruled
@@ -809,7 +817,7 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, co
                 handlers[fn_name] = spec["handler"]
                 seen.add(fn_name)
 
-    # Approved read-only tools from every switched-on MCP server, for every agent —
+    # Approved read-only tools from every switched-on MCP server and connected API, for every agent —
     # the same way inspect_website reaches all of them. Tools that change things
     # still need the agent's plan to ask for their server (below).
     _bind_catalog_read_tools(declarations, handlers, seen)
@@ -839,6 +847,12 @@ def get_tools_for_execution_agent(tools_needed: list[str], project_name: str, co
                     f"{raw_name} (MCP server '{server_name}' is running, but none of its tools is approved yet — "
                     "they are waiting for review in the Control room; do not claim to have used it)"
                 )
+            continue
+
+        if key.startswith(API_KEY_PREFIX):
+            service = key[len(API_KEY_PREFIX):]
+            if not _bind_api_service(service, declarations, handlers, seen) and not _catalog_has_enabled(service):
+                unavailable.append(f"{raw_name} ({_api_not_ready(service)}; do not claim to have used it)")
             continue
 
         if key in REGISTRY_TOOLS:
@@ -935,13 +949,29 @@ def _mcp_handler(server_name: str, tool_name: str):
     return _handler
 
 
+def _api_handler(service: str, tool_name: str):
+    def _handler(project_name: str, agent_id: str, **kwargs):
+        from connectors import tool_catalog, openapi_tools
+        # Read at call time, so a spec that moved since the agent started is followed.
+        tool = ((tool_catalog.get(service) or {}).get("tools") or {}).get(tool_name) or {}
+        if tool.get("status") != "enabled" or not tool.get("call"):
+            return {"status": "error", "error": f"{service}.{tool_name} is no longer enabled."}
+        return openapi_tools.call_operation(service, tool["call"], kwargs)
+    return _handler
+
+
+def _catalog_handler(server_name: str, tool_name: str, tool: dict):
+    return _api_handler(server_name, tool_name) if tool.get("call") else _mcp_handler(server_name, tool_name)
+
+
 def _catalog_declaration(server_name: str, tool_name: str, tool: dict) -> dict:
     note = ""
     if tool.get("risk") in ("destructive", "costs_money") and tool.get("rule") != "always_allow":
         note = " Every call waits for the user's approval in the Control room first."
+    label = "API" if tool.get("call") else "MCP"
     return {
         "name": tool["fn_name"],
-        "description": f"[MCP:{server_name}] {tool.get('description') or tool_name}{note}",
+        "description": f"[{label}:{server_name}] {tool.get('description') or tool_name}{note}",
         "parameters": _sanitize_schema(tool.get("parameters")),
     }
 
@@ -952,13 +982,14 @@ def _catalog_has_enabled(server_name: str) -> bool:
 
 
 def _bind_catalog_read_tools(declarations: list, handlers: dict, seen: set) -> int:
-    """Approved read-only tools of every enabled MCP server. Starts nothing:
-    the catalogue already has their declarations, and a call starts the server."""
+    """Approved read-only tools of every enabled MCP server and connected API.
+    Starts nothing: the catalogue already has their declarations, and a call
+    starts the server (or makes the request)."""
     try:
         from connectors import tool_catalog
         from agents import tool_onboarding
         tool_onboarding.sweep()
-        servers = _mcp_server_names()
+        servers = set(_mcp_server_names()) | _api_service_names()
         bound = 0
         for server_name, tool_name, tool in tool_catalog.enabled_tools():
             if bound >= TOOL_BUDGET:
@@ -966,7 +997,7 @@ def _bind_catalog_read_tools(declarations: list, handlers: dict, seen: set) -> i
             if server_name not in servers or tool.get("risk") != "read" or tool["fn_name"] in seen:
                 continue
             declarations.append(_catalog_declaration(server_name, tool_name, tool))
-            handlers[tool["fn_name"]] = _mcp_handler(server_name, tool_name)
+            handlers[tool["fn_name"]] = _catalog_handler(server_name, tool_name, tool)
             seen.add(tool["fn_name"])
             bound += 1
         return bound
@@ -1005,6 +1036,57 @@ def _bind_mcp_server(server_name: str, declarations: list, handlers: dict, seen:
     return bound
 
 
+# ---------------------------------------------------------------------------
+# APIS — operations read from the API's published spec (connectors/openapi_tools)
+# ---------------------------------------------------------------------------
+
+API_KEY_PREFIX = "api:"
+
+
+def _api_function_name(service: str, tool: str) -> str:
+    """Namespaced like MCP tools, so an API operation can't shadow a built-in."""
+    return re.sub(r"[^A-Za-z0-9_]", "_", f"api_{service}_{tool}")[:64]
+
+
+def _api_service_names() -> set:
+    """APIs the catalogue has read a spec for and that are still connected."""
+    try:
+        from connectors import tool_catalog
+        from connectors.api_connector import get_service_status
+        return {name for name, entry in tool_catalog.load().items()
+                if entry.get("kind") == "api" and get_service_status(name) != "unknown"}
+    except Exception:
+        return set()
+
+
+def _bind_api_service(service: str, declarations: list, handlers: dict, seen: set) -> int:
+    """Add every approved operation of a connected API. Returns how many were added."""
+    from connectors import tool_catalog
+    from agents import tool_onboarding
+    tool_onboarding.sweep()
+    bound = 0
+    for _, tool_name, tool in tool_catalog.enabled_tools(service):
+        if tool["fn_name"] in seen:
+            continue
+        declarations.append(_catalog_declaration(service, tool_name, tool))
+        handlers[tool["fn_name"]] = _api_handler(service, tool_name)
+        seen.add(tool["fn_name"])
+        bound += 1
+    return bound
+
+
+def _api_not_ready(service: str) -> str:
+    from connectors import tool_catalog
+    entry = tool_catalog.get(service) or {}
+    if entry.get("state") == "no_spec":
+        return f"API '{service}' is connected, but Jarvis found no API description for it yet"
+    if entry.get("state") == "researching":
+        return f"API '{service}' is connected and its tools are being researched"
+    if any(t.get("status") in ("pending", "held") for t in (entry.get("tools") or {}).values()):
+        return f"API '{service}' is connected, but its tools are waiting for review in the Control room"
+    return f"API '{service}' is connected, but none of its tools is approved"
+
+
 def classify_requested_tools(names, context: str | None = None) -> dict:
     """Sort raw tool names into what the Plugging Gate should actually ask about.
 
@@ -1028,7 +1110,7 @@ def classify_requested_tools(names, context: str | None = None) -> dict:
         if key in ALWAYS_ON_TOOLS:
             if raw not in always_on:
                 always_on.append(raw)
-        elif key in REGISTRY_TOOLS or key.startswith(MCP_KEY_PREFIX):
+        elif key in REGISTRY_TOOLS or key.startswith((MCP_KEY_PREFIX, API_KEY_PREFIX)):
             connectable.setdefault(key, [])
             if raw not in connectable[key]:
                 connectable[key].append(raw)
@@ -1064,13 +1146,20 @@ def describe_connectable(key: str) -> dict:
         }
 
     from connectors.api_connector import get_service_status
-    status = get_service_status(key)
-    return {
+    service = key[len(API_KEY_PREFIX):] if key.startswith(API_KEY_PREFIX) else key
+    status = get_service_status(service)
+    out = {
         "kind": "api",
-        "service": key,
+        "service": service,
         "configured": status != "unknown",
         "current_status": status,
     }
+    if key.startswith(API_KEY_PREFIX):
+        from connectors import tool_catalog
+        entry = tool_catalog.get(service) or {}
+        out["tools"] = sorted(entry.get("tools") or {})
+        out["spec_url"] = entry.get("spec_url")
+    return out
 
 
 def run_tool(handler_map: dict, project_name: str, agent_id: str, tool_name: str, tool_args: dict) -> dict:

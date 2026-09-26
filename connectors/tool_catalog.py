@@ -163,8 +163,11 @@ def classify_risk(name: str, description: str = "", annotations: dict | None = N
 # ---------------------------------------------------------------------------
 
 def _tool_hash(tool: dict) -> str:
-    raw = json.dumps([tool.get("name"), tool.get("description") or "", tool.get("input_schema") or {}],
-                     sort_keys=True, default=str)
+    parts = [tool.get("name"), tool.get("description") or "", tool.get("input_schema") or {}]
+    if tool.get("call"):
+        # An API tool pointed at a different address is a different tool.
+        parts.append(tool["call"])
+    raw = json.dumps(parts, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -211,6 +214,9 @@ def record_inventory(service: str, kind: str, tools: list[dict], fn_name) -> tup
                 "schema_hash": digest_one,
                 "discovered_at": now_iso(),
             }
+            if tool.get("call"):
+                # How to make the real request: API tools only (see openapi_tools).
+                new_tools[name]["call"] = tool["call"]
         entry = {
             **(entry or {}),
             "kind": kind,
