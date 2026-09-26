@@ -195,7 +195,7 @@ check("several calls in one round count as one round: the review comes after 3 r
 
 # ---- 3. execution agents -------------------------------------------------------------------
 execution_agent.get_tools_for_execution_agent = lambda *a, **k: (DECLARATIONS, {"web_search": None}, [])
-execution_agent.run_tool = lambda handlers, project, agent, name, args: {
+execution_agent.run_tool = lambda handlers, project, agent, name, args, **k: {
     "status": "ok", "action": "write_file", "path": f"Deliverables/{args.get('query')}.md"}
 EXEC_CFG = {"agent_id": "writer_exec_1", "role": "Writer", "brief": "Write it.", "tools_needed": ["web_search"], "output_spec": {}}
 

@@ -141,7 +141,7 @@ plan_reply = json.dumps({"task_summary": "Launch script", "task_type": "content"
 models = use_model(json.dumps(UNDERSTANDING), plan_reply)
 planned = brain.build_agent_plan("Write my launch video script.")
 check("the task is understood before it is planned",
-      models.systems[0] == brain.UNDERSTAND_SYSTEM_PROMPT and models.systems[1] == brain.BRAIN_SYSTEM_PROMPT)
+      models.systems[0] == brain.UNDERSTAND_SYSTEM_PROMPT and models.systems[1] == brain.get_brain_system_prompt())
 check("the planner is given the understanding", "JARVIS'S TASK UNDERSTANDING" in models.contents[1]
       and "Ends with a sign-up call to action" in models.contents[1])
 check("the plan keeps the understanding and its depth",

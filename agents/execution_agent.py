@@ -44,7 +44,7 @@ def _extract_artifact(tool_name: str, tool_args: dict, result) -> dict | None:
     # write_file's own bookkeeping (list_deliverables, read_file) also uses
     # "path" but isn't something the user asked to "open" — only count it as
     # an artifact when this call actually wrote something.
-    if result.get("action") == "write_file":
+    if result.get("action") in ("write_file", "code_project"):
         for key in _ARTIFACT_PATH_KEYS:
             if result.get(key):
                 return {"type": "path", "value": result[key], "label": str(label), "tool": tool_name}
