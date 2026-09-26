@@ -8,6 +8,9 @@
  *
  *   JarvisSections.openSidebar()            open the list of sections
  *   JarvisSections.createFrom(planId, name) the "Make this a section" window
+ *   JarvisSections.createFromFolder(path, name)
+ *                                           the same window, for a folder picked
+ *                                           in the IDE instead of a pipeline
  */
 (function () {
     "use strict";
@@ -651,7 +654,9 @@
         draft.busy = false;
         setHead("Make this a section",
             "Tell Jarvis what this section is about — what it is for and where you are " +
-            "taking it. The pipeline’s own work comes with it; this is what frames it. " +
+            "taking it. " + (draft.folderPath
+                ? "Jarvis reads the folder " + draft.folderPath + " as the work it starts from; "
+                : "The pipeline’s own work comes with it; ") + "this is what frames it. " +
             "Jarvis will ask about anything it still needs before writing it up.");
 
         panelBody().innerHTML =
@@ -764,7 +769,11 @@
     // and the dropped files live before there is any section to hold them.
     function startDraft() {
         if (draft.draftId) return Promise.resolve();
-        return post("/sections/intake/start", {
+        return post("/sections/intake/start", draft.folderPath ? {
+            folder_path: draft.folderPath,
+            name: draft.name,
+            brief: draft.brief
+        } : {
             plan_id: draft.planId,
             name: draft.name,
             brief: draft.brief
@@ -1070,14 +1079,15 @@
         var html = "";
         var goal = plan.understanding && plan.understanding.goal;
         var pos = plan.position || {};
+        var what = draft.folderPath ? "The folder you picked" : "The pipeline you finished";
         var fits = pos.kind === "part"
-            ? "The pipeline you finished is <b>one part</b> of this section"
-            : "The pipeline you finished is <b>the beginning</b> of this section";
+            ? what + " is <b>one part</b> of this section"
+            : what + " is <b>the beginning</b> of this section";
         var founding = null;
         (plan.parts || []).forEach(function (p) { if (p.id === pos.part_id) founding = p; });
         html += '<div class="jsec-plan-box">' +
             (goal ? "<h4>Goal</h4><div>" + esc(goal) + "</div><br>" : "") +
-            "<h4>Where your pipeline fits</h4><div>" + fits +
+            "<h4>Where your " + (draft.folderPath ? "folder" : "pipeline") + " fits</h4><div>" + fits +
             (founding ? ": " + esc(founding.title) : "") + ". " + esc(pos.why || "") + "</div></div>";
 
         var by = coverage();
@@ -1411,6 +1421,7 @@
                 return post("/sections/create", {
                     draft_id: draft.draftId || "",
                     plan_id: draft.planId,
+                    folder_path: draft.folderPath || "",
                     name: draft.name,
                     brief: draft.brief
                 });
@@ -1455,12 +1466,20 @@
         draft = null;
     }
 
-    function createFrom(planId, suggestedName) {
+    // A folder picked in the IDE goes through exactly the same window and the
+    // same gate as a finished pipeline: brief, questions, research, plan.
+    function createFromFolder(path, suggestedName) {
+        createFrom(null, suggestedName || String(path || "").split(/[\\/]/).filter(Boolean).pop(),
+                   path);
+    }
+
+    function createFrom(planId, suggestedName, folderPath) {
         injectStyle();
         buildModal();
         pendingFiles = [];
         draft = {
             planId: planId,
+            folderPath: folderPath || "",
             draftId: null,
             name: suggestedName || "",
             brief: "",
@@ -1536,6 +1555,7 @@
         openInfo: openInfo,
         closeInfo: closeInfo,
         createFrom: createFrom,
+        createFromFolder: createFromFolder,
         currentSectionId: currentSectionId,
         mountButton: mountButton
     };

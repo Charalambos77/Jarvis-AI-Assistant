@@ -186,6 +186,13 @@ def _initialise_schema(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE notes ADD COLUMN section_id TEXT REFERENCES sections(id)")
             conn.commit()
 
+        # A section can start from a folder (from the IDE) rather than a
+        # pipeline; this is that folder, read in place and never written to.
+        cursor.execute("PRAGMA table_info(sections)")
+        if 'source_path' not in [row[1] for row in cursor.fetchall()]:
+            conn.execute("ALTER TABLE sections ADD COLUMN source_path TEXT")
+            conn.commit()
+
         # Memory patterns table migration
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_patterns'")
         if not cursor.fetchone():
@@ -596,11 +603,12 @@ def delete_pipeline(conn: sqlite3.Connection, plan_id: str):
 # pipelines started inside the section build on top of it.
 
 def create_section(conn: sqlite3.Connection, section_id: str, name: str, folder: str,
-                   brief: str = "", founding_plan_id: str | None = None) -> str:
+                   brief: str = "", founding_plan_id: str | None = None,
+                   source_path: str | None = None) -> str:
     conn.execute(
-        """INSERT INTO sections (id, name, folder, brief, founding_plan_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (section_id, name, folder, brief or "", founding_plan_id, _now()),
+        """INSERT INTO sections (id, name, folder, brief, founding_plan_id, created_at, source_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (section_id, name, folder, brief or "", founding_plan_id, _now(), source_path),
     )
     if founding_plan_id:
         conn.execute(
@@ -629,6 +637,13 @@ def get_section(conn: sqlite3.Connection, section_id: str) -> dict | None:
     section = dict(row)
     section["plan_ids"] = get_section_plan_ids(conn, section_id)
     return section
+
+
+def get_section_by_source(conn: sqlite3.Connection, source_path: str) -> dict | None:
+    """The section started from this folder, if there is one."""
+    row = conn.execute("SELECT * FROM sections WHERE source_path = ? LIMIT 1",
+                       (source_path,)).fetchone()
+    return dict(row) if row else None
 
 
 def get_section_by_folder(conn: sqlite3.Connection, folder: str) -> dict | None:

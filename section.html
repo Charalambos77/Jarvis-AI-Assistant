@@ -594,8 +594,8 @@
         const pos = plan.position || {};
         const founding = parts.find(p => p.id === pos.part_id);
         html += '<div class="plan-line"><b>' +
-            (pos.kind === "part" ? "The founding pipeline is one part" :
-                                   "The founding pipeline is the beginning") +
+            ((sectionData.section.source_path ? "The founding folder" : "The founding pipeline") +
+             (pos.kind === "part" ? " is one part" : " is the beginning")) +
             '</b>' + (founding ? ': ' + esc(founding.title) : '') + '. ' + esc(pos.why || '') + '</div>';
 
         const cov = sectionData.coverage || { covered: {}, uncovered: [] };

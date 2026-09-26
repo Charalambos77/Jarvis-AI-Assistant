@@ -344,6 +344,13 @@ def knowledge_digest(section: dict, max_chars: int = 6000) -> str:
     if brief:
         out += ["## What this section is about", "", brief, ""]
 
+    source = (section.get("source_path") or "").strip()
+    if source:
+        out += ["## The folder this section started from", "",
+                f"`{source}` — the existing work this section builds on. Read it there; "
+                "it is the owner's folder, so change files in it only when the task is "
+                "to change them.", ""]
+
     summary = summary_body(folder)
     if summary:
         out += ["## What this section already knows", "", summary, ""]
@@ -367,6 +374,69 @@ def knowledge_digest(section: dict, max_chars: int = 6000) -> str:
     ]
 
     return "\n".join(out)[:max_chars]
+
+
+# What a folder picked in the IDE is made of. Skipped: what is generated,
+# installed or version control, which says nothing about the work itself.
+SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "env", "dist", "build",
+             ".next", ".idea", ".vscode", ".mypy_cache", ".pytest_cache", "target", ".cache"}
+TEXT_EXTS = {".md", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".html", ".css",
+             ".yml", ".yaml", ".toml", ".ini", ".cfg", ".sql", ".sh", ".bat", ".ps1", ".java",
+             ".go", ".rs", ".rb", ".php", ".c", ".h", ".cpp", ".cs", ".csv", ".xml", ".env.example"}
+
+
+def folder_material(path: str, max_chars: int = 6000, max_files: int = 400) -> str:
+    """A folder's existing work, as text: its tree, then its readable files.
+
+    This is what a section started from a folder knows about itself — the same
+    job `pipeline_material` does for a pipeline. READMEs and top-level files
+    come first, because they say what the work is; nothing is written here.
+    """
+    if not path or not os.path.isdir(path):
+        return ""
+    tree, files = [], []
+    for root, dirs, names in os.walk(path):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+        rel = os.path.relpath(root, path)
+        depth = 0 if rel == "." else rel.count(os.sep) + 1
+        if rel != ".":
+            tree.append("  " * (depth - 1) + os.path.basename(root) + "/")
+        for name in sorted(names):
+            if len(files) >= max_files:
+                break
+            tree.append("  " * depth + name)
+            full = os.path.join(root, name)
+            ext = os.path.splitext(name)[1].lower()
+            if ext in TEXT_EXTS or name.lower().startswith("readme"):
+                files.append((0 if name.lower().startswith("readme") else depth + 1, full))
+    out = ["### Files", "\n".join(tree[:300]), ""]
+    budget = max_chars - len("\n".join(out))
+    for _, full in sorted(files):
+        if budget <= 200:
+            break
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read(min(budget, 2500))
+        except Exception:
+            continue
+        chunk = f"### {os.path.relpath(full, path)}\n{text.strip()}\n"
+        out.append(chunk)
+        budget -= len(chunk)
+    return "\n".join(out)[:max_chars]
+
+
+def folder_section_name(path: str) -> str:
+    """A section folder under 'Let Jarvis Handle It' for work that lives elsewhere.
+
+    The picked folder is only read; the section's own brief, knowledge and plan
+    are written here, next to every other section, never into the owner's code.
+    """
+    base = slugify(os.path.basename(os.path.normpath(path or "")), "Folder section")
+    name, n = base, 2
+    while os.path.exists(os.path.join(SECTIONS_ROOT, name)):
+        name = f"{base} ({n})"
+        n += 1
+    return name
 
 
 def pipeline_material(folder: str, max_chars: int = 5000) -> str:

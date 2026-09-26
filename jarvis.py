@@ -3742,6 +3742,7 @@ def _section_card(section: dict) -> dict:
         "brief": section.get("brief", ""),
         "created_at": section.get("created_at"),
         "founding_plan_id": section.get("founding_plan_id"),
+        "source_path": section.get("source_path"),
         "plan_ids": [p["id"] for p in pipelines],
         "pipeline_count": len(pipelines),
         "running": any(p.get("status") == "running" for p in pipelines),
@@ -3789,6 +3790,63 @@ def create_section_draft(plan: dict, name: str, brief: str) -> dict:
     return draft
 
 
+def _folder_task(path: str) -> str:
+    return f"The existing work in the folder {path}"
+
+
+def create_folder_section_draft(path: str, name: str, brief: str) -> dict:
+    """Open a section draft for a folder picked in the IDE, not a pipeline.
+
+    Everything after this is the same gate a pipeline goes through: the brief,
+    the questions, the research and the plan, then Create section. The folder
+    itself is only read; the section's files go under 'Let Jarvis Handle It'.
+    """
+    import time as _time
+    import uuid
+    _prune_section_drafts()
+    folder = section_store.folder_section_name(path)
+    draft = {
+        "draft_id": uuid.uuid4().hex[:8],
+        "plan_id": None,
+        "source_path": path,
+        "folder": folder,
+        "fresh_folder": not os.path.exists(os.path.join(section_store.SECTIONS_ROOT, folder)),
+        "task": _folder_task(path),
+        "name": (name or "").strip() or os.path.basename(os.path.normpath(path)),
+        "brief": (brief or "").strip(),
+        "files": [],
+        "qa": [],
+        "pending_questions": [],
+        "rounds": 0,
+        "brief_text": None,
+        "crew": None,
+        "stage": "brief",
+        "created": _time.time(),
+        "touched": _time.time(),
+    }
+    with SECTION_DRAFTS_LOCK:
+        SECTION_DRAFTS[draft["draft_id"]] = draft
+    return draft
+
+
+def _check_section_folder(path: str):
+    """(clean absolute path, None) or (None, (error, status)) for a picked folder."""
+    path = (path or "").strip()
+    if not path or not os.path.isabs(path):
+        return None, ("folder_path must be an absolute path", 400)
+    path = os.path.normpath(path)
+    if not os.path.isdir(path):
+        return None, (f"folder not found: {path}", 404)
+    conn = db.get_connection(DB_PATH)
+    try:
+        existing = db.get_section_by_source(conn, path)
+    finally:
+        conn.close()
+    if existing:
+        return None, ("That folder is already a section.", 409, existing["id"])
+    return path, None
+
+
 def _get_section_draft(draft_id: str):
     import time as _time
     with SECTION_DRAFTS_LOCK:
@@ -3831,6 +3889,13 @@ def _section_draft_discard(draft: dict):
     with SECTION_DRAFTS_LOCK:
         SECTION_DRAFTS.pop(draft["draft_id"], None)
     _delete_section_draft_uploads(draft)
+    # A folder draft may have made its section folder just to hold the drops;
+    # if nothing else is in it, cancelling takes it away again.
+    if draft.get("fresh_folder"):
+        target = os.path.join(section_store.SECTIONS_ROOT, draft["folder"])
+        if os.path.isdir(target) and not any(f for _, _, f in os.walk(target)):
+            import shutil
+            shutil.rmtree(target, ignore_errors=True)
 
 
 def _section_draft_context_text(draft: dict) -> str:
@@ -3856,14 +3921,23 @@ def _section_draft_context_text(draft: dict) -> str:
         f"THE FOUNDING PIPELINE:\n{draft.get('task', '')}",
     ]
 
-    material = section_store.pipeline_material(draft["folder"])
-    if material:
+    if draft.get("source_path"):
+        lines[0] = ("An existing folder of work is about to become a SECTION: a lasting workspace "
+                    "that pipelines start inside, already knowing what the folder holds.")
+        lines[-1] = f"THE FOLDER IT STARTS FROM:\n{draft['source_path']}"
+        material = section_store.folder_material(draft["source_path"])
         lines.append(
-            "\nWHAT THAT PIPELINE ALREADY FOUND — this is established knowledge the "
-            "section inherits. Never ask the user about anything in here:\n" + material
-        )
+            "\nWHAT THE FOLDER ALREADY CONTAINS — this is the work the section inherits. "
+            "Never ask the user about anything in here:\n" + (material or "(the folder is empty)"))
     else:
-        lines.append("\nWHAT THAT PIPELINE ALREADY FOUND:\n(it left nothing in its memory)")
+        material = section_store.pipeline_material(draft["folder"])
+        if material:
+            lines.append(
+                "\nWHAT THAT PIPELINE ALREADY FOUND — this is established knowledge the "
+                "section inherits. Never ask the user about anything in here:\n" + material
+            )
+        else:
+            lines.append("\nWHAT THAT PIPELINE ALREADY FOUND:\n(it left nothing in its memory)")
 
     lines.append(f"\nSECTION NAME THE USER GAVE:\n{draft.get('name', '')}")
     written = (draft.get("brief") or "").strip()
@@ -4101,7 +4175,7 @@ def _section_web_search(folder: str, query: str) -> dict:
 def _section_plan_inputs_from_draft(draft: dict) -> dict:
     conn = db.get_connection(DB_PATH)
     try:
-        founding = next((p for p in db.get_pipelines(conn) if p["id"] == draft["plan_id"]), None)
+        founding = next((p for p in db.get_pipelines(conn) if p["id"] == draft.get("plan_id")), None)
     finally:
         conn.close()
     return {
@@ -4113,8 +4187,9 @@ def _section_plan_inputs_from_draft(draft: dict) -> dict:
         "qa": list(draft.get("qa") or []),
         "file_names": [f["name"] for f in draft.get("files", [])],
         "file_parts": _intake_file_parts(draft),
-        "founding_plan_id": draft["plan_id"],
+        "founding_plan_id": draft.get("plan_id") or "",
         "founding_status": (founding or {}).get("status", ""),
+        "source_path": draft.get("source_path") or "",
     }
 
 
@@ -4129,7 +4204,8 @@ def _section_plan_inputs_from_section(section: dict) -> dict:
     return {
         "folder": section["folder"],
         "name": section.get("name") or section["folder"],
-        "task": (founding or {}).get("task_summary") or (founding or {}).get("task") or "",
+        "task": (founding or {}).get("task_summary") or (founding or {}).get("task")
+                or (_folder_task(section["source_path"]) if section.get("source_path") else ""),
         "brief_text": brief,
         "typed": brief,
         "qa": [],
@@ -4137,6 +4213,7 @@ def _section_plan_inputs_from_section(section: dict) -> dict:
         "file_parts": [],
         "founding_plan_id": section.get("founding_plan_id") or "",
         "founding_status": (founding or {}).get("status", ""),
+        "source_path": section.get("source_path") or "",
     }
 
 
@@ -4157,7 +4234,10 @@ def _section_plan_context(inputs: dict, *extra: str) -> str:
     lines = [
         f"THE SECTION: {inputs['name']}",
         "",
-        "THE FOUNDING PIPELINE — the finished work this section grows from:",
+        ("THE FOUNDING WORK — the existing folder this section grows from. Treat it "
+         "exactly as a founding pipeline: is it the beginning, or one part?"
+         if inputs.get("source_path") else
+         "THE FOUNDING PIPELINE — the finished work this section grows from:"),
         inputs.get("task") or "(unknown)",
         "",
         "WHAT THE SECTION IS FOR (the brief settled with the owner):",
@@ -4166,8 +4246,11 @@ def _section_plan_context(inputs: dict, *extra: str) -> str:
         "THE OWNER'S OWN WORDS — the source of every ask:",
         _section_owner_words(inputs),
         "",
-        "WHAT THE FOUNDING PIPELINE ALREADY FOUND:",
-        section_store.pipeline_material(folder, max_chars=4000) or "(nothing on disk)",
+        "WHAT THE FOUNDING WORK ALREADY CONTAINS:" if inputs.get("source_path")
+        else "WHAT THE FOUNDING PIPELINE ALREADY FOUND:",
+        (section_store.folder_material(inputs["source_path"], max_chars=6000)
+         if inputs.get("source_path") else
+         section_store.pipeline_material(folder, max_chars=4000)) or "(nothing on disk)",
         "",
         "THE AGENTS THAT ACTUALLY RAN, with their real agent_ids:",
         section_store.crew_material(folder, max_chars=5000) or "(no agent plan survives on disk)",
@@ -4659,7 +4742,8 @@ def _section_draft_record(draft: dict, final_brief: str) -> str | None:
     brief, where the agents can read them.
     """
     out = [f"# Section brief — {draft.get('name') or draft.get('folder')}", ""]
-    out += ["## Founding pipeline", draft.get("task", ""), ""]
+    out += ["## Founding folder" if draft.get("source_path") else "## Founding pipeline",
+            draft.get("task", ""), ""]
 
     written = (draft.get("brief") or "").strip()
     out += ["## What the user wrote", written if written else "_(nothing written)_", ""]
@@ -4739,25 +4823,47 @@ def sections_create_route():
     if draft:
         # The draft's own text wins: it is what the user read and corrected.
         brief = (draft.get("brief_text") or "").strip() or _section_draft_fallback_brief(draft)
-    if not plan_id:
-        return jsonify({"error": "plan_id is required"}), 400
+    # A section can also start from a folder picked in the IDE: the same gate,
+    # with the folder's files standing in for a pipeline's findings.
+    source_path = (draft or {}).get("source_path")
+    if not draft and (data.get("folder_path") or "").strip():
+        source_path, problem = _check_section_folder(data["folder_path"])
+        if problem:
+            body = {"error": problem[0]}
+            if len(problem) > 2:
+                body["section_id"] = problem[2]
+            return jsonify(body), problem[1]
+    if source_path:
+        if draft:
+            # Checked again: another window may have made it a section meanwhile.
+            _, problem = _check_section_folder(source_path)
+            if problem and problem[1] == 409:
+                return jsonify({"error": problem[0], "section_id": problem[2]}), 409
+        plan_id = None
+    elif not plan_id:
+        return jsonify({"error": "plan_id or folder_path is required"}), 400
 
     conn = db.get_connection(DB_PATH)
     try:
-        plan = next((p for p in db.get_pipelines(conn) if p["id"] == plan_id), None)
-        if not plan:
-            return jsonify({"error": f"pipeline '{plan_id}' not found"}), 404
+        if source_path:
+            folder = (draft or {}).get("folder") or section_store.folder_section_name(source_path)
+        else:
+            plan = next((p for p in db.get_pipelines(conn) if p["id"] == plan_id), None)
+            if not plan:
+                return jsonify({"error": f"pipeline '{plan_id}' not found"}), 404
 
-        existing = db.get_section_for_pipeline(conn, plan_id)
-        if existing:
-            return jsonify({"error": "That pipeline is already part of a section.",
-                            "section_id": existing["id"]}), 409
+            existing = db.get_section_for_pipeline(conn, plan_id)
+            if existing:
+                return jsonify({"error": "That pipeline is already part of a section.",
+                                "section_id": existing["id"]}), 409
 
-        folder = plan.get("project_name") or "Default Project"
-        name = ((data.get("name") or (draft or {}).get("name") or "").strip() or folder)
+            folder = plan.get("project_name") or "Default Project"
+        name = ((data.get("name") or (draft or {}).get("name") or "").strip()
+                or (os.path.basename(source_path) if source_path else folder))
         import uuid
         section_id = uuid.uuid4().hex[:8]
-        db.create_section(conn, section_id, name, folder, brief, plan_id)
+        section_store.section_dir(folder)
+        db.create_section(conn, section_id, name, folder, brief, plan_id, source_path=source_path)
         section = db.get_section(conn, section_id)
     finally:
         conn.close()
@@ -4816,9 +4922,20 @@ def sections_create_route():
 def section_intake_start_route():
     """Open a draft for a section. Nothing is persisted and no section exists yet."""
     data = request.get_json(force=True) or {}
+    if (data.get("folder_path") or "").strip():
+        # From the IDE: a folder, not a pipeline. Same gate from here on.
+        path, problem = _check_section_folder(data["folder_path"])
+        if problem:
+            body = {"error": problem[0]}
+            if len(problem) > 2:
+                body["section_id"] = problem[2]
+            return jsonify(body), problem[1]
+        draft = create_folder_section_draft(path, data.get("name") or "", data.get("brief") or "")
+        return jsonify({"draft_id": draft["draft_id"], "name": draft["name"],
+                        "folder": draft["folder"], "source_path": path})
     plan_id = str(data.get("plan_id") or "").strip()
     if not plan_id:
-        return jsonify({"error": "plan_id is required"}), 400
+        return jsonify({"error": "plan_id or folder_path is required"}), 400
 
     conn = db.get_connection(DB_PATH)
     try:
