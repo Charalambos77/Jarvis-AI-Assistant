@@ -36,7 +36,8 @@ import webview
 import db
 import sections as section_store
 import command_gate
-from agents import tool_review, tool_requests, agent_questions
+import control_room
+from agents import tool_review, tool_requests, agent_questions, tool_onboarding
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -1571,6 +1572,8 @@ coordinator.register_state_provider("start_pipeline", start_pipeline_local)
 tool_review.set_notifier(lambda text: push_message("system", text))
 tool_requests.set_notifier(lambda text: push_message("system", text))
 agent_questions.set_notifier(lambda text: push_message("system", text))
+tool_onboarding.set_notifier(lambda text: push_message("system", text))
+control_room.set_notifier(lambda text: push_message("system", text))
 coordinator.register_state_provider("resume_pipeline", resume_pipeline_local)
 coordinator.register_state_provider("delete_pipeline", delete_pipeline_local)
 coordinator.register_state_provider("get_pipelines", get_pipelines_local)
@@ -1835,6 +1838,11 @@ def provider_comparison_page():
 @app.route("/commands.html")
 def commands_page():
     return send_from_directory(BASE_DIR, "commands.html")
+
+
+@app.route("/control_room.html")
+def control_room_page():
+    return send_from_directory(BASE_DIR, "control_room.html")
 
 
 @app.route("/library.html")
@@ -2183,6 +2191,77 @@ def tool_requests_decide():
         return jsonify({"error": "request_id is required — without it the wrong request could be "
                                  "answered when more than one is waiting."}), 400
     result = tool_requests.decide(request_id, data.get("decision") or "", reason=data.get("reason") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/tool_onboarding/pending", methods=["GET"])
+def tool_onboarding_pending():
+    """Newly connected services whose tools wait for a review on the Commands page."""
+    return jsonify({"pending": tool_onboarding.pending(), "researching": tool_onboarding.researching(),
+                    "log": tool_onboarding.log(), "wait_seconds": tool_onboarding.WAIT_SECONDS})
+
+
+@app.route("/tool_onboarding/decide", methods=["POST"])
+def tool_onboarding_decide():
+    """Approve all, approve read-only, pick some, or reject one service's new tools."""
+    data = request.get_json(force=True) or {}
+    service = (data.get("service") or "").strip()
+    if not service:
+        return jsonify({"error": "service is required."}), 400
+    tools = data.get("tools") if isinstance(data.get("tools"), list) else None
+    result = tool_onboarding.decide(service, data.get("decision") or "", tools=tools,
+                                    reason=data.get("reason") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/control/pending", methods=["GET"])
+def control_pending():
+    """Everything waiting in the Control room: risky tools to decide, and held calls."""
+    return jsonify({"calls": control_room.pending_calls(), "tools": control_room.held_tools()})
+
+
+@app.route("/control/tools", methods=["GET"])
+def control_tools():
+    """Every tool that costs money or is destructive, with its rule, and the call log."""
+    return jsonify({"tools": control_room.risky_tools(), "log": control_room.call_log()})
+
+
+@app.route("/control/tool", methods=["POST"])
+def control_tool_decide():
+    """Set a risky tool to always ask, always allow, or block."""
+    data = request.get_json(force=True) or {}
+    result = control_room.decide_tool((data.get("service") or "").strip(), (data.get("tool") or "").strip(),
+                                      data.get("decision") or "")
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/control/limits", methods=["GET", "POST"])
+def control_limits():
+    """Spending limits per service and per pipeline, and what has been spent."""
+    if request.method == "POST":
+        data = request.get_json(force=True) or {}
+        result = control_room.set_limit((data.get("scope") or "").strip(), (data.get("service") or "").strip(),
+                                        data.get("limit"))
+        if "error" in result:
+            return jsonify(result), 400
+    return jsonify(control_room.spending())
+
+
+@app.route("/control/call", methods=["POST"])
+def control_call_decide():
+    """Allow one held call once, or deny it."""
+    data = request.get_json(force=True) or {}
+    request_id = (data.get("request_id") or "").strip()
+    if not request_id:
+        return jsonify({"error": "request_id is required — without it the wrong call could be "
+                                 "answered when more than one is waiting."}), 400
+    result = control_room.decide_call(request_id, data.get("decision") or "", reason=data.get("reason") or "")
     if "error" in result:
         return jsonify(result), 400
     return jsonify(result)
@@ -4661,7 +4740,9 @@ def mcp_toggle_route():
 
     info = ensure_server_running(name)
     if info["status"] == "up":
-        push_message("system", f"MCP server '{name}' connected — {len(info['tools'])} tool(s) available.")
+        push_message("system", f"MCP server '{name}' connected — {len(info['tools'])} tool(s) found.")
+        # Records the tools and opens their review (Commands page) or holds them (Control room).
+        tool_onboarding.observe_mcp(name, info.get("tools", []))
     else:
         push_message("system", f"MCP server '{name}' could not start: {info.get('error')}")
     return jsonify({
@@ -4730,9 +4811,57 @@ def connect_tool_route():
 
     success = save_tool_credentials(service_name, credentials, method_id=method_id)
     if success:
+        _observe_api_later(service_name)
         return jsonify({"status": "success", "message": f"Successfully connected {service_name}"})
     else:
         return jsonify({"error": f"Failed to save credentials for {service_name}"}), 500
+
+
+def _observe_api_later(service_name: str) -> None:
+    """Turn a just-connected API's spec into tools, off the request thread.
+
+    Services Jarvis already has a built-in handler for, and MCP servers, are left alone.
+    """
+    from agents.tool_executor import _resolve_tool_key, REGISTRY_TOOLS, ALWAYS_ON_TOOLS, MCP_KEY_PREFIX
+
+    service = service_name.lower().replace("-", "_").replace(" ", "_")
+    key = _resolve_tool_key(service, allow_llm=False)
+    if key in REGISTRY_TOOLS or key in ALWAYS_ON_TOOLS or key.startswith(MCP_KEY_PREFIX):
+        return
+
+    def _run():
+        try:
+            tool_onboarding.observe_api(service)
+        except Exception as e:
+            print(f"[Tools] Could not read {service}'s API description: {e}")
+
+    threading.Thread(target=_run, name=f"api-observe-{service}", daemon=True).start()
+
+
+@app.route("/control/api_spec", methods=["POST"])
+def control_api_spec():
+    """Save where a connected API's spec lives, and read its tools from there."""
+    from connectors.api_connector import load_registry, save_registry
+    from connectors import openapi_tools
+
+    data = request.get_json(force=True) or {}
+    service = (data.get("service") or "").strip()
+    spec_url = (data.get("spec_url") or "").strip()
+    if not service or not spec_url.startswith(("http://", "https://")):
+        return jsonify({"error": "service and an http(s) spec_url are required."}), 400
+    if openapi_tools.fetch_spec(spec_url) is None:
+        return jsonify({"error": f"{spec_url} is not an OpenAPI, Swagger or Google API description."}), 400
+    registry = load_registry()
+    clean = service.lower().replace("-", "_").replace(" ", "_")
+    names = [n for n in dict.fromkeys((service, clean)) if n in registry]
+    if not names:
+        return jsonify({"error": f"'{service}' is not connected."}), 404
+    for name in names:
+        registry[name]["spec_url"] = spec_url
+    save_registry()
+    entry = tool_onboarding.observe_api(clean, spec_url)
+    return jsonify({"status": "ok", "service": clean, "state": entry.get("state"),
+                    "tools": len(entry.get("tools") or {}), "error": entry.get("spec_error")})
 
 
 @app.route("/api/open-artifact", methods=["POST"])
@@ -4793,9 +4922,19 @@ def tools_overview_route():
     apis = []
     # Everything Jarvis has a real connector for, plus anything already in the
     # registry — so services with a handler show up even before they're set up.
-    names = sorted(set(registry) | set(REGISTRY_TOOLS))
+    #
+    # Connecting a service saves it under the name it was given AND a cleaned-up
+    # one ("Mini API" and "mini_api"). Those are one service, so they get one
+    # row, under the cleaned-up name, connected if either spelling is.
+    clean = lambda n: n.lower().replace("-", "_").replace(" ", "_")
+    spellings: dict[str, list[str]] = {}
+    for name in sorted(set(registry) | set(REGISTRY_TOOLS)):
+        spellings.setdefault(clean(name), []).append(name)
+    names = sorted(spellings)
     for name in names:
-        cfg = registry.get(name) or {}
+        configs = [registry[n] for n in spellings[name] if registry.get(n)]
+        cfg = next((c for c in configs if c.get("status", "unknown") != "unknown"), None) \
+            or registry.get(name) or (configs[0] if configs else {})
         status = cfg.get("status", "unknown")
         # Resolve rather than test membership: google_drive_api has no entry of
         # its own but aliases onto google_docs_api's handler, and calling that
@@ -4815,12 +4954,43 @@ def tools_overview_route():
             "tool_name": spec["declaration"]["name"] if spec else None,
         })
 
+    # APIs whose tools come from their spec: where they are in the catalogue.
+    try:
+        from connectors import tool_catalog
+        catalog = tool_catalog.load()
+        for a in apis:
+            entry = catalog.get(a["service"].lower().replace("-", "_").replace(" ", "_"))
+            if entry and entry.get("kind") == "api":
+                statuses = [t.get("status") for t in (entry.get("tools") or {}).values()]
+                a["catalog"] = {"state": entry.get("state"), "summary": entry.get("summary", ""),
+                                "spec_url": entry.get("spec_url"), "spec_error": entry.get("spec_error"),
+                                "tools": len(statuses), "enabled": statuses.count("enabled"),
+                                "pending": statuses.count("pending"), "held": statuses.count("held"),
+                                "research": (entry.get("research") or {}).get("status")}
+    except Exception as e:
+        print(f"[Tools] Could not read the tool catalogue: {e}")
+
     try:
         from connectors.mcp_connector import list_available_mcps
         mcps = list_available_mcps()
     except Exception as e:
         mcps = []
         print(f"[Tools] Could not list MCP servers: {e}")
+
+    # Where each server's tools are in the catalogue: researched, reviewed, in use.
+    try:
+        from connectors import tool_catalog
+        catalog = tool_catalog.load()
+        for m in mcps:
+            entry = catalog.get(m.get("name")) or {}
+            statuses = [t.get("status") for t in (entry.get("tools") or {}).values()]
+            if entry:
+                m["catalog"] = {"state": entry.get("state"), "summary": entry.get("summary", ""),
+                                "enabled": statuses.count("enabled"), "pending": statuses.count("pending"),
+                                "held": statuses.count("held"),
+                                "research": (entry.get("research") or {}).get("status")}
+    except Exception as e:
+        print(f"[Tools] Could not read the tool catalogue: {e}")
 
     always_on = [
         {"name": spec["declaration"]["name"], "description": spec["declaration"]["description"]}
@@ -4851,10 +5021,15 @@ def disconnect_tool_route():
         return jsonify({"error": "service_name is required"}), 400
 
     registry = load_registry()
-    if service not in registry:
+    # Every spelling it was saved under ("Mini API" and "mini_api"), or it would
+    # still count as connected under the other one.
+    clean = lambda n: n.lower().replace("-", "_").replace(" ", "_")
+    names = [n for n in registry if clean(n) == clean(service)]
+    if not names:
         return jsonify({"error": f"'{service}' is not in the registry."}), 404
 
-    registry[service]["status"] = "unknown"
+    for name in names:
+        registry[name]["status"] = "unknown"
     save_registry()
     push_message("system", f"{service} disconnected. Stored credentials were left in place.")
     return jsonify({"service": service, "status": "unknown", "configured": False})
@@ -5074,12 +5249,27 @@ def mic_loop(window):
         pa.terminate()
 
 
+def start_tool_background_work():
+    """Background work on connected services, started only by the running app.
+
+    Kept out of import so a test that imports jarvis never starts servers,
+    fetches API specs or researches tools into this machine's real catalogue.
+    """
+    # Reviews of newly connected tools approve themselves when their wait runs
+    # out, even with no page open to notice.
+    tool_onboarding.start_sweeper()
+    # Connected services are looked at again: new or changed tools go up for
+    # review, and connected APIs with no tools yet get them from their spec.
+    tool_onboarding.start_startup_check()
+
+
 if __name__ == "__main__":
     from datetime import datetime
     import db
     
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
+    start_tool_background_work()
     time.sleep(0.5)  # give Flask a moment to bind before the window loads it
 
     # Start background reminder thread

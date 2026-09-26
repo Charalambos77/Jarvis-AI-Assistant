@@ -23,5 +23,11 @@ def add(a: float, b: float) -> str:
     return str(a + b)
 
 
+@mcp.tool()
+def delete_note(title: str) -> str:
+    """Delete a note permanently. Used to check that destructive tools are held in the Control room."""
+    return f"deleted: {title}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

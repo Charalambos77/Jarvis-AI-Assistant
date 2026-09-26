@@ -292,6 +292,7 @@ try:
               {"/image.png", "/fetch", "/socket", "/redirected"} <= reached)
         _Private.hits.clear()
         probe = wi.capture_site(PROBE_URL, os.path.join(PROJECT_DIR, "probe_guarded"), url_guard=refuse_private)
+        print(f"      (reached with the guard: {sorted(_Private.hits)})")
         check("with the guard, nothing the page loads reaches it", _Private.hits == [])
         check("the page itself is still captured", probe["measured"]["title"] == "Probe")
         check("what was refused is reported with the capture",

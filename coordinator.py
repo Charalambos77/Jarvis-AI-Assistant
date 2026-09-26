@@ -399,7 +399,7 @@ TOOLS = [
                     "description": (
                         "go_to_plan: Navigate to the Plan page. "
                         "go_to_brain: Return to Brain Core (3D map home). "
-                        "go_to_apis: Navigate to the APIs/MCPs comparison page. "
+                        "go_to_apis: Navigate to the Control room, where APIs and MCP servers are managed. "
                         "go_to_execution: Navigate to the Execution page dashboard. "
                         "open_side_panel: Open the left side panel showing tasks. "
                         "close_side_panel: Close/hide the left side panel. "
@@ -822,7 +822,8 @@ UI_MAP = (
     "    Action: go_to_brain\n"
     "  - Plan Page (plan.html): Project plan with phases and timelines. "
     "    Action: go_to_plan\n"
-    "  - APIs/MCPs Page (provider_comparison.html): Compare AI providers. "
+    "  - Control Room (control_room.html): connected APIs and MCP servers, reviews of their new tools, "
+    "    approvals for anything that costs money or is destructive, and spending limits. "
     "    Action: go_to_apis\n"
     "  - Execution Page (execution.html): Real-time execution stream and task logs. "
     "    Action: go_to_execution\n"
@@ -858,7 +859,7 @@ UI_MAP = (
     "VOICE EXAMPLES (always invoke control_interface for these):\n"
     "  'open settings' → open_settings_panel\n"
     "  'show the plan' / 'go to plan' → go_to_plan\n"
-    "  'go to APIs' / 'show providers' → go_to_apis\n"
+    "  'go to APIs' / 'open the control room' → go_to_apis\n"
     "  'open notes' / 'show my notes' → open_notes_panel\n"
     "  'show task 5' / 'open task 5' → open_task_detail, payload={task_id:5}\n"
     "  'close the panel' / 'close everything' → close_side_panel\n"
@@ -1420,7 +1421,7 @@ def handle_request(transcript: str) -> str:
                         action_map = {
                             "go_to_plan": "Navigating to the Plan page, Sir.",
                             "go_to_brain": "Returning to the Brain Core, Sir.",
-                            "go_to_apis": "Going to the APIs page, Sir.",
+                            "go_to_apis": "Going to the Control room, Sir.",
                             "go_to_execution": "Going into execution mode, Sir.",
                             "open_side_panel": "Opening the side panel, Sir.",
                             "close_side_panel": "Closing the side panel, Sir.",

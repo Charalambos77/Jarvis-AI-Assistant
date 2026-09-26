@@ -28,8 +28,10 @@
         { key: "plan", label: "Plan", href: "plan.html", aliases: ["plan"] },
         { key: "library", label: "Library", href: "library.html", aliases: ["library"] },
         { key: "commands", label: "Commands", href: "commands.html", aliases: ["commands"] },
-        { key: "apis", label: "APIs/MCPs", href: "provider_comparison.html",
-          aliases: ["apis/mcps", "apis", "apis/mcp"] }
+        // APIs and MCP servers are managed in the Control room now, so a page's
+        // old "APIs/MCPs" button is taken over and relabelled rather than kept.
+        { key: "control", label: "Control room", href: "control_room.html",
+          aliases: ["control room", "control", "apis/mcps", "apis", "apis/mcp"] }
     ];
 
     // Where each page keeps its buttons. First one found wins.
@@ -59,7 +61,8 @@
         "plan.html": "plan",
         "library.html": "library",
         "commands.html": "commands",
-        "provider_comparison.html": "apis"
+        "control_room.html": "control",
+        "provider_comparison.html": "control"
     }[page] || "";
 
     function hrefFor(dest) {
@@ -169,6 +172,19 @@
                 container.appendChild(found);
             }
 
+            if (dest.key === "control" && normalise(found.textContent) !== "control room") {
+                // A cloned button keeps the page's look but drops its old click
+                // handler, which still pointed at the APIs/MCPs page.
+                var fresh = found.cloneNode(true);
+                fresh.removeAttribute("onclick");
+                fresh.textContent = dest.label;
+                fresh.addEventListener("click", function () {
+                    window.location.href = hrefFor(dest);
+                });
+                found.parentNode.replaceChild(fresh, found);
+                found = fresh;
+            }
+
             found.classList.add("jarvis-nav-btn");
             found.setAttribute("data-nav", dest.key);
             if (dest.key === CURRENT && !found.classList.contains("active")) {
@@ -200,6 +216,23 @@
         }
         tick();
         setInterval(tick, 3000);
+
+        /* The Control room has no time limit, so a waiting call or tool is easy to
+           forget: its button carries the count on every page too. */
+        function tickControl() {
+            fetch("/control/pending")
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var count = (data.calls || []).length + (data.tools || []).length;
+                    var btn = document.querySelector('[data-nav="control"]');
+                    if (!btn) return;
+                    btn.textContent = count ? "Control room (" + count + ")" : "Control room";
+                    btn.classList.toggle("jarvis-nav-waiting", count > 0);
+                })
+                .catch(function () { /* Jarvis restarting; the next tick retries. */ });
+        }
+        tickControl();
+        setInterval(tickControl, 3000);
     }
 
     function start() {

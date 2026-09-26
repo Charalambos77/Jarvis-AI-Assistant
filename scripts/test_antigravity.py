@@ -52,6 +52,16 @@ def stub_run(payload=None, stderr="", returncode=0, capture=None):
 
 real_subprocess_run = subprocess.run
 
+# On a machine without agy (a CI box, a fresh checkout) the offline checks still
+# run: they only need find_binary() to name a file, since every subprocess call
+# below is stubbed. The live check needs the real thing.
+if antigravity.find_binary() is None and "--live" not in sys.argv:
+    stand_in = os.path.join(tempfile.mkdtemp(prefix="jarvis_agy_bin_"), "agy.cmd" if os.name == "nt" else "agy")
+    with open(stand_in, "w") as f:
+        f.write("")
+    os.environ["AGY_BINARY"] = stand_in
+    print(f"NOTE  agy is not installed here; using a stand-in path that nothing runs ({stand_in})")
+
 # ---- 1. availability decides whether the tool is offered at all ------------
 
 check("the installed binary is found", antigravity.find_binary() is not None)

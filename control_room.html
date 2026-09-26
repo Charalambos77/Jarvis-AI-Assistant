@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis Control Room</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #05070A;
+            --panel: rgba(255,255,255,0.025);
+            --line: rgba(255,255,255,0.08);
+            --text: #E2E8F0;
+            --muted: #9CA3AF;
+            --dim: #4B5563;
+            --accent: #60A5FA;
+            --go: #34D399;
+            --no: #F87171;
+            --warn: #FBBF24;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; background: var(--bg); color: var(--text);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+        .shell { display: flex; flex-direction: column; height: 100vh; }
+
+        header {
+            flex: 0 0 auto; padding: 22px 34px;
+            border-bottom: 1px solid var(--line);
+            display: flex; align-items: flex-start; gap: 24px;
+            background: rgba(8,10,14,0.9);
+        }
+        .id-block { flex: 1 1 auto; min-width: 0; }
+        .eyebrow {
+            font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin-bottom: 8px;
+        }
+        h1 { margin: 0; font-size: 22px; font-weight: 700; color: #FFF; }
+        .sub { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.7; max-width: 780px; }
+        .top-right-nav { display: flex; gap: 10px; flex: 0 0 auto; }
+        .nav-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+            color: var(--muted); font-family: inherit;
+            font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+            text-transform: uppercase; padding: 12px 20px; border-radius: 8px;
+            cursor: pointer; transition: all .25s ease;
+        }
+        .nav-btn:hover { background: rgba(255,255,255,0.07); color: #FFF; border-color: rgba(255,255,255,0.25); }
+        .nav-btn.active { background: #FFF; color: #000; border-color: #FFF; }
+
+        .body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 26px 34px 70px; }
+        .body::-webkit-scrollbar { width: 10px; }
+        .body::-webkit-scrollbar-track { background: transparent; }
+        .body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 6px; }
+        .body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+        .section-title {
+            font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--dim); margin: 30px 0 14px; display: flex; align-items: center; gap: 10px;
+        }
+        .section-title:first-child { margin-top: 0; }
+        .count-pill {
+            background: rgba(255,255,255,0.06); border-radius: 20px; padding: 2px 9px;
+            font-size: 10px; letter-spacing: 1px; color: var(--muted);
+        }
+        .count-pill.live { background: rgba(251,191,36,0.16); color: var(--warn); }
+
+        .card {
+            background: var(--panel); border: 1px solid var(--line);
+            border-radius: 12px; padding: 20px 22px; margin-bottom: 14px;
+        }
+        .card.waiting { border-color: rgba(251,191,36,0.42); background: rgba(251,191,36,0.04); }
+
+        .cmd {
+            font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #FFF;
+            background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 8px;
+            padding: 13px 15px; word-break: break-all; line-height: 1.6;
+        }
+        .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 13px; }
+        .badge {
+            font-size: 10.5px; letter-spacing: .6px; padding: 4px 10px; border-radius: 6px;
+            background: rgba(255,255,255,0.05); color: var(--muted); border: 1px solid var(--line);
+        }
+        .badge.link { cursor: pointer; }
+        .badge.link:hover { color: #FFF; border-color: rgba(255,255,255,0.28); }
+        .badge.go { background: rgba(52,211,153,0.13); color: var(--go); border-color: rgba(52,211,153,0.25); }
+        .badge.no { background: rgba(248,113,113,0.13); color: var(--no); border-color: rgba(248,113,113,0.25); }
+        .badge.warn { background: rgba(251,191,36,0.14); color: var(--warn); border-color: rgba(251,191,36,0.28); }
+
+        .breakdown { margin-top: 14px; font-size: 12px; color: var(--muted); line-height: 1.9; }
+        .breakdown b { color: var(--text); font-weight: 500; }
+        .sig { font-family: 'JetBrains Mono', monospace; color: var(--accent); font-size: 12px; }
+
+        .timer { margin-top: 15px; }
+        .timer-bar { height: 3px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
+        .timer-fill { height: 100%; background: var(--warn); transition: width 1s linear; }
+        .timer-text { font-size: 11px; color: var(--dim); margin-top: 7px; }
+
+        .decide { margin-top: 17px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        input[type=text] {
+            flex: 1 1 240px; min-width: 200px;
+            background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); font-family: inherit; font-size: 12.5px; padding: 10px 13px;
+        }
+        input[type=text]:focus { outline: none; border-color: rgba(96,165,250,0.45); }
+        .btn {
+            border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--text);
+            font-family: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: .8px;
+            padding: 10px 16px; border-radius: 8px; cursor: pointer; transition: all .2s ease;
+            white-space: nowrap;
+        }
+        .btn:hover { background: rgba(255,255,255,0.08); }
+        .btn.go { border-color: rgba(52,211,153,0.4); color: var(--go); }
+        .btn.go:hover { background: rgba(52,211,153,0.13); }
+        .btn.always { border-color: rgba(96,165,250,0.4); color: var(--accent); }
+        .btn.always:hover { background: rgba(96,165,250,0.13); }
+        .btn.no { border-color: rgba(248,113,113,0.4); color: var(--no); }
+        .btn.no:hover { background: rgba(248,113,113,0.13); }
+        .btn.tiny { padding: 6px 11px; font-size: 10.5px; }
+        .scope {
+            display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted);
+            cursor: pointer; user-select: none;
+        }
+
+        .empty {
+            border: 1px dashed var(--line); border-radius: 12px; padding: 26px;
+            font-size: 12.5px; color: var(--dim); line-height: 1.8;
+        }
+
+        .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+        select {
+            background: rgba(0,0,0,0.35); border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); font-family: inherit; font-size: 12px; padding: 9px 12px;
+        }
+        select:focus { outline: none; border-color: rgba(96,165,250,0.45); }
+
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            text-align: left; font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase;
+            color: var(--dim); font-weight: 600; padding: 0 12px 10px; border-bottom: 1px solid var(--line);
+        }
+        td { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.045); font-size: 12.5px; vertical-align: top; }
+        tr:hover td { background: rgba(255,255,255,0.018); }
+        td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #FFF; word-break: break-all; max-width: 420px; }
+        td.why { color: var(--muted); max-width: 300px; }
+        .when { color: var(--dim); white-space: nowrap; font-size: 11.5px; }
+
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 1000px) { .two-col { grid-template-columns: 1fr; } }
+        .rule-row {
+            display: flex; align-items: center; gap: 12px; padding: 11px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.045);
+        }
+        .rule-row:last-child { border-bottom: none; }
+        .rule-row .sig { flex: 1 1 auto; }
+        .deny-row {
+            padding: 9px 0; font-size: 12.5px; color: var(--muted); line-height: 1.6;
+            border-bottom: 1px solid rgba(255,255,255,0.045); display: flex; gap: 10px;
+        }
+        .deny-row:last-child { border-bottom: none; }
+        .deny-row::before { content: "✕"; color: var(--no); flex: 0 0 auto; }
+        .note { font-size: 12px; color: var(--dim); line-height: 1.8; margin-bottom: 14px; }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <header>
+        <div class="id-block">
+            <div class="eyebrow">Jarvis · Control room</div>
+            <h1>Control room</h1>
+            <div class="sub">
+                Your connected APIs and MCP servers, the new tools they bring, and anything that can
+                <em>spend money</em> or <em>do something destructive</em> (delete, send, publish). New tools that
+                only read or change things approve themselves after ten minutes if you don't answer. Money and
+                destructive tools and calls have no time limit: they wait until you answer, and the rest of the
+                pipeline keeps working meanwhile.
+            </div>
+        </div>
+        <!-- Filled in by nav_ui.js, which gives every page the same set. -->
+        <div class="top-right-nav"></div>
+    </header>
+
+    <div class="body">
+        <div class="section-title">
+            Calls waiting for you <span class="count-pill" id="call-count">0</span>
+        </div>
+        <div id="calls"></div>
+
+        <div class="section-title">
+            New risky tools <span class="count-pill" id="held-count">0</span>
+        </div>
+        <div id="held"></div>
+
+        <!-- New tools from a connected service (read and write ones; risky ones are above) -->
+        <div class="section-title">
+            New tools to review <span class="count-pill" id="onboarding-count">0</span>
+        </div>
+        <div id="onboarding"></div>
+
+        <!-- Spending limits for tools that cost money -->
+        <div class="section-title">Spending limits</div>
+        <div class="card">
+            <div class="note">
+                A call that would take a service or a pipeline over its limit waits here for you, even when its tool
+                is set to "Always allow". Amounts are in whatever unit the service charges (dollars, credits…),
+                read from the call's own amount or price. A money call with no amount Jarvis can read counts as
+                over any limit you set, so it is always shown to you. Leave a box empty for no limit.
+            </div>
+            <div id="limits"></div>
+        </div>
+
+        <!-- Rules for tools that cost money or are destructive -->
+        <div class="section-title">Rules for risky tools</div>
+        <div class="card"><div id="rules"></div></div>
+
+        <!-- Connected APIs and MCP servers (moved here from the APIs/MCPs page) -->
+        <div class="section-title">Connected services</div>
+        <div class="two-col">
+            <div class="card">
+                <div class="eyebrow">MCP servers</div>
+                <div class="note">Switching a server on finds its tools, researches them, and puts them up for review above.</div>
+                <div id="mcps"></div>
+            </div>
+            <div class="card">
+                <div class="eyebrow">APIs</div>
+                <div id="apis"></div>
+                <div id="connect-form" class="decide" style="display:none"></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="eyebrow">Always on — no setup</div>
+            <div id="always-on"></div>
+            <div class="note" style="margin:12px 0 0">Comparing AI providers and their costs?
+                <a href="provider_comparison.html" style="color:var(--accent)">Open the provider directory</a>.</div>
+        </div>
+
+        <div class="section-title">Already decided</div>
+        <div id="log"></div>
+    </div>
+</div>
+
+<script>
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const RISK = { costs_money: "costs money", destructive: "destructive" };
+const RULE = { always_ask: "Ask every call", always_allow: "Always allow", block: "Blocked" };
+// A reason being typed against a held call, kept across the 2-second repaint.
+const draft = {};
+
+function ago(iso) {
+    const t = typeof iso === "number" ? iso * 1000 : Date.parse(iso);
+    if (!t) return "";
+    const s = Math.floor((Date.now() - t) / 1000);
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+}
+
+function openPipeline(planId) {
+    if (!planId) return;
+    localStorage.setItem('jarvis_active_pipeline_id', planId);
+    location.href = 'plan.html';
+}
+
+function pill(id, n) {
+    const el = document.getElementById(id);
+    el.textContent = n;
+    el.className = n ? "count-pill live" : "count-pill";
+}
+
+function renderCalls(items) {
+    pill('call-count', items.length);
+    const host = document.getElementById('calls');
+    if (!items.length) {
+        host.innerHTML = `<div class="empty">No call is waiting. When an agent wants to use a tool that costs money or is destructive, it stops here until you allow or deny it.</div>`;
+        return;
+    }
+    host.innerHTML = items.map(c => `
+        <div class="card waiting">
+            <div class="badges">
+                ${c.plan_id ? `<span class="badge link" onclick="openPipeline('${esc(c.plan_id)}')">Pipeline ${esc(c.plan_id)} →</span>` : ""}
+                <span class="badge">${esc(c.role || c.agent_id || "agent")} · ${esc(c.kind || "")} agent</span>
+                <span class="badge no">${esc(RISK[c.risk] || c.risk)}</span>
+                <span class="badge">waiting ${esc(ago(c.asked_ts))}</span>
+            </div>
+            <div class="cmd">${esc(c.service)} · ${esc(c.tool)}</div>
+            <div class="breakdown"><b>With:</b> <span class="sig">${esc(c.args)}</span></div>
+            ${c.amount != null ? `<div class="breakdown"><b>Amount:</b> ${esc(c.amount)}</div>` : ""}
+            ${c.limit_reason ? `<div class="breakdown" style="color:var(--warn)"><b>Spending limit:</b> ${esc(c.limit_reason)}</div>` : ""}
+            <div class="decide">
+                <input type="text" id="why-${c.request_id}" placeholder="Why — optional, the agent is told"
+                       value="${esc(draft[c.request_id] || "")}" oninput="draft['${c.request_id}'] = this.value">
+                <button class="btn go" onclick="decideCall('${c.request_id}','allow')">Allow once</button>
+                <button class="btn no" onclick="decideCall('${c.request_id}','deny')">Deny</button>
+            </div>
+        </div>`).join("");
+}
+
+function ruleButtons(t) {
+    const current = t.status === "disabled" ? "block" : (t.status === "held" ? "" : t.rule);
+    return ["always_ask", "always_allow", "block"].map(d => `
+        <button class="btn tiny ${d === current ? (d === "block" ? "no" : "go") : ""}"
+                onclick="decideTool('${esc(t.service)}','${esc(t.tool)}','${d}')">${RULE[d]}</button>`).join(" ");
+}
+
+function renderHeld(items) {
+    pill('held-count', items.length);
+    const host = document.getElementById('held');
+    if (!items.length) {
+        host.innerHTML = `<div class="empty">No risky tool is waiting. When a service you connect offers a tool that costs money or is destructive, it waits here instead of on the Commands page.</div>`;
+        return;
+    }
+    // A big API (YouTube has 16) would fill the page with one card per tool, so a
+    // service with more than two waiting tools gets one card with a row per tool.
+    const byService = {};
+    items.forEach(t => (byService[t.service] = byService[t.service] || []).push(t));
+    host.innerHTML = Object.entries(byService).map(([service, tools]) => tools.length <= 2
+        ? tools.map(t => `
+        <div class="card waiting">
+            <div class="badges">
+                <span class="badge">${esc(t.service)}</span>
+                <span class="badge no">${esc(RISK[t.risk] || t.risk)}</span>
+                <span class="badge">found ${esc(ago(t.discovered_at))}</span>
+            </div>
+            <div class="cmd">${esc(t.tool)}</div>
+            <div class="breakdown">${esc(t.description)}</div>
+            <div class="decide">${ruleButtons(t)}</div>
+        </div>`).join("")
+        : `
+        <div class="card waiting">
+            <div class="badges">
+                <span class="badge">${esc(service)}</span>
+                <span class="badge no">${tools.length} risky tools</span>
+                <span class="badge">found ${esc(ago(tools[0].discovered_at))}</span>
+            </div>
+            <div class="decide" style="margin:4px 0 10px">
+                <button class="btn tiny" onclick="decideAll('${esc(service)}','always_ask')">Ask every call for all ${tools.length}</button>
+                <button class="btn tiny" onclick="decideAll('${esc(service)}','block')">Block all ${tools.length}</button>
+            </div>
+            ${tools.map(t => `
+            <div class="rule-row">
+                <div style="flex:1 1 auto;min-width:0">
+                    <span class="sig">${esc(t.tool)}</span>
+                    <span class="badge no" style="margin-left:6px">${esc(RISK[t.risk] || t.risk)}</span>
+                    <div class="note" style="margin:4px 0 0">${esc(String(t.description || "").slice(0, 200))}</div>
+                </div>
+                <div class="decide" style="margin:0;flex:0 0 auto">${ruleButtons(t)}</div>
+            </div>`).join("")}
+        </div>`).join("");
+}
+
+let heldCache = [];
+async function decideAll(service, decision) {
+    const tools = heldCache.filter(t => t.service === service);
+    if (!confirm(`${decision === 'block' ? 'Block' : 'Ask before every call to'} all ${tools.length} risky tools of ${service}?`)) return;
+    for (const t of tools)
+        await fetch('/control/tool', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service, tool: t.tool, decision }) });
+    refresh();
+}
+
+function renderRules(tools) {
+    const decided = tools.filter(t => t.status !== "held");
+    document.getElementById('rules').innerHTML = decided.length ? `
+        <table><tr><th>Tool</th><th>Risk</th><th>Rule</th></tr>
+        ${decided.map(t => `<tr>
+            <td class="mono">${esc(t.service)} · ${esc(t.tool)}</td>
+            <td>${esc(RISK[t.risk] || t.risk)}</td>
+            <td>${ruleButtons(t)}</td></tr>`).join("")}
+        </table>` : `<div class="note">No risky tool has been decided yet.</div>`;
+}
+
+function renderLog(log) {
+    document.getElementById('log').innerHTML = log.length ? `
+        <table><tr><th>When</th><th>Call</th><th>Agent</th><th>Answer</th></tr>
+        ${log.slice(0, 50).map(c => `<tr>
+            <td class="when">${esc(ago(c.decided_at))}</td>
+            <td class="mono">${esc(c.service)} · ${esc(c.tool)}</td>
+            <td class="why">${esc(c.role || c.agent_id)}</td>
+            <td><span class="badge ${c.decision === "allow" ? "go" : "no"}">${esc(c.decision === "allow" ? "allowed once" : "denied")}</span>
+                ${c.reason ? `<div class="why">${esc(c.reason)}</div>` : ""}</td></tr>`).join("")}
+        </table>` : `<div class="empty">No call has been answered yet.</div>`;
+}
+
+/* ---------- new tools from a connected service ---------- */
+
+/* Unticked boxes, kept across the 2-second repaint (everything starts ticked). */
+const onboardingUnticked = {};
+const RISK_LABEL = { read: "reads only", write: "changes things", destructive: "destructive", costs_money: "costs money" };
+
+function renderOnboarding(items, answered, waitFor, researching) {
+    const host = document.getElementById('onboarding');
+    const pill = document.getElementById('onboarding-count');
+    pill.textContent = items.length;
+    pill.className = items.length ? "count-pill live" : "count-pill";
+
+    // Services being researched come first: no buttons yet, their review opens when it's done.
+    const studying = (researching || []).map(r => `
+        <div class="card">
+            <div class="badges"><span class="badge">${esc(r.service)}</span>
+                <span class="badge">started ${esc(ago(r.started_at))}</span></div>
+            <div class="cmd">Jarvis is researching ${esc(r.service)}'s ${esc(r.tools)} new tool(s)</div>
+            <div class="breakdown">It is reading the service's documentation and writing a guide for each tool.
+                The review opens here when it's done.</div>
+        </div>`).join("");
+
+    if (!items.length) {
+        const recent = (answered || []).slice(0, 5).map(r => `
+            <div class="breakdown"><span class="sig">${esc(r.service)}</span>
+                — <b>${esc(r.by === "timeout" ? "approved (no answer)" : r.decision.replace("_", " "))}</b>,
+                ${esc((r.enabled || []).length)} tool(s) enabled ${esc(ago(r.at))}</div>`).join("");
+        host.innerHTML = studying + `<div class="empty">
+            No new tools waiting. When you connect a service, the tools it offers appear here before any agent can use them.
+            Tools that cost money or are destructive wait under "New risky tools" above instead.
+        </div>${recent}`;
+        return;
+    }
+
+    host.innerHTML = studying + items.map(item => {
+        const pct = Math.max(0, Math.min(100, (item.expires_in / waitFor) * 100));
+        const mins = Math.floor(item.expires_in / 60), secs = item.expires_in % 60;
+        const key = item.service;
+        const research = item.research || {};
+        const about = item.summary ? `<div class="breakdown"><b>What it is:</b> ${esc(item.summary)}</div>` : "";
+        const useFor = (item.use_for || []).length
+            ? `<div class="breakdown"><b>Good for:</b> ${item.use_for.map(esc).join(" · ")}</div>` : "";
+        const failed = research.status === "failed"
+            ? `<div class="breakdown" style="color:var(--warn)">Jarvis couldn't research this service (${esc(research.error || "unknown error")}), so the tools show the server's own descriptions.</div>` : "";
+        const off = onboardingUnticked[key] || {};
+        const rows = item.tools.map(t => `
+            <label class="scope" style="align-items:flex-start;margin-top:10px">
+                <input type="checkbox" ${off[t.name] ? "" : "checked"}
+                       onchange="toggleOnboardingTool('${esc(key)}','${esc(t.name)}', this.checked)">
+                <span><span class="sig">${esc(t.name)}</span>
+                    <span class="badge ${t.risk === "read" ? "go" : "warn"}" style="margin-left:6px">${esc(RISK_LABEL[t.risk] || t.risk)}</span>
+                    ${t.researched ? "" : `<span class="badge" style="margin-left:6px">not researched</span>`}<br>
+                    ${esc(t.description)}</span>
+            </label>`).join("");
+        const held = item.held_in_control_room
+            ? `<div class="breakdown">${esc(item.held_in_control_room)} more tool(s) cost money or are destructive — those wait
+               under "New risky tools" above, with no time limit.</div>` : "";
+        return `
+        <div class="card waiting">
+            <div class="badges">
+                <span class="badge">${esc(item.kind.toUpperCase())} · ${esc(item.service)}</span>
+                <span class="badge">found ${esc(ago(item.asked_ts))}</span>
+            </div>
+            <div class="cmd">${esc(item.service)} offers ${esc(item.tools.length)} new tool(s)</div>
+            ${about}${useFor}${failed}
+            <div class="breakdown">Approved read-only tools go to every agent. Tools that change things go to agents whose plan asks for ${esc(item.service)}.</div>
+            ${rows}
+            ${held}
+            <div class="timer">
+                <div class="timer-bar"><div class="timer-fill" style="width:${pct}%"></div></div>
+                <div class="timer-text">Approved automatically in ${mins}m ${String(secs).padStart(2, "0")}s if nobody answers.</div>
+            </div>
+            <div class="decide">
+                <button class="btn go" onclick="decideOnboarding('${esc(key)}','approve')">Approve all</button>
+                <button class="btn always" onclick="decideOnboarding('${esc(key)}','approve_read')">Approve read-only</button>
+                <button class="btn" onclick="decideOnboarding('${esc(key)}','pick')">Approve ticked</button>
+                <button class="btn no" onclick="decideOnboarding('${esc(key)}','reject')">Reject</button>
+            </div>
+        </div>`;
+    }).join("");
+    onboardingCache = items;
+}
+
+let onboardingCache = [];
+
+function toggleOnboardingTool(service, tool, checked) {
+    onboardingUnticked[service] = onboardingUnticked[service] || {};
+    if (checked) delete onboardingUnticked[service][tool];
+    else onboardingUnticked[service][tool] = true;
+}
+
+async function decideOnboarding(service, decision) {
+    const item = onboardingCache.find(i => i.service === service) || { tools: [] };
+    const off = onboardingUnticked[service] || {};
+    const tools = item.tools.map(t => t.name).filter(n => !off[n]);
+    const res = await fetch('/tool_onboarding/decide', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service, decision, tools })
+    });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    delete onboardingUnticked[service];
+    refresh();
+}
+
+/* ---------- spending limits ---------- */
+
+// A number being typed into a limit box, kept across the 2-second repaint.
+const limitDraft = {};
+
+function renderLimits(data) {
+    const host = document.getElementById('limits');
+    if (document.activeElement && document.activeElement.classList.contains('limit-input')) return;
+    const services = data.services || [];
+    const row = (scope, key, label, spent, limit) => `
+        <div class="rule-row">
+            <div class="sig">${esc(label)}</div>
+            <div class="note" style="margin:0">spent ${esc(spent || 0)}</div>
+            <input type="text" class="limit-input" style="flex:0 0 120px;min-width:0" placeholder="no limit"
+                   value="${esc(limitDraft[scope + key] != null ? limitDraft[scope + key] : (limit == null ? "" : limit))}"
+                   oninput="limitDraft['${scope}${esc(key)}'] = this.value">
+            <button class="btn tiny" onclick="saveLimit('${scope}','${esc(key)}')">Save</button>
+        </div>`;
+    host.innerHTML =
+        row("pipeline", "", "Each pipeline", "", data.pipeline_limit) +
+        (services.length ? services.map(s => row("service", s.service, s.service, s.spent, s.limit)).join("")
+                         : `<div class="note" style="margin-top:10px">No connected service has a tool that costs money yet.</div>`);
+}
+
+function saveLimit(scope, key) {
+    const raw = limitDraft[scope + key];
+    delete limitDraft[scope + key];
+    post('/control/limits', { scope, service: key, limit: raw == null ? undefined : raw });
+}
+
+/* ---------- connected services ---------- */
+
+const CATALOG_STATE = {
+    researching: "researching its tools",
+    awaiting_review: "tools waiting for your review",
+    ready: "ready",
+    rejected: "rejected",
+};
+let connectBusy = false;    // no repaint while the connect form is open
+
+function renderMcps(mcps) {
+    document.getElementById('mcps').innerHTML = mcps.length ? mcps.map(m => {
+        const up = m.status === 'up';
+        const status = up ? "running" : (m.status === 'down' ? "failed to start" : (m.status === 'enabled' ? "on, starts when needed" : "off"));
+        const cat = m.catalog || {};
+        const tools = cat.state ? `<div class="note" style="margin:4px 0 0">${esc(CATALOG_STATE[cat.state] || cat.state)} ·
+            ${esc(cat.enabled || 0)} in use · ${esc(cat.pending || 0)} to review · ${esc(cat.held || 0)} risky waiting</div>` : "";
+        const err = m.status === 'down' && m.error ? `<div class="note" style="margin:4px 0 0;color:var(--no)">${esc(String(m.error).slice(0, 160))}</div>` : "";
+        return `<div class="rule-row">
+            <div style="flex:1 1 auto;min-width:0">
+                <span class="sig">${esc(m.name)}</span>
+                <span class="badge ${up ? "go" : (m.status === 'down' ? "no" : "")}" style="margin-left:6px">${esc(status)}</span>
+                <div class="note" style="margin:4px 0 0">${esc(m.description || "")}</div>${tools}${err}
+            </div>
+            <button class="btn tiny ${m.enabled ? "no" : "go"}" onclick="toggleMcp('${esc(m.name)}', ${!m.enabled}, this)">${m.enabled ? "Switch off" : "Switch on"}</button>
+        </div>`;
+    }).join("") : `<div class="note">No MCP servers configured. Add one to mcp_registry.json.</div>`;
+}
+
+// What an API with tools read from its spec shows under its name.
+function apiCatalogNote(a) {
+    const cat = a.catalog;
+    if (!cat) return null;
+    if (cat.state === 'no_spec')
+        return { text: cat.spec_error || "No API description found yet.", bad: true };
+    const counts = `${cat.tools || 0} tools from its API description · ${cat.enabled || 0} in use · ` +
+        `${cat.pending || 0} to review · ${cat.held || 0} risky waiting`;
+    return { text: `${CATALOG_STATE[cat.state] || cat.state || ""} · ${counts}`, spec: cat.spec_url };
+}
+
+function renderApis(apis) {
+    document.getElementById('apis').innerHTML = apis.length ? apis.map(a => {
+        const on = a.configured;
+        const fromSpec = on && !a.has_handler ? apiCatalogNote(a) : null;
+        const note = fromSpec ? fromSpec.text
+            : on && !a.has_handler ? "Connected. Jarvis is looking for its API description to turn it into tools."
+            : (a.has_handler ? `Agents call it as ${a.tool_name}${a.handled_by ? ` (via ${a.handled_by})` : ""}.` : "No connector yet.");
+        const spec = fromSpec && fromSpec.spec
+            ? `<div class="note" style="margin:2px 0 0">Spec: <a href="${esc(fromSpec.spec)}" target="_blank" rel="noopener" style="color:inherit">${esc(fromSpec.spec)}</a></div>` : "";
+        const specBtn = on && !a.has_handler
+            ? `<button class="btn tiny" onclick="openSpec('${esc(a.service)}')">${fromSpec && fromSpec.spec ? "Change spec" : "Add spec link"}</button>` : "";
+        return `<div class="rule-row">
+            <div style="flex:1 1 auto;min-width:0">
+                <span class="sig">${esc(a.service)}</span>
+                <span class="badge ${on ? "go" : ""}" style="margin-left:6px">${on ? "connected" : "not connected"}</span>
+                <div class="note" style="margin:4px 0 0${fromSpec && fromSpec.bad ? ";color:var(--no)" : ""}">${esc(note)}</div>${spec}
+            </div>
+            ${specBtn}
+            ${on ? `<button class="btn tiny no" onclick="disconnectApi('${esc(a.service)}')">Disconnect</button>`
+                 : `<button class="btn tiny go" onclick="openConnect('${esc(a.service)}','${esc(a.auth)}')">Connect</button>`}
+        </div>`;
+    }).join("") : `<div class="note">No APIs known yet.</div>`;
+}
+
+function renderAlwaysOn(tools) {
+    document.getElementById('always-on').innerHTML = tools.map(t =>
+        `<div class="rule-row"><span class="sig">${esc(t.name)}</span><span class="note" style="margin:0">${esc(String(t.description).slice(0, 110))}</span></div>`).join("");
+}
+
+async function toggleMcp(name, enabled, btn) {
+    btn.disabled = true;
+    btn.textContent = enabled ? "Starting…" : "Stopping…";
+    await post('/api/mcp/toggle', { name, enabled });
+}
+
+async function disconnectApi(service) {
+    if (!confirm(`Disconnect ${service}? Agents stop being offered it. Your stored credentials are kept.`)) return;
+    await post('/api/tools/disconnect', { service_name: service });
+}
+
+function openConnect(service, auth) {
+    connectBusy = true;
+    const form = document.getElementById('connect-form');
+    form.style.display = 'flex';
+    form.innerHTML = (auth === 'oauth'
+        ? `<input type="text" id="cf-id" placeholder="${esc(service)} OAuth Client ID">
+           <input type="text" id="cf-secret" placeholder="OAuth Client Secret">`
+        : `<input type="text" id="cf-key" placeholder="${esc(service)} API key">`) +
+        `<button class="btn go" onclick="submitConnect('${esc(service)}','${esc(auth)}', this)">Connect</button>
+         <button class="btn" onclick="closeConnect()">Cancel</button>`;
+}
+
+function openSpec(service) {
+    connectBusy = true;
+    const form = document.getElementById('connect-form');
+    form.style.display = 'flex';
+    form.innerHTML = `<input type="text" id="cf-spec" placeholder="Address of ${esc(service)}'s OpenAPI, Swagger or Google API description">
+        <button class="btn go" onclick="submitSpec('${esc(service)}', this)">Read tools</button>
+        <button class="btn" onclick="closeConnect()">Cancel</button>`;
+}
+
+async function submitSpec(service, btn) {
+    const spec_url = ((document.getElementById('cf-spec') || {}).value || "").trim();
+    if (!/^https?:\/\//.test(spec_url)) { alert("Paste a link starting with http:// or https://"); return; }
+    btn.disabled = true;
+    btn.textContent = "Reading…";
+    const res = await fetch('/control/api_spec', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service, spec_url }) });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    closeConnect();
+    refresh();
+}
+
+function closeConnect() {
+    connectBusy = false;
+    const form = document.getElementById('connect-form');
+    form.style.display = 'none';
+    form.innerHTML = "";
+}
+
+async function submitConnect(service, auth, btn) {
+    const val = id => ((document.getElementById(id) || {}).value || "").trim();
+    const credentials = auth === 'oauth' ? { client_id: val('cf-id'), client_secret: val('cf-secret') } : { api_key: val('cf-key') };
+    if (Object.values(credentials).some(v => !v)) { alert("Fill in every box first."); return; }
+    btn.disabled = true;
+    btn.textContent = auth === 'oauth' ? "Waiting for consent in your browser…" : "Connecting…";
+    const res = await fetch('/api/connect-tool', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_name: service, credentials, method_id: auth }) });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    closeConnect();
+    refresh();
+}
+
+async function post(url, body) {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const out = await res.json().catch(() => ({}));
+    if (out.error) alert(out.error);
+    refresh();
+}
+
+function decideCall(requestId, decision) {
+    const reason = (document.getElementById('why-' + requestId) || {}).value || "";
+    delete draft[requestId];
+    post('/control/call', { request_id: requestId, decision, reason });
+}
+
+function decideTool(service, tool, decision) {
+    post('/control/tool', { service, tool, decision });
+}
+
+async function refresh() {
+    try {
+        const [p, t] = await Promise.all([
+            fetch('/control/pending').then(x => x.json()),
+            fetch('/control/tools').then(x => x.json())
+        ]);
+        renderCalls(p.calls || []);
+        heldCache = p.tools || [];
+        renderHeld(heldCache);
+        renderRules(t.tools || []);
+        renderLog(t.log || []);
+    } catch (e) { /* Jarvis restarting; the next tick picks it up. */ }
+
+    // Kept apart, so one failing route can't blank the rest of the page.
+    try {
+        const ob = await fetch('/tool_onboarding/pending').then(x => x.json());
+        renderOnboarding(ob.pending || [], ob.log || [], ob.wait_seconds || 600, ob.researching || []);
+    } catch (e) { /* Not available yet; the next tick tries again. */ }
+
+    try {
+        renderLimits(await fetch('/control/limits').then(x => x.json()));
+    } catch (e) { /* Not available yet; the next tick tries again. */ }
+
+    if (!connectBusy) {
+        try {
+            const o = await fetch('/api/tools/overview').then(x => x.json());
+            renderMcps(o.mcps || []);
+            renderApis(o.apis || []);
+            renderAlwaysOn(o.always_on || []);
+        } catch (e) { /* Not available yet; the next tick tries again. */ }
+    }
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+  <script src="nav_ui.js"></script>
+  <script src="questions_ui.js"></script>
+  <script src="sections_ui.js"></script>
+</body>
+</html>

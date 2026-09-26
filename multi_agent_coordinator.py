@@ -530,6 +530,47 @@ async def identify_rejected_agents(redirect_note: str, agent_plan: dict) -> list
         return [a.get("agent_id") for a in agent_plan.get("execution_agents", [])]
 
 
+REVIEW_POLL_SECONDS = 2.0
+
+
+async def wait_for_tool_reviews(connectable_keys, event_logger=None) -> list[str]:
+    """Hold execution while a needed service's new tools are still being reviewed.
+
+    Starting agents now would hand them a service with none of its tools, and
+    they would work around it or fail. The wait is always short: a review that
+    nobody answers approves itself (tool_onboarding.WAIT_SECONDS). Tools that
+    cost money or are destructive are not waited on; they stay in the Control
+    room with no time limit, and the agents are told they are waiting there.
+    Returns the services that were waited on.
+    """
+    from agents import tool_onboarding
+
+    services = [k.split(":", 1)[1] if k.startswith(("mcp:", "api:")) else k for k in (connectable_keys or [])]
+    waited, announced = [], None
+    while True:
+        waiting = await asyncio.to_thread(tool_onboarding.waiting_on_review, services)
+        if not waiting:
+            break
+        for s in waiting:
+            if s not in waited:
+                waited.append(s)
+        if waiting != announced:
+            announced = waiting
+            left = [tool_onboarding.tools_state(s).get("expires_in") for s in waiting]
+            left = [x for x in left if x is not None]
+            when = f" It approves itself in {max(1, round(max(left) / 60))} min if nobody answers." if left else ""
+            message = (f"Waiting for the review of {', '.join(waiting)}'s new tools in the Control room "
+                       f"before the agents start.{when}")
+            print(f"[Pipeline] {message}")
+            if event_logger:
+                event_logger({"event_type": "narrative", "data": {"phase": "execution", "message": message, "icon": "⏳"}})
+        await asyncio.sleep(REVIEW_POLL_SECONDS)
+    if waited and event_logger:
+        event_logger({"event_type": "narrative", "data": {"phase": "execution", "icon": "✅",
+                      "message": f"Tools of {', '.join(waited)} reviewed; starting the agents."}})
+    return waited
+
+
 async def run_execution_phase(
     agent_plan: dict,
     blueprint: dict,
@@ -1551,6 +1592,9 @@ async def run_full_pipeline(
                 event_logger({"event_type": "narrative", "data": {"phase": "execution", "message": "Force re-executing — discarding stale exec_results and running execution agents fresh...", "icon": "🔁"}})
 
         if not skip_execution:
+            # New tools of a service the agents need may still be in review.
+            await wait_for_tool_reviews(list(required_tools["connectable"]), event_logger)
+
             # Phase 6: Execution + Quality Check
             print("[Pipeline] Phase 6: Parallel execution agents...")
             if event_logger:

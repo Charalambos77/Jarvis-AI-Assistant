@@ -128,6 +128,17 @@ def enabled_servers() -> dict:
 # Sessions
 # ---------------------------------------------------------------------------
 
+def _annotations(tool) -> dict:
+    raw = getattr(tool, "annotations", None)
+    if raw is None:
+        return {}
+    try:
+        data = raw.model_dump(exclude_none=True) if hasattr(raw, "model_dump") else dict(raw)
+    except Exception:
+        return {}
+    return {k: v for k, v in data.items() if k in ("readOnlyHint", "destructiveHint", "title")}
+
+
 class _Server:
     """One live stdio server: its process, session, and discovered tools."""
 
@@ -163,6 +174,10 @@ class _Server:
                     "name": t.name,
                     "description": t.description or "",
                     "input_schema": (t.inputSchema or {"type": "object", "properties": {}}),
+                    # readOnlyHint / destructiveHint, when the server gives them. The tool
+                    # catalogue treats them as hints: they can mark a tool destructive,
+                    # but never overrule money or destructive words in its name.
+                    "annotations": _annotations(t),
                 }
                 for t in listed.tools
             ]

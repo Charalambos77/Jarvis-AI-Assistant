@@ -20,6 +20,7 @@ from agents.tool_executor import get_tools_for_execution_agent, run_tool
 from agents.user_brief import user_brief_block
 from agents.links import URL_RE, Evidence, strip_unevidenced_links, cap_for_invented_links
 from agents import tool_review, tool_requests, agent_questions
+import control_room
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -174,6 +175,18 @@ async def run_research_agent(
     )
     declarations = list(declarations) + [tool_requests.DECLARATION, agent_questions.DECLARATION]
 
+    # Services the user connected. Their approved read-only tools are already in
+    # this agent's tools; the rest it can ask for with request_tool by service name.
+    try:
+        from agents.tool_onboarding import connected_services_note
+        connected_note = connected_services_note()
+    except Exception:
+        connected_note = ""
+    if connected_note:
+        connected_note = (connected_note.replace("name one in tools_needed exactly as written to give an agent "
+                                                 "all its approved tools", "if you need one's tools that you don't "
+                                                 "have, call request_tool with its name") + "\n")
+
     unavailable_note = ""
     if unavailable:
         unavailable_note = (
@@ -183,6 +196,11 @@ async def run_research_agent(
               "findings/recommendation that this part is blocked and why.\n"
         )
 
+    # Built outside the f-string: a backslash inside {} is a SyntaxError before Python 3.12.
+    memory_block = ("RELEVANT PAST PATTERNS FROM MEMORY:\n" + memory_context) if memory_context else ""
+    prior_block = ("APPROVED RESEARCH FROM PRIOR CYCLES (use as established context):\n"
+                   + prior_context) if prior_context else ""
+
     system_prompt = f"""
 You are a highly specialized {role} agent in the Jarvis multi-agent system.
 
@@ -190,9 +208,9 @@ YOUR BRIEF:
 {brief}
 
 {user_brief_block(user_brief)}
-{"RELEVANT PAST PATTERNS FROM MEMORY:\n" + memory_context if memory_context else ""}
+{memory_block}
 
-{"APPROVED RESEARCH FROM PRIOR CYCLES (use as established context):\n" + prior_context if prior_context else ""}
+{prior_block}
 
 TOOLS: You have real tools available (write_file, read_file, list_deliverables, and any research
 connectors listed below such as arxiv_search / web_search). USE them to gather real information —
@@ -205,7 +223,7 @@ to action — call inspect_website with its URL. web_search only returns what ot
 If you need a tool you don't have, or a better one for this job, call request_tool with its name and
 why. The user approves or rejects it on the Commands page and the call returns their answer. Don't
 decide on your own that no tool could help — ask.
-{unavailable_note}
+{connected_note}{unavailable_note}
 CRITICAL RULES:
 1. Focus ONLY on your brief. Do not go beyond it.
 2. Actually call your tools to gather real evidence before answering. Do not just describe what you would search for.
@@ -362,7 +380,11 @@ Output format:
                             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                         )
                 else:
-                    result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
+                    # Money and destructive calls wait in the Control room first, for as long as it takes.
+                    result = await control_room.check_call(fc.name, tool_args, agent_id=agent_id, role=role,
+                                                           kind="research", event_logger=event_logger)
+                    if result is None:
+                        result = run_tool(handlers, project_name, agent_id, fc.name, tool_args)
                     calls.append({"tool": fc.name, "args": tool_args})
                     tool_texts.append(json.dumps(result, default=str, ensure_ascii=False)[:50000])
                 if event_logger:
