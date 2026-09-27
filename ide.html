@@ -1356,6 +1356,36 @@
     $("engineSelect").addEventListener("change", function () { S.engine = this.value; renderEngineNote(); });
     $("modelSelect").addEventListener("change", function () { S.model = this.value; });
 
+    // Local AI apps (Ollama, LM Studio, ...) are found on their own. Look again
+    // when the model menu is about to open or Jarvis's window comes back, so a
+    // model downloaded meanwhile is in the list without reloading the page.
+    var lastModelCheck = 0;
+    function refreshModels() {
+        if (Date.now() - lastModelCheck < 5000) return;
+        lastModelCheck = Date.now();
+        api("GET", "/ide/engines?refresh=1").then(function (data) {
+            var models = data.models || [];
+            var sel = $("modelSelect");
+            var before = Array.prototype.map.call(sel.options, function (o) { return o.value; }).join("|");
+            var after = models.map(function (m) { return m.id; }).join("|");
+            if (before === after) return;
+            var keep = S.model;
+            var added = models.filter(function (m) { return before.split("|").indexOf(m.id) === -1; });
+            sel.innerHTML = models.map(function (m) {
+                return '<option value="' + esc(m.id) + '">' + esc(m.label) + "</option>";
+            }).join("") || '<option value="">No model found</option>';
+            S.model = models.some(function (m) { return m.id === keep; }) ? keep : data.model;
+            sel.value = S.model;
+            S.engines = data.engines || S.engines;
+            renderEngineNote();
+            if (added.length && before) toast("New model" + (added.length > 1 ? "s" : "") + " found: " +
+                added.slice(0, 3).map(function (m) { return m.label; }).join(", "));
+        }).catch(function () {});
+    }
+    $("modelSelect").addEventListener("pointerdown", refreshModels);
+    $("modelSelect").addEventListener("focus", refreshModels);
+    window.addEventListener("focus", refreshModels);
+
     function setMode(mode) {
         S.mode = mode === "autopilot" ? "autopilot" : "review";
         store("mode", S.mode);

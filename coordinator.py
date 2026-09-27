@@ -46,6 +46,13 @@ def get_ollama_config():
     force_cpu = sett.get("ollama_force_cpu", False) or (os.getenv("OLLAMA_FORCE_CPU", "false").lower() == "true")
     return url, model, force_cpu
 
+def _read_settings() -> dict:
+    try:
+        with open(os.path.join(BASE_DIR, "settings.json"), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
 def ensure_ollama_running(url, model, force_cpu):
     try:
         res = requests.get(f"{url}/api/tags", timeout=1)
@@ -1274,10 +1281,23 @@ def handle_request(transcript: str) -> str:
         except Exception:
             pass
 
-        # Fallback to Ollama if Gemini is selected but not configured
+        # Fallback to a local model if Gemini is selected but not configured
         if provider == "gemini" and not has_gemini():
-            print("[Coordinator] Gemini requested but not configured (missing key). Falling back to Ollama.")
+            print("[Coordinator] Gemini requested but not configured (missing key). Falling back to a local model.")
             provider = "ollama"
+
+        # The local model: the one picked in settings, else Ollama's, else any
+        # local AI app found on this PC (LM Studio, Jan, ...).
+        local_model_id = ""
+        if provider != "gemini":
+            try:
+                from connectors import local_ai
+                local_model_id = local_ai.pick_chat_model(_read_settings().get("local_model") or "")
+            except Exception as e:
+                print(f"[Coordinator] Local AI detection failed: {e}")
+            if not local_model_id and has_gemini():
+                print("[Coordinator] No local AI found on this PC. Using Gemini.")
+                provider = "gemini"
 
         if provider == "gemini":
             chat = get_chat_session()
@@ -1341,6 +1361,15 @@ def handle_request(transcript: str) -> str:
             return "I processed your request but took too many steps."
 
         ollama_url, ollama_model, _ = get_ollama_config()
+        local_base, local_key = f"{ollama_url.rstrip('/')}/v1", "ollama"
+        if local_model_id:
+            try:
+                from connectors import local_ai
+                local_ai.ensure_ready(local_model_id)
+                local_base, ollama_model = local_ai.endpoint(local_model_id)
+                local_key = local_model_id.partition(":")[0]
+            except Exception as e:
+                print(f"[Coordinator] {e}")
 
         if not OpenAI:
             return "OpenAI library not installed. Please run pip install -r requirements.txt."
@@ -1356,7 +1385,7 @@ def handle_request(transcript: str) -> str:
                 }
             })
 
-        client_ollama = OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama")
+        client_ollama = OpenAI(base_url=local_base, api_key=local_key)
 
         global OLLAMA_CHAT_HISTORY
         # Prune history to keep context clean for small local models (keeps system prompt + last 10 messages)

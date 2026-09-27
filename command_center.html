@@ -4422,8 +4422,16 @@
                         <div class="section-title">AI PROVIDER</div>
                         <select id="cfg-provider" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#fff;padding:10px 14px;border-radius:6px;font-size:13px;cursor:pointer;">
                             <option value="gemini" ${s.provider === 'gemini' ? 'selected' : ''}>Gemini (Cloud)</option>
-                            <option value="ollama" ${s.provider === 'ollama' || !s.provider ? 'selected' : ''}>Ollama (Local)</option>
+                            <option value="ollama" ${s.provider === 'ollama' || !s.provider ? 'selected' : ''}>Local AI on this PC</option>
                         </select>
+                    </div>
+
+                    <div>
+                        <div class="section-title">LOCAL MODEL</div>
+                        <select id="cfg-local-model" style="width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#fff;padding:10px 14px;border-radius:6px;font-size:13px;cursor:pointer;">
+                            <option value="">Looking for local AI...</option>
+                        </select>
+                        <div id="cfg-local-found" style="font-size:10px;color:var(--text-muted);margin-top:6px;line-height:1.5;"></div>
                     </div>
 
                     <div>
@@ -4457,13 +4465,39 @@
                     <div id="settings-save-status" style="font-size:11px;text-align:center;min-height:16px;"></div>
                 </div>
                 `;
+                loadLocalModels(s.local_model || '');
             } catch (err) {
                 host.innerHTML = `<div style="color:#F87171;font-size:12px;">Could not load settings.</div>`;
             }
         }
 
+        // Local AI apps (Ollama, LM Studio, Jan, ...) are found on their own;
+        // this just shows what Jarvis found and lets you pick the chat's model.
+        async function loadLocalModels(current) {
+            const sel = document.getElementById('cfg-local-model');
+            const found = document.getElementById('cfg-local-found');
+            if (!sel) return;
+            try {
+                const res = await fetch('/api/local-ai?refresh=1');
+                const data = await res.json();
+                const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+                const models = data.models || [];
+                sel.innerHTML = '<option value="">Automatic (Ollama first, then any running local AI)</option>' +
+                    models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+                sel.value = models.some((m) => m.id === current) ? current : '';
+                const apps = data.runtimes || [];
+                found.innerHTML = apps.length
+                    ? apps.map((r) => `<b>${esc(r.label)}</b>: ${r.running ? 'running' : 'installed'}, ${r.models.length} model${r.models.length === 1 ? '' : 's'}${r.note ? '. ' + esc(r.note) : ''}`).join('<br>')
+                    : 'No local AI found on this PC. Install Ollama or LM Studio and Jarvis will pick it up on his own.';
+            } catch (err) {
+                sel.innerHTML = '<option value="">Automatic</option>';
+                found.textContent = 'Could not look for local AI.';
+            }
+        }
+
         async function saveSettingsFromPanel() {
             const provider = document.getElementById('cfg-provider')?.value;
+            const local_model = document.getElementById('cfg-local-model')?.value || '';
             const voice_speed = parseInt(document.getElementById('cfg-speed')?.value);
             const wake_word_threshold = parseFloat(document.getElementById('cfg-threshold')?.value);
             const theme = document.getElementById('cfg-theme')?.value;
@@ -4473,7 +4507,7 @@
                 const res = await fetch('/settings', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ provider, voice_speed, wake_word_threshold, theme })
+                    body: JSON.stringify({ provider, local_model, voice_speed, wake_word_threshold, theme })
                 });
                 if (res.ok) {
                     if (status) { status.style.color = '#34D399'; status.textContent = '✓ Settings saved'; }

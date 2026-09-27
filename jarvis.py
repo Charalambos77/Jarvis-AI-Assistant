@@ -600,7 +600,7 @@ def get_snapshot_local():
 
 def change_settings_local(settings_dict):
     current = load_settings()
-    for k in ["theme", "voice_speed", "wake_word_threshold", "provider", "ollama_model", "ollama_url"]:
+    for k in ["theme", "voice_speed", "wake_word_threshold", "provider", "ollama_model", "ollama_url", "local_model"]:
         if k in settings_dict:
             if k == "voice_speed":
                 current[k] = int(settings_dict[k])
@@ -1935,6 +1935,14 @@ def ide_page():
 app.register_blueprint(ide.blueprint)
 
 
+@app.route("/api/local-ai", methods=["GET"])
+def local_ai_route():
+    """Local AI apps on this PC (Ollama, LM Studio, ...) and their models,
+    found on their own. ?refresh=1 looks again instead of using the last look."""
+    from connectors import local_ai
+    return jsonify(local_ai.detect(refresh=request.args.get("refresh") == "1"))
+
+
 @app.route("/api/console_logs", methods=["GET"])
 def get_console_logs():
     with CONSOLE_LOGS_LOCK:
@@ -1991,7 +1999,7 @@ def settings_route():
     if request.method == "POST":
         data = request.get_json(force=True) or {}
         current = load_settings()
-        for k in ["theme", "voice_speed", "wake_word_threshold", "provider", "ollama_model", "ollama_url"]:
+        for k in ["theme", "voice_speed", "wake_word_threshold", "provider", "ollama_model", "ollama_url", "local_model"]:
             if k in data:
                 if k == "voice_speed":
                     current[k] = int(data[k])
@@ -6366,6 +6374,12 @@ def start_tool_background_work():
     # Connected services are looked at again: new or changed tools go up for
     # review, and connected APIs with no tools yet get them from their spec.
     tool_onboarding.start_startup_check()
+    # Local AI apps (Ollama, LM Studio, ...) are looked for now and every half
+    # minute; a new app or model is announced in the chat and shows up in the
+    # model menus.
+    from connectors import local_ai
+    local_ai.on_change(lambda line: push_message("jarvis", line))
+    local_ai.start_watcher()
 
 
 if __name__ == "__main__":

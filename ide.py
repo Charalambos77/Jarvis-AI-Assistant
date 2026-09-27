@@ -466,13 +466,12 @@ def _ollama_config() -> tuple[str, str]:
     return url.rstrip("/"), model
 
 
-def _ollama_models() -> list[str]:
-    url, default = _ollama_config()
+def _local_models(refresh: bool = False) -> list[dict]:
+    """Every model on this PC's local AI apps (Ollama, LM Studio, ...), found
+    on their own; see connectors/local_ai.py."""
     try:
-        import requests
-        tags = requests.get(f"{url}/api/tags", timeout=1.5).json().get("models", [])
-        names = [t.get("name") for t in tags if t.get("name")]
-        return names or [default]
+        from connectors import local_ai
+        return local_ai.models(refresh)
     except Exception:
         return []
 
@@ -495,27 +494,27 @@ def _code_agent():
         return None
 
 
-def engines() -> dict:
+def engines(refresh: bool = False) -> dict:
     """What can do a mission right now, and which model Jarvis's own engine
     would use. The page greys out what is not available and says why."""
     s = _settings()
     have_gemini = bool(os.getenv("GEMINI_API_KEY"))
-    ollama = _ollama_models()
     models = []
     if have_gemini:
         models += [{"id": f"gemini:{m}", "label": m, "provider": "gemini"} for m in GEMINI_MODELS]
-    models += [{"id": f"ollama:{m}", "label": f"{m} (local)", "provider": "ollama"} for m in ollama]
+    models += [{"id": m["id"], "label": m["label"], "provider": m["provider"]}
+               for m in _local_models(refresh)]
 
     default_model = s.get("ide_model") or ""
     if default_model not in {m["id"] for m in models}:
-        preferred = "gemini" if (s.get("provider") or "gemini") == "gemini" and have_gemini else "ollama"
-        pick = [m for m in models if m["provider"] == preferred] or models
+        want_gemini = (s.get("provider") or "gemini") == "gemini" and have_gemini
+        pick = [m for m in models if (m["provider"] == "gemini") == want_gemini] or models
         default_model = pick[0]["id"] if pick else ""
 
     out = [{
         "id": "jarvis", "label": "Jarvis",
         "available": bool(models),
-        "reason": "" if models else "No model: add GEMINI_API_KEY to .env or start Ollama.",
+        "reason": "" if models else "No model: add GEMINI_API_KEY to .env or install a local AI such as Ollama or LM Studio.",
         "detail": "Plans first, then proposes edits you accept or reject.",
     }]
 
@@ -566,14 +565,27 @@ def call_model(model_id: str, system: str, prompt: str) -> str:
                                                response_mime_type="application/json",
                                                temperature=0.2))
         return resp.text or ""
-    if provider == "ollama":
+    from connectors import local_ai
+    if local_ai.is_local(model_id):
         from openai import OpenAI
-        url, default = _ollama_config()
-        client = OpenAI(base_url=f"{url}/v1", api_key="ollama")
-        resp = client.chat.completions.create(
-            model=name or default, temperature=0.2,
-            response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}])
+        try:
+            local_ai.ensure_ready(model_id)
+            base, name = local_ai.endpoint(model_id)
+        except (RuntimeError, ValueError) as e:
+            raise IDEError(str(e))
+        if provider == "ollama" and not name:
+            name = _ollama_config()[1]
+        client = OpenAI(base_url=base, api_key=provider)
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        try:
+            resp = client.chat.completions.create(model=name, temperature=0.2, messages=messages,
+                                                  response_format={"type": "json_object"})
+        except Exception as e:
+            # Some local servers (LM Studio, llama.cpp) only accept a JSON
+            # schema here, not plain JSON mode; the prompt already asks for JSON.
+            if "response_format" not in str(e):
+                raise
+            resp = client.chat.completions.create(model=name, temperature=0.2, messages=messages)
         return resp.choices[0].message.content or ""
     raise IDEError("No model picked for Jarvis. Choose one in the engine menu.")
 
@@ -1409,7 +1421,7 @@ def r_import():
 
 @blueprint.route("/ide/engines", methods=["GET"])
 def r_engines():
-    return jsonify(engines())
+    return jsonify(engines(refresh=request.args.get("refresh") == "1"))
 
 
 @blueprint.route("/ide/tree", methods=["GET"])

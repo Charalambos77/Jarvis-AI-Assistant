@@ -41,3 +41,6 @@ data/spending.json
 
 # The Workbench (ide.html) keeps its missions here; they belong to this PC.
 data/ide/
+
+# What local AI apps and models Jarvis last found on this PC (connectors/local_ai.py)
+data/local_ai_known.json

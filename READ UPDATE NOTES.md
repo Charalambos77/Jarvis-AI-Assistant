@@ -39,6 +39,7 @@ To go back to your old version at any time: `git checkout main`.
 | 8 | Start a section from a folder | **IDE** page, "◆ Make a section from this folder" |
 | 9 | The in-app IDE (Workbench): open any folder, Jarvis plans and edits on every message | **IDE** button in the top nav |
 | 10 | The coding agent can run on the Claude CLI | `.env` settings |
+| 11 | Jarvis finds local AI (Ollama, LM Studio, ...) on his own | IDE model menu, Settings (gear) "Local model" |
 
 The branch also carries earlier work that was already waiting on other branches and is not in `main` yet: the pipeline details and clarification window, the pipeline review fixes, the website inspector, the Antigravity CLI connection, your own "Logic Changes" and "Finished sections" commits, and your 6 September install script update from `main`.
 
@@ -209,7 +210,30 @@ The branch also carries earlier work that was already waiting on other branches 
 4. In the app, set `JARVIS_CODE_AGENT_BACKEND=cli` in `.env`, restart Jarvis and give him a task that needs working software (for example "build a small Python script that ..."). The task log should say "Handing a coding task to the Claude coding agent (cli)", then list the files it built.
 5. To check the fallback, set `JARVIS_CLAUDE_CLI=C:\nowhere\claude.exe` without the SDK installed. The agent should say the coding agent is not enabled and use `write_file`.
 
-## 11. Run the automatic checks
+## 11. Jarvis finds local AI on his own
+
+**What changed**
+- Jarvis looks for local AI on your PC by himself: when he starts, every 30 seconds while he runs, and whenever you open a model menu. You don't set anything up.
+- He finds running servers of **Ollama, LM Studio, Jan, GPT4All, llama.cpp / LocalAI, KoboldCpp, text-generation-webui and vLLM** on their usual ports, and lists the models each one has. He also notices Ollama and LM Studio when they're installed but closed.
+- Ollama's downloaded models show up even while Ollama is closed. Pick one and Jarvis starts Ollama for you.
+- For a closed LM Studio, Jan or GPT4All he tells you how to start its server instead of offering models he can't reach.
+- When a new app or model appears (you install LM Studio, or run `ollama pull ...`), Jarvis says so in the chat, for example "I found LM Studio on this PC with 2 models. Its models are now in the model menus."
+- **Where the models show up:**
+  - The IDE's model menu lists every local model next to Gemini, labelled with the app it comes from. It refreshes when you click the menu, and pops up "New model found" when something new appeared.
+  - **Settings** now says "Local AI on this PC" instead of "Ollama (Local)", and has a **Local model** menu plus a list of the apps Jarvis found. "Automatic" uses your Ollama model first, then any running local AI.
+  - The voice/chat assistant uses that local model. If Ollama isn't there but LM Studio is running, he uses LM Studio. If there's no local AI at all and you have a Gemini key, he uses Gemini instead of failing.
+- A server on another address can be added in `settings.json`: `"local_ai_servers": [{"name": "My box", "url": "http://192.168.1.5:8080/v1"}]`.
+
+**How to test**
+1. `git pull`, then start Jarvis as usual.
+2. With Ollama installed, open the **IDE**. The model menu lists your Ollama models as "name (local)".
+3. Install or open **LM Studio**, download a model, load it and start its server (Developer tab, or `lms server start`). Within 30 seconds Jarvis says in the chat that he found LM Studio, and the IDE's model menu shows its model as "name (LM Studio, local)" when you click it.
+4. Pick the LM Studio model in the IDE and send a message. The answer comes from LM Studio (its Developer tab shows the request).
+5. Quit Ollama (tray icon, Quit), then pick an Ollama model in the IDE and send a message. Jarvis starts Ollama and answers.
+6. Open **Settings** (gear). Under **Local model** you see every model found, and under it each app with "running" or "installed". Pick one, **Save**, set the provider to "Local AI on this PC" and talk to Jarvis.
+7. Offline check: `python scripts/test_local_ai.py` (uses fake servers, no real AI needed).
+
+## 12. Run the automatic checks
 
 From the Jarvis folder:
 
@@ -221,19 +245,20 @@ for %f in (scripts\test_*.py) do venv\Scripts\python %f
 
 Each script ends with "All ... checks passed" when it passes.
 
-Before pushing, all 36 test scripts passed on Linux with Python 3.12 (the desktop-only modules stood in, `GEMINI_API_KEY=fake`, `mcp<2`, Playwright 1.62). Every page (Control room, Suggestions, IDE, Plan, Library, Section) also loaded in the merged app.
+Before pushing, all 37 test scripts passed on Linux (last run with Python 3.11) (the desktop-only modules stood in, `GEMINI_API_KEY=fake`, `mcp<2`, Playwright 1.62). Every page (Control room, Suggestions, IDE, Plan, Library, Section) also loaded in the merged app.
 
 Fixes made while merging, so you know they're there:
 - A coding agent's built folder shows up as a clickable result again.
 - Two test scripts were adjusted to the coding agent's extra setting and prompt note.
 - Pause/stop, the "research first?" question and Suggestions were joined in the same part of the pipeline code, keeping all three.
 
-## 12. Known limits
+## 13. Known limits
 
 - Everything was tested on Linux with Python 3.12, with the model's answers scripted. Nobody has run it with a real Gemini key or on Windows yet, so the model may word things differently from what these notes describe, and Windows-only paths are the most likely place for a surprise.
 - The desktop-only parts (voice, microphone, the PyWebView window) were stood in for during the tests, so they were not exercised.
 - Held money and destructive calls are kept in memory. If you close Jarvis while one is waiting, the agent that made it has stopped anyway, and the call is gone.
 - Semantic Scholar and Supadata have no known description address yet, so they rely on a web search or a link you paste in the Control room.
 - The key page links could not be opened from where they were built (no web access there). They come from each provider's own docs and search results. Click each one you use once while logged in. These 11 are the least certain: Google Docs/Drive OAuth client, Supadata, Mistral, Perplexity, Pexels, AssemblyAI, Deepgram, Pinecone, X/Twitter, Shopify, HubSpot. If one is wrong, the fix is one line in `connectors/key_pages.py`.
+- Local AI detection was tested against stand-in servers, not real Ollama or LM Studio on Windows. The Windows install folders Jarvis checks for closed apps are the usual defaults; a custom install folder is only found once the app's server is running.
 - The Suggestions page and a section's plan parts are separate for now: swapping an idea on the Suggestions page doesn't change a section's plan.
 - If something breaks, tell Claude in the project what you did and what you saw, and `git checkout main` takes you back.
