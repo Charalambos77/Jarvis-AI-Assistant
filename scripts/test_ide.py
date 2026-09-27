@@ -11,18 +11,24 @@ or the rest of Jarvis. What is worth proving:
     puts it back;
   * Autopilot applies, and a stale proposal is refused rather than clobbering;
   * a question gets an answer and no changes;
+  * without /ultra the prompt box is a plain chat that changes nothing; /ultra
+    starts (or turns a chat into) a mission;
+  * a folder from anywhere on the PC opens in place, only once it was opened,
+    and files can be copied in without silently replacing anything;
   * the terminal runs in the project folder, streams output, and refuses the
     hard denylist;
   * the routes answer only this PC.
 
     PYTHONPATH=. python scripts/test_ide.py
 """
+import io
 import json
 import os
 import shutil
 import sys
 import tempfile
 import time
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -35,6 +41,7 @@ TMP = tempfile.mkdtemp(prefix="jarvis-ide-")
 ide.PROJECTS_ROOT = os.path.join(TMP, "Let Jarvis Handle It")
 ide.STORE_DIR = os.path.join(TMP, "data", "ide")
 ide.MISSIONS_FILE = os.path.join(ide.STORE_DIR, "missions.json")
+ide.FOLDERS_FILE = os.path.join(ide.STORE_DIR, "folders.json")
 ide.SETTINGS_PATH = os.path.join(TMP, "settings.json")
 ROOT = os.path.join(ide.PROJECTS_ROOT, PROJECT)
 
@@ -76,9 +83,9 @@ CALLS = []
 REPLIES = {}
 
 
-def fake_model(model_id, system, prompt):
-    CALLS.append({"model": model_id, "system": system, "prompt": prompt})
-    key = "plan" if system is ide.PLAN_SYSTEM else "edit"
+def fake_model(model_id, system, prompt, json_mode=True):
+    CALLS.append({"model": model_id, "system": system, "prompt": prompt, "json_mode": json_mode})
+    key = "plan" if system is ide.PLAN_SYSTEM else "chat" if system is ide.CHAT_SYSTEM else "edit"
     return REPLIES[key]
 
 
@@ -148,7 +155,7 @@ try:
         ],
         "commands": [{"command": "python -c \"print('hi')\"", "why": "smoke test"}],
         "summary": "Fixed add and added a README."}) + "\n```"
-    m = ide.start_mission(PROJECT, "add() is broken, fix it", engine="jarvis", model="gemini:gemini-2.5-flash",
+    m = ide.start_mission(PROJECT, "/ultra add() is broken, fix it", engine="jarvis", model="gemini:gemini-2.5-flash",
                           mode="review", context={"open_file": "src/app.py", "selection": "return a - b"},
                           background=False)
     m = ide.get_mission(m["id"])
@@ -186,7 +193,7 @@ try:
     print("follow-up, stale proposal, autopilot")
     REPLIES["edit"] = json.dumps({"edits": [{"path": "src/app.py", "action": "write", "content": "print('v2')\n"}],
                                   "summary": "Rewrote it."})
-    ide.follow_up(m["id"], "now rewrite it", background=False)
+    ide.follow_up(m["id"], "/ultra now rewrite it", background=False)
     m = ide.get_mission(m["id"])
     check("follow-up plans again and waits", m["status"] == "awaiting_plan", m["status"])
     check("follow-up prompt has the history", "add() is broken" in CALLS[-1]["prompt"] and "now rewrite it" in CALLS[-1]["prompt"])
@@ -201,7 +208,7 @@ try:
     REPLIES["edit"] = json.dumps({"edits": [{"path": "notes/todo.md", "action": "write", "content": "- ship\n"},
                                             {"path": "src/app.py", "action": "replace", "find": "not there", "replace": "x"}],
                                   "summary": "Added notes."})
-    a = ide.start_mission(PROJECT, "add a todo", model="gemini:gemini-2.5-flash", mode="autopilot", background=False)
+    a = ide.start_mission(PROJECT, "/ultra add a todo", model="gemini:gemini-2.5-flash", mode="autopilot", background=False)
     a = ide.get_mission(a["id"])
     check("autopilot applies without asking", a["status"] == "done" and read("notes/todo.md") == "- ship\n", a["status"])
     check("replace that doesn't match is reported, not applied",
@@ -213,7 +220,7 @@ try:
     REPLIES["edit"] = json.dumps({"edits": [
         {"path": "src/app.py", "action": "replace", "find": "someone else", "replace": "Jarvis"},
         {"path": "src/app.py", "action": "replace", "find": "not there", "replace": "x"}], "summary": "Half fits."})
-    h = ide.start_mission(PROJECT, "half an edit", model="gemini:gemini-2.5-flash", mode="autopilot", background=False)
+    h = ide.start_mission(PROJECT, "/ultra half an edit", model="gemini:gemini-2.5-flash", mode="autopilot", background=False)
     h = ide.get_mission(h["id"])
     check("autopilot holds a half-fitting edit for review",
           h["status"] == "review" and h["changes"][0]["status"] == "pending" and "someone else" in read("src/app.py"),
@@ -221,18 +228,53 @@ try:
     ide.decide_change(h["id"], "all", "reject")
 
     REPLIES["plan"] = json.dumps({"kind": "answer", "understanding": "A question.", "answer": "It adds two numbers."})
-    q = ide.start_mission(PROJECT, "what does add do?", model="gemini:gemini-2.5-flash", background=False)
+    q = ide.start_mission(PROJECT, "/ultra what does add do?", model="gemini:gemini-2.5-flash", background=False)
     q = ide.get_mission(q["id"])
     check("question answered with no changes", q["status"] == "done" and q["result"] == "It adds two numbers." and not q["changes"])
 
     REPLIES["plan"] = "this is not json"
-    bad = ide.start_mission(PROJECT, "anything", model="gemini:gemini-2.5-flash", background=True)
+    bad = ide.start_mission(PROJECT, "/ultra anything", model="gemini:gemini-2.5-flash", background=True)
     for _ in range(50):
         if ide.get_mission(bad["id"])["status"] not in ("planning", "working"):
             break
         time.sleep(0.05)
     bad = ide.get_mission(bad["id"])
     check("bad model output fails the mission, doesn't hang", bad["status"] == "failed" and "JSON" in bad["error"], bad)
+
+    print("chat by default, /ultra for missions")
+    REPLIES["chat"] = "It adds `a` and `b`.\n```python\nadd(1, 2)\n```"
+    before_calls = len(CALLS)
+    ch = ide.start_mission(PROJECT, "what does add do?", engine="antigravity", model="gemini:gemini-2.5-flash",
+                           context={"open_file": "src/app.py"}, background=False)
+    ch = ide.get_mission(ch["id"])
+    check("a message without /ultra is a chat", ch["kind"] == "chat" and ch["status"] == "done" and ch["engine"] == "jarvis", ch)
+    check("chat answers with Jarvis's model even with a CLI engine picked",
+          CALLS[-1]["system"] is ide.CHAT_SYSTEM and CALLS[-1]["model"] == "gemini:gemini-2.5-flash" and len(CALLS) == before_calls + 1)
+    check("chat sees the open file", "=== src/app.py ===" in CALLS[-1]["prompt"])
+    check("chat asks for plain text, missions for JSON", CALLS[-1]["json_mode"] is False
+          and all(c["json_mode"] for c in CALLS if c["system"] is not ide.CHAT_SYSTEM))
+    check("chat changes nothing and suggests nothing", not ch["changes"] and not ch["commands"] and ch["result"].startswith("It adds"))
+    ide.follow_up(ch["id"], "and what about negatives?", background=False)
+    ch = ide.get_mission(ch["id"])
+    check("chat follow-up is still a chat", ch["kind"] == "chat" and CALLS[-1]["system"] is ide.CHAT_SYSTEM
+          and "what does add do?" in CALLS[-1]["prompt"] and len(ch["conversation"]) == 4)
+    REPLIES["plan"] = json.dumps({"kind": "change", "understanding": "Handle negatives.", "steps": ["Edit add"],
+                                  "read": ["src/app.py"], "change": ["src/app.py"], "questions": []})
+    ide.follow_up(ch["id"], "/ultra make it handle negatives", engine="jarvis", model="gemini:gemini-2.5-pro",
+                  mode="review", background=False)
+    ch = ide.get_mission(ch["id"])
+    check("/ultra on a chat turns it into a mission that plans",
+          ch["kind"] == "ultra" and ch["status"] == "awaiting_plan" and CALLS[-1]["system"] is ide.PLAN_SYSTEM
+          and ch["model"] == "gemini:gemini-2.5-pro", ch["status"])
+    check("the /ultra prefix is stripped and marked", ch["conversation"][-1] == {"role": "owner", "text": "make it handle negatives", "ultra": True})
+    check("the plan knows the chat before it", "and what about negatives?" in CALLS[-1]["prompt"])
+    ide.follow_up(ch["id"], "why that approach?", background=False)
+    ch = ide.get_mission(ch["id"])
+    check("chatting on a mission keeps its plan waiting", ch["status"] == "awaiting_plan" and CALLS[-1]["system"] is ide.CHAT_SYSTEM, ch["status"])
+    ide.stop_mission(ch["id"])
+    code, r = post("/ide/missions", {"project": PROJECT, "prompt": "/ultra   "})
+    check("/ultra with nothing after it refused", code == 400 and "/ultra" in r["error"], r)
+    check("/ULTRA: works too", ide.split_ultra("  /ULTRA: fix it") == (True, "fix it") and ide.split_ultra("/ultrafast") == (False, "/ultrafast"))
 
     code, r = post("/ide/missions", {"project": PROJECT, "prompt": "   "})
     check("empty prompt refused", code == 400)
@@ -261,7 +303,7 @@ try:
 
     ide._code_agent = lambda: FakeAgent
     check("claude engine available when the module is", {e["id"]: e for e in ide.engines()["engines"]}["claude"]["available"])
-    c = ide.start_mission(PROJECT, "build it", engine="claude", background=False)
+    c = ide.start_mission(PROJECT, "/ultra build it", engine="claude", background=False)
     c = ide.get_mission(c["id"])
     check("CLI engine changes show as applied diffs",
           c["status"] == "done" and [x["path"] for x in c["changes"]] == ["built.py"] and c["changes"][0]["status"] == "applied",
@@ -289,6 +331,101 @@ try:
             break
         time.sleep(0.05)
     check("stop ends a running command", not j["running"], j)
+
+    print("folders from anywhere on the PC")
+    outside = os.path.join(TMP, "elsewhere", "My App")
+    os.makedirs(os.path.join(outside, "lib"))
+    with open(os.path.join(outside, "lib", "util.py"), "w", encoding="utf-8") as f:
+        f.write("X = 1\n")
+    code, r = get("/ide/tree?project=" + urllib.parse.quote(outside))
+    check("a folder that wasn't opened can't be read", code == 400 and "Open that folder" in r["error"], r)
+    code, r = post("/ide/open", {"path": os.path.join(outside, "lib", "util.py")})
+    check("opening a file opens its folder", code == 200 and r["project"] == os.path.join(os.path.realpath(outside), "lib") and r["file"] == "util.py", r)
+    code, r = post("/ide/close", {"path": r["project"]})
+    code, r = post("/ide/open", {"path": outside})
+    ext = r["project"]
+    check("open a folder where it is", code == 200 and ext == os.path.realpath(outside) and r["file"] == "", r)
+    code, r = get("/ide/projects")
+    listed = [p for p in r["projects"] if p["external"]]
+    check("it is listed under its folder name", [(p["name"], p["label"]) for p in listed] == [(ext, "My App")], listed)
+    code, r = post("/ide/open", {"path": os.path.join(outside, "lib", "util.py")})
+    check("a file inside an open folder uses that folder", r == {"project": ext, "file": "lib/util.py"}, r)
+    code, r = get("/ide/tree?project=" + urllib.parse.quote(ext))
+    check("its tree reads", code == 200 and any(e["path"] == "lib/util.py" for e in r["entries"]) and r["root"] == ext, r)
+    code, r = post("/ide/file", {"project": ext, "path": "lib/util.py", "content": "X = 2\n", "hash": ide._hash("X = 1\n")})
+    check("and saves in place", code == 200 and open(os.path.join(outside, "lib", "util.py")).read() == "X = 2\n", r)
+    code, r = post("/ide/entry", {"op": "create", "project": ext, "path": "../../escape.txt", "kind": "file"})
+    check("still can't step outside it", code == 400 and not os.path.exists(os.path.join(TMP, "escape.txt")), r)
+    code, r = post("/ide/open", {"path": os.path.join(ROOT, "src")})
+    check("a folder inside one of Jarvis's projects opens that project", r == {"project": PROJECT, "file": ""}, r)
+    code, r = post("/ide/open", {"path": "relative/path"})
+    check("a relative path is refused", code == 400, r)
+    code, r = post("/ide/open", {"path": os.path.join(TMP, "nope")})
+    check("a missing path is refused", code == 400 and "does not exist" in r["error"], r)
+    REPLIES["chat"] = "Sure."
+    c2 = ide.start_mission(ext, "what is X?", background=False)
+    check("chat works on an opened folder", ide.get_mission(c2["id"])["status"] == "done" and "lib/util.py" in CALLS[-1]["prompt"])
+
+    code, r = get("/ide/browse?path=" + urllib.parse.quote(os.path.dirname(outside)))
+    check("the page's folder browser lists folders", code == 200 and r["dirs"] == ["My App"] and r["parent"], r)
+    code, r = post("/ide/pick", {"kind": "folder"})
+    check("no desktop window: the page falls back to its own browser", code == 200 and r["available"] is False, r)
+
+    class FakeWindow:
+        def create_file_dialog(self, kind, allow_multiple=False):
+            return (outside,)
+    fake_webview = type(sys)("webview")
+    fake_webview.windows = [FakeWindow()]
+    fake_webview.FOLDER_DIALOG, fake_webview.OPEN_DIALOG = 20, 10
+    real_webview = sys.modules.get("webview")
+    sys.modules["webview"] = fake_webview
+    try:
+        code, r = post("/ide/pick", {"kind": "folder"})
+    finally:
+        if real_webview is not None:
+            sys.modules["webview"] = real_webview
+        else:
+            sys.modules.pop("webview", None)
+    check("the desktop window's own dialog is used when there is one", r == {"available": True, "paths": [outside]}, r)
+
+    print("copying files in")
+    resp = client.post("/ide/upload", environ_base=LOCAL, content_type="multipart/form-data", data={
+        "project": ext, "dir": "lib",
+        "files": [(io.BytesIO(b"hello"), "a.txt"), (io.BytesIO(b"deep"), "b.txt")],
+        "paths": ["a.txt", "assets/img/b.txt"]})
+    r = resp.get_json()
+    check("dropped files and a dropped folder's layout are saved",
+          resp.status_code == 200 and sorted(r["saved"]) == ["lib/a.txt", "lib/assets/img/b.txt"]
+          and open(os.path.join(outside, "lib", "assets", "img", "b.txt")).read() == "deep", r)
+    resp = client.post("/ide/upload", environ_base=LOCAL, content_type="multipart/form-data", data={
+        "project": ext, "files": [(io.BytesIO(b"new"), "a.txt")], "paths": ["lib/a.txt"]})
+    r = resp.get_json()
+    check("an existing file isn't replaced without asking",
+          r["exists"] == ["lib/a.txt"] and open(os.path.join(outside, "lib", "a.txt")).read() == "hello", r)
+    resp = client.post("/ide/upload", environ_base=LOCAL, content_type="multipart/form-data", data={
+        "project": ext, "overwrite": "1", "files": [(io.BytesIO(b"new"), "a.txt")], "paths": ["lib/a.txt"]})
+    check("...and is when the owner says so", open(os.path.join(outside, "lib", "a.txt")).read() == "new")
+    resp = client.post("/ide/upload", environ_base=LOCAL, content_type="multipart/form-data", data={
+        "project": ext, "files": [(io.BytesIO(b"x"), "x.txt")], "paths": ["../../../pwned.txt"]})
+    check("an upload can't land outside the folder", resp.status_code == 400 and not os.path.exists(os.path.join(TMP, "pwned.txt")))
+
+    source = os.path.join(TMP, "source")
+    os.makedirs(os.path.join(source, "pkg"))
+    with open(os.path.join(source, "pkg", "m.py"), "w") as f:
+        f.write("pass\n")
+    with open(os.path.join(source, "notes.md"), "w") as f:
+        f.write("n\n")
+    code, r = post("/ide/import", {"project": PROJECT, "dir": "", "paths": [os.path.join(source, "pkg"), os.path.join(source, "notes.md")]})
+    check("import copies a folder and a file into the project",
+          code == 200 and sorted(r["copied"]) == ["notes.md", "pkg"] and os.path.isfile(os.path.join(ROOT, "pkg", "m.py"))
+          and os.path.isfile(os.path.join(source, "notes.md")), r)
+    code, r = post("/ide/import", {"project": PROJECT, "paths": [os.path.join(source, "notes.md")]})
+    check("import doesn't replace without asking", r["exists"] == ["notes.md"] and not r["copied"], r)
+
+    code, r = post("/ide/close", {"path": ext})
+    code, r = get("/ide/projects")
+    check("closing takes it off the list and leaves the files", not any(p["external"] for p in r["projects"])
+          and os.path.isfile(os.path.join(outside, "lib", "util.py")))
 
     print("access")
     code, r = post("/ide/file", {"project": PROJECT, "path": "x.txt", "content": "x"}, remote="192.168.1.20")

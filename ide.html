@@ -10,8 +10,10 @@
          * The Workbench. Agent-first like Antigravity — you hand Jarvis a
          * mission and review what comes back — but laid out as one cockpit
          * instead of a separate agent manager: files on the left, the editor
-         * in the middle, Jarvis's mission deck on the right, a terminal dock
-         * underneath. "Missions" focus turns the deck into the whole screen.
+         * in the middle, Jarvis's deck on the right, a terminal dock
+         * underneath. "Jarvis" focus turns the deck into the whole screen.
+         * The deck is a plain chat about the code unless a message starts
+         * with /ultra; only then does Jarvis plan and make changes.
          */
         :root {
             --bg: #05070A;
@@ -352,6 +354,77 @@
         .composer-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
         .composer-foot .hint { flex: 1; font-size: 10.5px; color: var(--dim); }
 
+        .explorer .pane-title { gap: 2px; }
+        .explorer .pane-title .icon-btn { white-space: nowrap; padding-left: 5px; padding-right: 5px; }
+        .composer.ultra textarea { border-color: rgba(56,189,248,0.55); box-shadow: 0 0 0 1px rgba(56,189,248,0.18), 0 0 18px rgba(56,189,248,0.12); }
+        .composer.ultra .hint { color: var(--arc); }
+        .composer { position: relative; }
+        .slash {
+            position: absolute; left: 12px; right: 12px; bottom: calc(100% - 4px); display: none;
+            background: #0B1017; border: 1px solid rgba(56,189,248,0.35); border-radius: 9px; padding: 4px; z-index: 5;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .slash.show { display: block; }
+        .slash div { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--muted); }
+        .slash div b { color: var(--arc); font-family: var(--mono); margin-right: 8px; }
+        .slash div:hover, .slash div.on { background: var(--arc-soft); color: #FFF; }
+        .ctl-row { display: flex; gap: 8px; align-items: center; flex-basis: 100%; }
+        .ctl-row select { flex: 1 1 120px; min-width: 0; }
+        .ctl-label { font-size: 9.5px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); width: 44px; flex: 0 0 auto; }
+        .ctl-label.ultra { color: var(--arc); font-family: var(--mono); letter-spacing: 0; text-transform: none; font-size: 11px; }
+        .bubble pre {
+            font-family: var(--mono); font-size: 11.5px; background: rgba(0,0,0,0.45); border: 1px solid var(--line);
+            border-radius: 7px; padding: 9px 11px; margin: 8px 0; overflow-x: auto; white-space: pre; color: #E5EDF5;
+        }
+        .ultra-chip { font-family: var(--mono); color: var(--arc); letter-spacing: 0; text-transform: none; margin-left: 6px; }
+
+        /* ---------- open / import ---------- */
+        .menu-wrap { position: relative; }
+        .menu {
+            position: absolute; top: calc(100% + 6px); left: 0; min-width: 230px; display: none; z-index: 40;
+            background: #0B1017; border: 1px solid var(--line2); border-radius: 9px; padding: 4px;
+            box-shadow: 0 14px 40px rgba(0,0,0,0.55);
+        }
+        .menu.show { display: block; }
+        .menu button {
+            display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text);
+            padding: 8px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;
+        }
+        .menu button:hover { background: var(--arc-soft); color: #FFF; }
+        .menu .sub { display: block; font-size: 10.5px; color: var(--dim); margin-top: 2px; }
+        .explorer { position: relative; }
+        .drop-veil {
+            position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 6;
+            background: rgba(56,189,248,0.08); border: 2px dashed rgba(56,189,248,0.6); color: var(--arc);
+            font-size: 12.5px; text-align: center; padding: 20px; pointer-events: none;
+        }
+        .explorer.dropping .drop-veil { display: flex; }
+        .node.drop-target { background: var(--arc-soft); outline: 1px dashed rgba(56,189,248,0.6); }
+        .modal-back {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center;
+            justify-content: center; z-index: 45;
+        }
+        .modal-back.show { display: flex; }
+        .modal {
+            width: min(640px, 92vw); max-height: 78vh; display: flex; flex-direction: column; background: var(--bg2);
+            border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        }
+        .modal h3 { margin: 0; padding: 14px 16px 4px; font-size: 14px; color: #FFF; }
+        .modal .sub { padding: 0 16px 10px; font-size: 11.5px; color: var(--dim); }
+        .modal .path-row { display: flex; gap: 8px; padding: 0 16px 10px; }
+        .modal .path-row input { flex: 1; padding: 8px 10px; font-family: var(--mono); font-size: 12px; }
+        .modal .roots { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 8px; }
+        .modal .list { flex: 1; overflow: auto; margin: 0 16px; border: 1px solid var(--line); border-radius: 8px; min-height: 200px; }
+        .modal .list div {
+            padding: 7px 10px; font-size: 12.5px; cursor: pointer; display: flex; gap: 8px; align-items: center;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .modal .list div:hover { background: rgba(255,255,255,0.04); }
+        .modal .list div.file { color: var(--muted); }
+        .modal .list div.file.off { opacity: .4; cursor: default; }
+        .modal .list .ico { color: var(--dim); width: 14px; text-align: center; }
+        .modal .foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 16px 14px; }
+
         .toast {
             position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
             background: #111827; border: 1px solid var(--line2); color: var(--text);
@@ -375,10 +448,18 @@
         <div class="project-picker">
             <select id="projectSelect" title="Project folder"></select>
             <button class="icon-btn" id="newProjectBtn" title="New project">＋</button>
+            <div class="menu-wrap">
+                <button class="icon-btn" id="openBtn" title="Open a folder or file from anywhere on this PC">Open…</button>
+                <div class="menu" id="openMenu">
+                    <button data-open="folder">Folder on this PC…<span class="sub">Work on it where it is. Nothing is copied.</span></button>
+                    <button data-open="file">File on this PC…<span class="sub">Opens its folder with the file in a tab.</span></button>
+                </div>
+            </div>
+            <button class="icon-btn" id="closeFolderBtn" title="Take this folder off the list (nothing on disk changes)" style="display:none">✕</button>
         </div>
         <div class="focus-switch" id="focusSwitch">
             <button data-focus="code" class="on">Code</button>
-            <button data-focus="missions">Missions</button>
+            <button data-focus="missions">Jarvis</button>
         </div>
         <div class="spacer"></div>
         <div class="top-right-nav">
@@ -393,8 +474,18 @@
                 <span class="grow">Files</span>
                 <button class="icon-btn" id="newFileBtn" title="New file">＋ file</button>
                 <button class="icon-btn" id="newDirBtn" title="New folder">＋ dir</button>
+                <div class="menu-wrap">
+                    <button class="icon-btn" id="importBtn" title="Copy files or a folder from this PC into this project">⤓ import</button>
+                    <div class="menu" id="importMenu" style="left:auto;right:0">
+                        <button data-import="files">Files from this PC…<span class="sub">Copied into the project folder.</span></button>
+                        <button data-import="dir">A folder from this PC…<span class="sub">Copied in with everything inside it.</span></button>
+                    </div>
+                </div>
                 <button class="icon-btn" id="refreshBtn" title="Refresh">↻</button>
             </div>
+            <input type="file" id="importFiles" multiple hidden>
+            <input type="file" id="importDir" webkitdirectory directory multiple hidden>
+            <div class="drop-veil" id="dropVeil">Drop to copy into the project</div>
             <div class="section-strip" id="sectionStrip"></div>
             <div class="tree" id="tree"></div>
         </aside>
@@ -416,9 +507,9 @@
                     <div class="card-w">
                         <div class="big-reactor"></div>
                         <h2>Work with Jarvis</h2>
-                        Open a file on the left, or tell Jarvis what to build in the mission deck.
-                        He writes down what he understood and his plan first, then proposes the
-                        changes for you to accept.<br><br>
+                        Open a file on the left, or use <b>Open…</b> at the top for any folder on this PC.
+                        Drag files onto the file list to copy them in. Ask Jarvis about the code on the right;
+                        start a message with <b>/ultra</b> when you want him to plan and make the changes.<br><br>
                         <kbd>Ctrl</kbd> <kbd>S</kbd> save &nbsp; <kbd>Ctrl</kbd> <kbd>I</kbd> ask about the selection
                         &nbsp; <kbd>Ctrl</kbd> <kbd>`</kbd> terminal
                     </div>
@@ -444,13 +535,19 @@
 
         <!-- Mission deck -->
         <aside class="deck" id="deck">
-            <div class="pane-title"><span class="grow">Missions</span></div>
+            <div class="pane-title"><span class="grow">Jarvis</span></div>
             <div class="deck-controls">
-                <select id="engineSelect" title="Who does the work"></select>
-                <select id="modelSelect" title="Jarvis's model"></select>
-                <div class="mode" id="modeSwitch" title="Review: approve the plan and each change. Autopilot: Jarvis applies his changes; you can still revert them.">
-                    <button data-mode="review" class="on">Review</button>
-                    <button data-mode="autopilot">Autopilot</button>
+                <div class="ctl-row">
+                    <span class="ctl-label">Model</span>
+                    <select id="modelSelect" title="Jarvis's model, for chat and for /ultra with Jarvis"></select>
+                </div>
+                <div class="ctl-row" title="Only used when a message starts with /ultra">
+                    <span class="ctl-label ultra">/ultra</span>
+                    <select id="engineSelect" title="Who does the work on /ultra"></select>
+                    <div class="mode" id="modeSwitch" title="Review: approve the plan and each change. Autopilot: Jarvis applies his changes; you can still revert them.">
+                        <button data-mode="review" class="on">Review</button>
+                        <button data-mode="autopilot">Autopilot</button>
+                    </div>
                 </div>
                 <div class="engine-note" id="engineNote"></div>
             </div>
@@ -458,16 +555,34 @@
                 <div class="mission-list" id="missionList"></div>
                 <div class="mission-detail" id="missionDetail"></div>
             </div>
-            <div class="composer">
+            <div class="composer" id="composer">
+                <div class="slash" id="slash"><div class="on" data-slash="/ultra "><b>/ultra</b>Let Jarvis plan and make the changes</div></div>
                 <div class="ctx" id="ctx"></div>
-                <textarea id="prompt" placeholder="Tell Jarvis what to build, fix or explain…"></textarea>
+                <textarea id="prompt" placeholder="Ask about your code… start with /ultra to have Jarvis make changes"></textarea>
                 <div class="composer-foot">
-                    <span class="hint" id="composerHint">Ctrl+Enter to send · starts a new mission</span>
-                    <button class="btn" id="newMissionBtn" style="display:none">New mission</button>
+                    <span class="hint" id="composerHint">Ctrl+Enter to send · starts a new chat</span>
+                    <button class="btn" id="newMissionBtn" style="display:none">New chat</button>
                     <button class="btn arc" id="sendBtn">Send</button>
                 </div>
             </div>
         </aside>
+    </div>
+</div>
+<div class="modal-back" id="browser">
+    <div class="modal">
+        <h3 id="browserTitle">Open a folder</h3>
+        <div class="sub" id="browserSub">Pick a folder on this PC. Jarvis works on it where it is.</div>
+        <div class="path-row">
+            <input type="text" id="browserPath" spellcheck="false" placeholder="Paste a full path, e.g. C:\Users\you\Projects\app">
+            <button class="btn" id="browserGo">Go</button>
+            <button class="btn" id="browserUp" title="Up one folder">↑</button>
+        </div>
+        <div class="roots" id="browserRoots"></div>
+        <div class="list" id="browserList"></div>
+        <div class="foot">
+            <button class="btn" id="browserCancel">Cancel</button>
+            <button class="btn arc" id="browserOpen">Open this folder</button>
+        </div>
     </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -480,6 +595,7 @@
     // ------------------------------------------------------------------ state
     var S = {
         project: "",
+        projects: [],
         entries: [],
         collapsed: {},
         tabs: [],            // {key, path, kind:"file"|"diff", model, hash, dirty, mission, change}
@@ -620,19 +736,31 @@
     }
 
     // ------------------------------------------------------------- projects
-    function loadProjects() {
+    function loadProjects(pick) {
         return api("GET", "/ide/projects").then(function (data) {
             var sel = $("projectSelect");
-            var names = (data.projects || []).map(function (p) { return p.name; });
+            S.projects = data.projects || [];
+            var names = S.projects.map(function (p) { return p.name; });
             var params = new URLSearchParams(window.location.search);
-            var want = params.get("project") || recall("project");
-            sel.innerHTML = names.length
-                ? names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("")
-                : '<option value="">No projects yet</option>';
+            var want = pick || params.get("project") || recall("project");
+            function opt(p) {
+                return '<option value="' + esc(p.name) + '" title="' + esc(p.path || p.name) + '">' + esc(p.label || p.name) + "</option>";
+            }
+            var own = S.projects.filter(function (p) { return !p.external; });
+            var opened = S.projects.filter(function (p) { return p.external; });
+            sel.innerHTML = !names.length ? '<option value="">No projects yet</option>'
+                : (opened.length
+                    ? '<optgroup label="Jarvis\'s projects">' + own.map(opt).join("") + "</optgroup>" +
+                      '<optgroup label="Opened from this PC">' + opened.map(opt).join("") + "</optgroup>"
+                    : own.map(opt).join(""));
             S.project = names.indexOf(want) !== -1 ? want : (names[0] || "");
             sel.value = S.project;
             return openProject();
         });
+    }
+
+    function currentProject() {
+        return (S.projects || []).find(function (p) { return p.name === S.project; }) || null;
     }
 
     function openProject() {
@@ -647,7 +775,10 @@
             updateComposer();
         }
         renderTabs(); showActive();
-        $("termPrompt").textContent = (S.project || "no project") + " ›";
+        var cur = currentProject();
+        $("termPrompt").textContent = ((cur && cur.label) || S.project || "no project") + " ›";
+        $("closeFolderBtn").style.display = cur && cur.external ? "" : "none";
+        $("projectSelect").title = cur ? (cur.path || cur.name) : "Project folder";
         renderSectionStrip();
         return Promise.all([loadTree(), loadMissions(true), loadSections()]);
     }
@@ -669,6 +800,219 @@
             return loadProjects();
         }).catch(function (e) { toast(e.message, true); });
     });
+
+    // ------------------------------------------------- open from this PC
+    /* "Open…" works on a folder where it is (nothing copied). The desktop
+       window's own Open dialog is used when there is one; otherwise (a normal
+       browser, or an older pywebview) the page's own folder browser. */
+    function toggleMenu(id, show) {
+        var m = $(id);
+        var willShow = show === undefined ? !m.classList.contains("show") : show;
+        document.querySelectorAll(".menu.show").forEach(function (x) { x.classList.remove("show"); });
+        if (willShow) m.classList.add("show");
+    }
+    $("openBtn").addEventListener("click", function (ev) { ev.stopPropagation(); toggleMenu("openMenu"); });
+    $("importBtn").addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        if (!S.project) return toast("Pick or create a project first.", true);
+        toggleMenu("importMenu");
+    });
+    document.addEventListener("click", function () { toggleMenu("openMenu", false); });
+
+    $("openMenu").addEventListener("click", function (ev) {
+        var b = ev.target.closest("[data-open]");
+        if (!b) return;
+        toggleMenu("openMenu", false);
+        openFromPC(b.getAttribute("data-open"));
+    });
+
+    function openFromPC(kind) {
+        api("POST", "/ide/pick", { kind: kind }).then(function (r) {
+            if (!r.available) return showBrowser(kind);
+            if (r.paths && r.paths.length) openPath(r.paths[0]);
+        }).catch(function () { showBrowser(kind); });
+    }
+
+    function openPath(path) {
+        if (S.tabs.some(function (t) { return t.dirty; }) &&
+            !confirm("You have unsaved files. Open another folder and lose those edits?")) return Promise.resolve();
+        return api("POST", "/ide/open", { path: path }).then(function (r) {
+            hideBrowser();
+            return loadProjects(r.project).then(function () {
+                if (r.file) openFile(r.file);
+                toast("Opened " + ((currentProject() || {}).label || r.project));
+            });
+        }).catch(function (e) { toast(e.message, true); });
+    }
+
+    $("closeFolderBtn").addEventListener("click", function () {
+        var cur = currentProject();
+        if (!cur || !cur.external) return;
+        if (S.tabs.some(function (t) { return t.dirty; }) &&
+            !confirm("You have unsaved files. Close this folder and lose those edits?")) return;
+        api("POST", "/ide/close", { path: cur.name }).then(function () {
+            store("project", "");
+            return loadProjects(" ");
+        }).catch(function (e) { toast(e.message, true); });
+    });
+
+    var B = { kind: "folder", path: "" };
+    function showBrowser(kind) {
+        B.kind = kind;
+        $("browserTitle").textContent = kind === "file" ? "Open a file" : "Open a folder";
+        $("browserSub").textContent = kind === "file"
+            ? "Click a file to open it. Its folder opens in the IDE with the file in a tab."
+            : "Go into the folder you want, then press Open this folder. Jarvis works on it where it is.";
+        $("browserOpen").style.display = kind === "file" ? "none" : "";
+        $("browser").classList.add("show");
+        browseTo(B.path || "");
+    }
+    function hideBrowser() { $("browser").classList.remove("show"); }
+    function browseTo(path) {
+        return api("GET", "/ide/browse?" + q({ path: path })).then(function (r) {
+            B.path = r.path; B.parent = r.parent;
+            $("browserPath").value = r.path;
+            $("browserUp").disabled = !r.parent;
+            var roots = [["Home", r.home]].concat((r.roots || []).map(function (x) { return [x, x]; }));
+            $("browserRoots").innerHTML = roots.map(function (x) {
+                return '<button class="btn tiny" data-go="' + esc(x[1]) + '">' + esc(x[0]) + "</button>";
+            }).join("");
+            var sep = r.path.indexOf("\\") !== -1 ? "\\" : "/";
+            function join(n) { return r.path.replace(/[\\/]$/, "") + sep + n; }
+            var rows = (r.dirs || []).map(function (d) {
+                return '<div class="dir" data-go="' + esc(join(d)) + '"><span class="ico">▣</span>' + esc(d) + "</div>";
+            }).concat((r.files || []).map(function (f) {
+                return '<div class="file' + (B.kind === "file" ? "" : " off") + '" data-file="' + esc(join(f)) + '"><span class="ico">·</span>' + esc(f) + "</div>";
+            }));
+            $("browserList").innerHTML = rows.join("") || '<div class="file off">This folder is empty.</div>';
+        }).catch(function (e) { toast(e.message, true); });
+    }
+    $("browserRoots").addEventListener("click", function (ev) {
+        var g = ev.target.getAttribute("data-go");
+        if (g) browseTo(g);
+    });
+    $("browserList").addEventListener("click", function (ev) {
+        var row = ev.target.closest("[data-go],[data-file]");
+        if (!row) return;
+        if (row.getAttribute("data-go")) return browseTo(row.getAttribute("data-go"));
+        if (B.kind === "file") openPath(row.getAttribute("data-file"));
+    });
+    $("browserGo").addEventListener("click", function () { browseTo($("browserPath").value.trim()); });
+    $("browserPath").addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") browseTo(this.value.trim());
+    });
+    $("browserUp").addEventListener("click", function () { if (B.parent) browseTo(B.parent); });
+    $("browserCancel").addEventListener("click", hideBrowser);
+    $("browserOpen").addEventListener("click", function () { if (B.path) openPath(B.path); });
+    $("browser").addEventListener("click", function (ev) { if (ev.target === this) hideBrowser(); });
+
+    // ----------------------------------------------- import (copy) into it
+    /* Import copies files in: the page's own file inputs (the desktop window
+       shows its native dialog for them) or files dropped on the file list. */
+    $("importMenu").addEventListener("click", function (ev) {
+        var b = ev.target.closest("[data-import]");
+        if (!b) return;
+        toggleMenu("importMenu", false);
+        $(b.getAttribute("data-import") === "dir" ? "importDir" : "importFiles").click();
+    });
+    function fromInput(input) {
+        var items = Array.prototype.map.call(input.files, function (f) {
+            return { file: f, path: f.webkitRelativePath || f.name };
+        });
+        input.value = "";
+        if (items.length) uploadItems(items, "");
+    }
+    $("importFiles").addEventListener("change", function () { fromInput(this); });
+    $("importDir").addEventListener("change", function () { fromInput(this); });
+
+    function uploadItems(items, dir, overwrite) {
+        if (!S.project) return toast("Pick or create a project first.", true);
+        var form = new FormData();
+        form.append("project", S.project);
+        form.append("dir", dir || "");
+        if (overwrite) form.append("overwrite", "1");
+        items.forEach(function (it) { form.append("files", it.file, it.file.name); form.append("paths", it.path); });
+        toast("Copying " + items.length + " file" + (items.length === 1 ? "" : "s") + "…");
+        return fetch("/ide/upload", { method: "POST", body: form }).then(function (r) {
+            return r.json().catch(function () { return {}; }).then(function (data) {
+                if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+                return data;
+            });
+        }).then(function (r) {
+            var where = dir ? dir + "/" : "the project";
+            if (r.exists && r.exists.length && !overwrite) {
+                var names = r.exists.slice(0, 5).join("\n") + (r.exists.length > 5 ? "\n…and " + (r.exists.length - 5) + " more" : "");
+                if (confirm("These are already in the project:\n" + names + "\n\nReplace them?")) {
+                    var again = items.filter(function (it) {
+                        var rel = (dir ? dir + "/" : "") + it.path.replace(/\\/g, "/");
+                        return r.exists.indexOf(rel) !== -1;
+                    });
+                    return uploadItems(again, dir, true).then(function () { return r; });
+                }
+            }
+            if (r.saved && r.saved.length) toast("Copied " + r.saved.length + " file" + (r.saved.length === 1 ? "" : "s") + " into " + where);
+            loadTree(); reloadCleanTabs();
+            return r;
+        }).catch(function (e) { toast(e.message, true); });
+    }
+
+    // Drag and drop from the PC onto the file list (onto a folder to copy into it).
+    function readEntry(entry, prefix, out) {
+        return new Promise(function (resolve) {
+            if (entry.isFile) {
+                entry.file(function (f) { out.push({ file: f, path: prefix + f.name }); resolve(); }, function () { resolve(); });
+            } else if (entry.isDirectory) {
+                var reader = entry.createReader(), all = [];
+                (function more() {
+                    reader.readEntries(function (batch) {
+                        if (!batch.length) {
+                            Promise.all(all.map(function (e) { return readEntry(e, prefix + entry.name + "/", out); })).then(resolve);
+                        } else { all = all.concat(Array.prototype.slice.call(batch)); more(); }
+                    }, function () { resolve(); });
+                })();
+            } else resolve();
+        });
+    }
+    (function dropZone() {
+        var ex = document.querySelector(".explorer"), depth = 0;
+        function hasFiles(ev) { return ev.dataTransfer && Array.prototype.indexOf.call(ev.dataTransfer.types || [], "Files") !== -1; }
+        function clearTarget() { document.querySelectorAll(".node.drop-target").forEach(function (n) { n.classList.remove("drop-target"); }); }
+        function targetDir(ev) {
+            var node = ev.target.closest && ev.target.closest(".node");
+            if (!node) return "";
+            var p = node.getAttribute("data-path");
+            return node.getAttribute("data-type") === "dir" ? p : (p.indexOf("/") !== -1 ? p.slice(0, p.lastIndexOf("/")) : "");
+        }
+        ex.addEventListener("dragenter", function (ev) { if (!hasFiles(ev)) return; depth++; ex.classList.add("dropping"); });
+        ex.addEventListener("dragleave", function () { if (--depth <= 0) { depth = 0; ex.classList.remove("dropping"); clearTarget(); } });
+        ex.addEventListener("dragover", function (ev) {
+            if (!hasFiles(ev)) return;
+            ev.preventDefault(); ev.dataTransfer.dropEffect = "copy";
+            var dir = targetDir(ev);
+            $("dropVeil").textContent = S.project ? "Drop to copy into " + (dir ? dir + "/" : "the project") : "Pick a project first";
+            clearTarget();
+            if (dir) {
+                var n = document.querySelector('.node[data-path="' + dir.replace(/"/g, '\\"') + '"]');
+                if (n) n.classList.add("drop-target");
+            }
+        });
+        ex.addEventListener("drop", function (ev) {
+            if (!hasFiles(ev)) return;
+            ev.preventDefault();
+            depth = 0; ex.classList.remove("dropping"); clearTarget();
+            var dir = targetDir(ev), out = [];
+            var entries = Array.prototype.map.call(ev.dataTransfer.items || [], function (it) {
+                return it.webkitGetAsEntry ? it.webkitGetAsEntry() : null;
+            }).filter(Boolean);
+            var done = entries.length
+                ? Promise.all(entries.map(function (e) { return readEntry(e, "", out); }))
+                : Promise.resolve(Array.prototype.forEach.call(ev.dataTransfer.files, function (f) { out.push({ file: f, path: f.name }); }));
+            done.then(function () { if (out.length) uploadItems(out, dir); });
+        });
+        // Dropping anywhere else must not navigate the window away to the file.
+        window.addEventListener("dragover", function (ev) { ev.preventDefault(); });
+        window.addEventListener("drop", function (ev) { ev.preventDefault(); });
+    })();
 
     // ----------------------------------------------------------------- tree
     function loadTree() {
@@ -692,11 +1036,11 @@
     function renderTree() {
         var el = $("tree");
         if (!S.project) {
-            el.innerHTML = '<div class="tree-empty">Create a project with ＋ to start, or run a pipeline — its folder shows up here.</div>';
+            el.innerHTML = '<div class="tree-empty">Create a project with ＋, or use <b>Open…</b> for any folder on this PC. A pipeline\'s folder shows up here too.</div>';
             return;
         }
         if (!S.entries.length) {
-            el.innerHTML = '<div class="tree-empty">This project is empty. Add a file, or ask Jarvis to build something.</div>';
+            el.innerHTML = '<div class="tree-empty">This project is empty. Add a file, drop files here from your PC, or ask Jarvis to build something with /ultra.</div>';
             return;
         }
         var touched = touchedPaths();
@@ -1010,7 +1354,6 @@
 
     function renderEngineNote() {
         var e = S.engines.find(function (x) { return x.id === S.engine; }) || {};
-        $("modelSelect").style.display = S.engine === "jarvis" ? "" : "none";
         var unavailable = S.engines.filter(function (x) { return !x.available; })
             .map(function (x) { return x.label + ": " + x.reason; });
         var note = $("engineNote");
@@ -1020,6 +1363,7 @@
                 unavailable.length + " engine" + (unavailable.length > 1 ? "s" : "") + " not set up (hover for why)</span>" : "");
         // Autopilot/Review only shapes Jarvis's own engine; the CLIs apply edits themselves.
         $("modeSwitch").style.display = S.engine === "jarvis" ? "" : "none";
+        updateComposer();
     }
 
     $("engineSelect").addEventListener("change", function () { S.engine = this.value; renderEngineNote(); });
@@ -1031,6 +1375,7 @@
         Array.prototype.forEach.call($("modeSwitch").children, function (b) {
             b.classList.toggle("on", b.getAttribute("data-mode") === S.mode);
         });
+        updateComposer();
     }
     $("modeSwitch").addEventListener("click", function (ev) {
         var m = ev.target.getAttribute("data-mode");
@@ -1043,6 +1388,23 @@
         review: ["Review changes", "warn"], done: ["Done", "go"], failed: ["Failed", "no"], stopped: ["Stopped", ""]
     };
     var ENGINE_LABEL = { jarvis: "Jarvis", antigravity: "Antigravity", claude: "Claude" };
+    function isChat(m) { return m && m.kind === "chat"; }
+    function statusOf(m) {
+        if (isChat(m) && (m.status === "working" || m.status === "done")) return m.status === "working" ? ["Thinking", "arc"] : ["Chat", ""];
+        return STATUS[m.status] || [m.status, ""];
+    }
+
+    // Jarvis's chat answers: fenced code blocks and `inline code`, nothing else.
+    function richText(text) {
+        var chunks = String(text || "").split(/```/);
+        return chunks.map(function (chunk, i) {
+            if (i % 2) return "<pre>" + esc(chunk.replace(/^[\w+-]*\n/, "").replace(/\n$/, "")) + "</pre>";
+            // The block already breaks the line; drop the blank lines around it.
+            if (i > 0) chunk = chunk.replace(/^\n+/, "");
+            if (i < chunks.length - 1) chunk = chunk.replace(/\n+$/, "");
+            return esc(chunk).replace(/`([^`\n]+)`/g, "<code>$1</code>");
+        }).join("");
+    }
 
     function loadMissions(force) {
         if (!S.project) { S.missions = []; renderMissionList(); renderDetail(); return Promise.resolve(); }
@@ -1065,20 +1427,21 @@
     function renderMissionList() {
         var el = $("missionList");
         if (!S.missions.length) {
-            el.innerHTML = '<div class="empty-deck">No missions on this project yet.<br><br>' +
-                "Describe what you want below. In <b>Review</b> mode Jarvis shows you what he understood and his plan before " +
-                "writing anything, then each change as a diff you accept or reject. In <b>Autopilot</b> he applies them " +
+            el.innerHTML = '<div class="empty-deck">Ask Jarvis anything about this project\'s code below. He reads the open file ' +
+                "and your selection, and answers without changing anything.<br><br>" +
+                "Start a message with <b>/ultra</b> when you want him to do the work. He writes down what he understood and his plan, " +
+                "then in <b>Review</b> shows each change as a diff you accept or reject, or in <b>Autopilot</b> applies them " +
                 "and you can revert any of them.</div>";
             return;
         }
         el.innerHTML = S.missions.map(function (m) {
-            var st = STATUS[m.status] || [m.status, ""];
+            var st = statusOf(m);
             var pending = (m.changes || []).filter(function (c) { return c.status === "pending"; }).length;
             return '<div class="m-item' + (m.id === S.selected ? " on" : "") + '" data-id="' + m.id + '">' +
                 '<span class="ring ' + esc(m.status) + '"></span><div style="min-width:0;flex:1">' +
                 '<div class="t">' + esc(m.title) + "</div>" +
                 '<div class="s">' + esc(st[0]) + (pending ? " · " + pending + " to review" : "") +
-                " · " + esc(ENGINE_LABEL[m.engine] || m.engine) + " · " + ago(m.created_at) + "</div></div></div>";
+                (isChat(m) ? "" : " · /ultra · " + esc(ENGINE_LABEL[m.engine] || m.engine)) + " · " + ago(m.created_at) + "</div></div></div>";
         }).join("");
     }
 
@@ -1114,7 +1477,7 @@
     function isBusy(m) { return m && (m.status === "planning" || m.status === "working"); }
 
     function statusBadge(m) {
-        var st = STATUS[m.status] || [m.status, ""];
+        var st = statusOf(m);
         return '<span class="badge ' + st[1] + '">' + esc(st[0]) + "</span>";
     }
 
@@ -1123,16 +1486,18 @@
         var m = S.mission;
         if (!m) {
             el.innerHTML = document.body.classList.contains("missions-focus")
-                ? '<div class="empty-deck">Pick a mission on the left, or start one below.</div>' : "";
+                ? '<div class="empty-deck">Pick a conversation on the left, or start one below.</div>' : "";
             return;
         }
         var out = [];
         out.push('<div class="d-head"><button class="btn tiny back-btn" data-act="back">←</button>' +
             "<h3>" + esc(m.title) + "</h3>" + statusBadge(m) + "</div>");
         out.push('<div class="row-actions" style="margin:-4px 0 14px">' +
-            '<span class="badge arc">' + esc(ENGINE_LABEL[m.engine] || m.engine) + "</span>" +
-            (m.engine === "jarvis" ? '<span class="badge">' + esc((m.model || "").replace(/^\w+:/, "")) + "</span>" +
-                '<span class="badge">' + (m.mode === "autopilot" ? "Autopilot" : "Review") + "</span>" : "") +
+            (isChat(m)
+                ? '<span class="badge">Chat · changes nothing</span><span class="badge">' + esc((m.chat_model || m.model || "").replace(/^\w+:/, "")) + "</span>"
+                : '<span class="badge arc">/ultra · ' + esc(ENGINE_LABEL[m.engine] || m.engine) + "</span>" +
+                  (m.engine === "jarvis" ? '<span class="badge">' + esc((m.model || "").replace(/^\w+:/, "")) + "</span>" : "") +
+                  '<span class="badge">' + (m.mode === "autopilot" ? "Autopilot" : "Review") + "</span>") +
             '<span class="spacer" style="flex:1"></span>' +
             (isBusy(m) || m.status === "awaiting_plan" ? '<button class="btn tiny no" data-act="stop">Stop</button>' : "") +
             (!isBusy(m) ? '<button class="btn tiny" data-act="delete">Remove</button>' : "") + "</div>");
@@ -1160,7 +1525,8 @@
         }
 
         if (isBusy(m)) {
-            mid.push('<div class="step"><div class="step-label">' + (m.status === "planning" ? "Understanding and planning" : "Working") +
+            var lastTurn = (m.conversation || []).filter(function (t) { return t.role === "owner"; }).pop() || {};
+            mid.push('<div class="step"><div class="step-label">' + (m.status === "planning" ? "Understanding and planning" : (lastTurn.ultra ? "Working" : "Thinking")) +
                 '</div><div class="bubble" style="color:var(--muted)"><span class="ring working" style="display:inline-block;vertical-align:-2px;margin-right:8px"></span>' +
                 esc((m.log && m.log.length ? m.log[m.log.length - 1].text : "Starting…")) + "</div></div>");
         }
@@ -1170,8 +1536,8 @@
         conv.forEach(function (turn, i) { if (turn.role === "owner") lastOwner = i; });
         conv.forEach(function (turn, i) {
             out.push('<div class="step ' + (turn.role === "owner" ? "owner" : "") + '">' +
-                '<div class="step-label">' + (turn.role === "owner" ? "You" : "Jarvis") + "</div>" +
-                '<div class="bubble">' + esc(turn.text) + "</div></div>");
+                '<div class="step-label">' + (turn.role === "owner" ? "You" + (turn.ultra ? '<span class="ultra-chip">/ultra</span>' : "") : "Jarvis") + "</div>" +
+                '<div class="bubble">' + (turn.role === "owner" ? esc(turn.text) : richText(turn.text)) + "</div></div>");
             if (i === lastOwner) out.push.apply(out, mid);
         });
         if (lastOwner === -1) out.push.apply(out, mid);
@@ -1355,16 +1721,39 @@
         $("prompt").focus();
     }
 
+    var ULTRA = /^\s*\/ultra\b/i;
     function updateComposer() {
         var m = S.mission;
         var following = !!(S.selected && m && !isBusy(m));
+        var ultra = ULTRA.test($("prompt").value);
+        $("composer").classList.toggle("ultra", ultra);
         $("newMissionBtn").style.display = S.selected ? "" : "none";
-        $("composerHint").textContent = S.selected
-            ? (isBusy(m) ? "Jarvis is working on this mission…" : "Ctrl+Enter to send · continues this mission")
-            : "Ctrl+Enter to send · starts a new mission";
+        var eng = ENGINE_LABEL[S.engine] || S.engine;
+        $("composerHint").textContent = S.selected && m && isBusy(m) ? "Jarvis is working on this…"
+            : ultra ? "/ultra · " + eng + (S.engine === "jarvis" ? " plans and makes the changes (" + (S.mode === "autopilot" ? "Autopilot" : "Review") + ")" : " does the work") + " · Ctrl+Enter"
+            : "Ctrl+Enter to send · " + (S.selected ? "continues this chat" : "starts a new chat") + " · /ultra to make changes";
         $("sendBtn").disabled = !!(S.selected && m && isBusy(m));
-        $("prompt").placeholder = following ? "Reply to Jarvis on this mission…" : "Tell Jarvis what to build, fix or explain…";
+        $("sendBtn").textContent = ultra ? "Run /ultra" : "Send";
+        $("prompt").placeholder = following ? "Reply to Jarvis… start with /ultra to have him make changes"
+            : "Ask about your code… start with /ultra to have Jarvis make changes";
     }
+
+    // Typing "/" offers /ultra, like a slash command.
+    function renderSlash() {
+        var v = $("prompt").value;
+        var show = /^\/\w*$/.test(v) && "/ultra".indexOf(v.toLowerCase()) === 0 && v.toLowerCase() !== "/ultra ";
+        $("slash").classList.toggle("show", show);
+        return show;
+    }
+    function completeSlash() {
+        $("prompt").value = "/ultra ";
+        $("slash").classList.remove("show");
+        $("prompt").focus();
+        updateComposer();
+    }
+    $("slash").addEventListener("mousedown", function (ev) { ev.preventDefault(); completeSlash(); });
+    $("prompt").addEventListener("input", function () { renderSlash(); updateComposer(); });
+    $("prompt").addEventListener("blur", function () { $("slash").classList.remove("show"); });
 
     $("newMissionBtn").addEventListener("click", function () { selectMission(null); $("prompt").focus(); });
 
@@ -1376,7 +1765,9 @@
         btn.disabled = true;
         var req;
         if (S.selected && S.mission && !isBusy(S.mission)) {
-            req = api("POST", "/ide/missions/" + S.selected + "/followup", { message: text, context: context() });
+            req = api("POST", "/ide/missions/" + S.selected + "/followup", {
+                message: text, context: context(), engine: S.engine, model: S.model, mode: S.mode
+            });
         } else {
             req = api("POST", "/ide/missions", {
                 project: S.project, prompt: text, engine: S.engine, model: S.model, mode: S.mode, context: context()
@@ -1384,6 +1775,7 @@
         }
         req.then(function (m) {
             $("prompt").value = "";
+            $("slash").classList.remove("show");
             S.includeFile = true; S.includeSelection = true;
             return loadMissions().then(function () { selectMission(m.id); });
         }).catch(function (e) { toast(e.message, true); })
@@ -1391,6 +1783,10 @@
     }
     $("sendBtn").addEventListener("click", send);
     $("prompt").addEventListener("keydown", function (ev) {
+        if ($("slash").classList.contains("show") && (ev.key === "Tab" || (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey))) {
+            ev.preventDefault(); completeSlash(); return;
+        }
+        if (ev.key === "Escape") $("slash").classList.remove("show");
         if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") { ev.preventDefault(); send(); }
     });
 

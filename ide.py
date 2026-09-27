@@ -25,9 +25,14 @@ Three engines can do a mission:
   * "claude"      — the Claude coding agent (agents/code_agent.py) when that
                     module is present and set up. Same shape as Antigravity.
 
-Everything here is confined to one project folder under "Let Jarvis Handle It".
-Paths are resolved and checked before every read and write, so neither the
-owner's typo nor a model's invention can reach Jarvis's own source.
+Everything here is confined to one project folder: one under "Let Jarvis
+Handle It", or a folder the owner opened from elsewhere on the PC. Paths are
+resolved and checked before every read and write, so neither the owner's typo
+nor a model's invention can reach outside it.
+
+By default the IDE behaves like a normal IDE: the prompt box is a chat about
+the open code that never edits anything. Jarvis only works as an agent (plans,
+proposes edits and commands) on a message that starts with /ultra.
 """
 import difflib
 import hashlib
@@ -48,6 +53,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECTS_ROOT = os.path.join(BASE_DIR, "Let Jarvis Handle It")
 STORE_DIR = os.path.join(BASE_DIR, "data", "ide")
 MISSIONS_FILE = os.path.join(STORE_DIR, "missions.json")
+FOLDERS_FILE = os.path.join(STORE_DIR, "folders.json")    # folders opened from elsewhere on the PC
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 
 # Folders that are someone else's output, not the project's source. Listing a
@@ -90,7 +96,42 @@ def _clean_project(project: str) -> str:
     return name
 
 
+def _is_abs(path: str) -> bool:
+    """A folder the owner opened from anywhere on the PC is named by its full
+    path; Jarvis's own projects are named by their folder name."""
+    path = (path or "").strip()
+    return bool(path) and (os.path.isabs(path) or bool(re.match(r"^[a-zA-Z]:[\\/]", path)))
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _opened_folders() -> list[str]:
+    try:
+        with open(FOLDERS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return [p for p in data if isinstance(p, str)]
+    except (OSError, ValueError):
+        return []
+
+
+def _save_opened_folders(paths: list[str]) -> None:
+    os.makedirs(STORE_DIR, exist_ok=True)
+    with open(FOLDERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(paths, f, indent=2)
+
+
 def project_root(project: str, create: bool = False) -> str:
+    if _is_abs(project):
+        # Only folders the owner opened here, so a request can't name any
+        # folder on the PC and start reading it.
+        root = os.path.realpath(project.strip())
+        if _norm(root) not in {_norm(p) for p in _opened_folders()}:
+            raise IDEError("Open that folder from the IDE first.")
+        if not os.path.isdir(root):
+            raise IDEError(f"{root} is no longer there.")
+        return root
     root = os.path.realpath(os.path.join(PROJECTS_ROOT, _clean_project(project)))
     if not root.startswith(os.path.realpath(PROJECTS_ROOT) + os.sep):
         raise IDEError("That project is outside Jarvis's projects folder.")
@@ -129,14 +170,152 @@ def _rel(project: str, path: str) -> str:
 # ---------------------------------------------------------------------------
 
 def list_projects() -> list[dict]:
-    if not os.path.isdir(PROJECTS_ROOT):
-        return []
+    """Jarvis's own projects, then the folders the owner opened from elsewhere
+    on the PC (named by their full path, labelled by their folder name)."""
     out = []
-    for name in sorted(os.listdir(PROJECTS_ROOT), key=str.lower):
-        path = os.path.join(PROJECTS_ROOT, name)
-        if os.path.isdir(path) and not name.startswith("."):
-            out.append({"name": name, "modified": os.path.getmtime(path)})
+    if os.path.isdir(PROJECTS_ROOT):
+        for name in sorted(os.listdir(PROJECTS_ROOT), key=str.lower):
+            path = os.path.join(PROJECTS_ROOT, name)
+            if os.path.isdir(path) and not name.startswith("."):
+                out.append({"name": name, "label": name, "path": path, "external": False,
+                            "modified": os.path.getmtime(path)})
+    for path in _opened_folders():
+        if os.path.isdir(path):
+            out.append({"name": path, "label": os.path.basename(path.rstrip("\\/")) or path, "path": path,
+                        "external": True, "modified": os.path.getmtime(path)})
     return out
+
+
+def open_path(path: str) -> dict:
+    """Open a folder (or a file, by opening its folder) from anywhere on the PC.
+    The folder is worked on where it is; nothing is copied."""
+    path = (path or "").strip().strip('"')
+    if not _is_abs(path):
+        raise IDEError("Give the full path of a folder or file on this PC.")
+    target = os.path.realpath(os.path.expanduser(path))
+    if not os.path.exists(target):
+        raise IDEError(f"{path} does not exist.")
+    folder, file_rel = (target, "") if os.path.isdir(target) else (os.path.dirname(target), os.path.basename(target))
+    if os.path.dirname(folder) == folder:
+        raise IDEError("Pick a folder, not a whole drive.")
+    # Inside one of Jarvis's own projects? Open that project instead.
+    lj = os.path.realpath(PROJECTS_ROOT)
+    if _norm(folder).startswith(_norm(lj) + os.sep):
+        name = os.path.relpath(folder, lj).split(os.sep)[0]
+        inner = os.path.relpath(target, os.path.join(lj, name)).replace(os.sep, "/")
+        return {"project": name, "file": inner if os.path.isfile(target) else ""}
+    # Inside a folder that is already open? Use that one.
+    for opened in _opened_folders():
+        if _norm(folder) == _norm(opened) or _norm(folder).startswith(_norm(opened) + os.sep):
+            rel = os.path.relpath(target, opened).replace(os.sep, "/")
+            return {"project": opened, "file": rel if os.path.isfile(target) else ""}
+    with _LOCK:
+        _save_opened_folders(_opened_folders() + [folder])
+    return {"project": folder, "file": file_rel}
+
+
+def close_folder(path: str) -> dict:
+    """Take an opened folder off the list. Nothing on disk changes."""
+    keep = [p for p in _opened_folders() if _norm(p) != _norm(path or "")]
+    with _LOCK:
+        _save_opened_folders(keep)
+    return {"status": "closed"}
+
+
+def browse(path: str = "") -> dict:
+    """One folder's subfolders and files, for the page's own folder browser
+    (used when the native Open dialog isn't available)."""
+    path = (path or "").strip().strip('"') or os.path.expanduser("~")
+    if not _is_abs(path):
+        raise IDEError("Give a full path.")
+    path = os.path.realpath(path)
+    if not os.path.isdir(path):
+        raise IDEError(f"{path} is not a folder.")
+    dirs, files = [], []
+    try:
+        names = sorted(os.listdir(path), key=str.lower)
+    except OSError as err:
+        raise IDEError(f"Can't open {path}: {err.strerror or err}")
+    for n in names:
+        full = os.path.join(path, n)
+        try:
+            (dirs if os.path.isdir(full) else files).append(n)
+        except OSError:
+            continue
+    parent = os.path.dirname(path)
+    if os.name == "nt":
+        roots = [f"{c}:\\" for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if os.path.exists(f"{c}:\\")]
+    else:
+        roots = ["/"]
+    return {"path": path, "parent": parent if parent != path else "", "dirs": dirs, "files": files,
+            "home": os.path.expanduser("~"), "roots": roots}
+
+
+def pick_native(kind: str) -> dict:
+    """Ask the desktop window for its own Open dialog. Returns
+    {"available": False} when Jarvis isn't running in its desktop window
+    (for example opened in a normal browser), so the page uses its own browser."""
+    try:
+        import webview
+    except Exception:
+        return {"available": False}
+    windows = getattr(webview, "windows", None) or []
+    if not windows:
+        return {"available": False}
+    folder = kind == "folder"
+    dialog_kind = None
+    file_dialog = getattr(webview, "FileDialog", None)
+    if file_dialog is not None:
+        dialog_kind = getattr(file_dialog, "FOLDER" if folder else "OPEN", None)
+    if dialog_kind is None:
+        dialog_kind = getattr(webview, "FOLDER_DIALOG" if folder else "OPEN_DIALOG", None)
+    if dialog_kind is None:
+        return {"available": False}
+    try:
+        picked = windows[0].create_file_dialog(dialog_kind, allow_multiple=(kind == "files"))
+    except Exception as err:
+        return {"available": False, "error": str(err)}
+    if isinstance(picked, str):
+        picked = [picked]
+    return {"available": True, "paths": [str(p) for p in (picked or [])]}
+
+
+def save_upload(project: str, rel: str, stream, overwrite: bool = False) -> dict:
+    """Write one file the owner dropped or picked into the project."""
+    target = resolve(project, rel)
+    if os.path.isdir(target):
+        raise IDEError(f"{rel} is a folder.")
+    if os.path.exists(target) and not overwrite:
+        return {"path": _rel(project, target), "status": "exists"}
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "wb") as f:
+        shutil.copyfileobj(stream, f)
+    return {"path": _rel(project, target), "status": "saved"}
+
+
+def import_paths(project: str, dest_dir: str, paths: list[str], overwrite: bool = False) -> dict:
+    """Copy files or folders from elsewhere on the PC into the project."""
+    root = project_root(project)
+    dest = resolve(project, dest_dir) if (dest_dir or "").strip("/ ") else root
+    if not os.path.isdir(dest):
+        raise IDEError(f"{dest_dir} is not a folder.")
+    done, exists = [], []
+    for src in paths or []:
+        src = os.path.realpath((src or "").strip().strip('"'))
+        if not _is_abs(src) or not os.path.exists(src):
+            raise IDEError(f"{src} does not exist.")
+        target = os.path.join(dest, os.path.basename(src.rstrip("\\/")))
+        if _norm(target) == _norm(src) or _norm(dest).startswith(_norm(src) + os.sep):
+            raise IDEError("A folder can't be copied into itself.")
+        if os.path.exists(target) and not overwrite:
+            exists.append(_rel(project, target))
+            continue
+        if os.path.isdir(src):
+            shutil.copytree(src, target, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, target)
+        done.append(_rel(project, target))
+    return {"copied": done, "exists": exists}
 
 
 def create_project(name: str) -> dict:
@@ -374,8 +553,9 @@ def remember_choice(engine: str | None, model: str | None) -> None:
         _save_setting("ide_model", model)
 
 
-def call_model(model_id: str, system: str, prompt: str) -> str:
-    """One JSON-mode completion from Jarvis's own model. Tests replace this."""
+def call_model(model_id: str, system: str, prompt: str, json_mode: bool = True) -> str:
+    """One completion from Jarvis's own model: JSON mode for missions, plain
+    text for chat. Tests replace this."""
     provider, _, name = (model_id or "").partition(":")
     if provider == "gemini":
         from google import genai
@@ -384,16 +564,16 @@ def call_model(model_id: str, system: str, prompt: str) -> str:
         resp = client.models.generate_content(
             model=name or "gemini-2.5-flash", contents=prompt,
             config=types.GenerateContentConfig(system_instruction=system,
-                                               response_mime_type="application/json",
+                                               response_mime_type="application/json" if json_mode else None,
                                                temperature=0.2))
         return resp.text or ""
     if provider == "ollama":
         from openai import OpenAI
         url, default = _ollama_config()
         client = OpenAI(base_url=f"{url}/v1", api_key="ollama")
+        extra = {"response_format": {"type": "json_object"}} if json_mode else {}
         resp = client.chat.completions.create(
-            model=name or default, temperature=0.2,
-            response_format={"type": "json_object"},
+            model=name or default, temperature=0.2, **extra,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}])
         return resp.choices[0].message.content or ""
     raise IDEError("No model picked for Jarvis. Choose one in the engine menu.")
@@ -530,6 +710,24 @@ Rules:
 - Use "write" for new files and for rewrites; give the whole file, never a fragment or placeholder.
 - Commands are suggestions the owner runs with a click. Never include destructive commands.
 - Stay inside the project folder. Do not invent files you were not shown unless you are creating them."""
+
+
+CHAT_SYSTEM = """You are Jarvis, the assistant inside the owner's IDE, answering questions about one project folder.
+Answer the owner's latest message directly and concisely, using the files, the open file and the selection you
+are shown. Markdown is fine; put code in fenced blocks.
+
+You can't change anything in this mode: never claim to have edited a file or run a command. When the owner wants
+you to make the change yourself, show the code they could use, and tell them they can start their message with
+/ultra to have you plan it and make the edits."""
+
+ULTRA = re.compile(r"^\s*/ultra\b[:\s]*", re.IGNORECASE)
+
+
+def split_ultra(text: str) -> tuple[bool, str]:
+    """(True, the rest) when a message starts with /ultra."""
+    text = (text or "").strip()
+    match = ULTRA.match(text)
+    return (True, text[match.end():].strip()) if match else (False, text)
 
 
 def _listing(project: str, limit: int = 600) -> str:
@@ -691,6 +889,43 @@ def _apply(m: dict, change: dict) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(change["after"])
+
+
+def _chat_prompt(m: dict) -> str:
+    ctx = m.get("context") or {}
+    parts = [f"PROJECT: {m['project']}", "FILES:\n" + _listing(m["project"])]
+    if ctx.get("open_file"):
+        parts.append(f"THE OWNER HAS THIS FILE OPEN: {ctx['open_file']}")
+        opened = _file_context(m["project"], [ctx["open_file"]])
+        if opened:
+            parts.append(opened)
+    if ctx.get("selection"):
+        parts.append("THE OWNER SELECTED:\n" + ctx["selection"][:6000])
+    parts.append("CONVERSATION SO FAR:\n" + _history(m))
+    return "\n\n".join(parts)
+
+
+def _chat_round(m: dict) -> None:
+    """A plain answer: no plan, no edits, no commands. A plan still waiting
+    on approval, or changes still waiting on review, keep waiting."""
+    before = m["status"]
+    m["status"] = "working"
+    _log(m, "phase", "Thinking.")
+    _save(m)
+    answer = (call_model(m.get("chat_model") or (m["model"] if m["engine"] == "jarvis" else "") or engines()["model"],
+                         CHAT_SYSTEM, _chat_prompt(m), json_mode=False) or "").strip()
+    if _stopped(m):
+        return
+    m["conversation"].append({"role": "jarvis", "text": answer or "(no answer)"})
+    m["result"] = answer
+    if before == "awaiting_plan":
+        m["status"] = "awaiting_plan"
+    elif any(c["status"] == "pending" for c in m.get("changes", [])):
+        m["status"] = "review"
+    else:
+        m["status"] = "done"
+    _log(m, "answer", "Answered.")
+    _save(m)
 
 
 def _plan_round(m: dict) -> None:
@@ -869,29 +1104,46 @@ def _title(prompt: str) -> str:
     return (cut if len(cut) > 40 else line[:80]).rstrip(" ,.;:") + "…"
 
 
-def start_mission(project: str, prompt: str, engine: str = "jarvis", model: str = "",
-                  mode: str = "review", context: dict | None = None, background: bool = True) -> dict:
-    project_root(project)
-    prompt = (prompt or "").strip()
-    if not prompt:
-        raise IDEError("Tell Jarvis what you want done.")
+def _go_ultra(m: dict, engine: str, model: str, mode: str) -> None:
+    """Turn a chat into an agent mission, with the engine and mode picked now."""
     if engine not in ("jarvis", "antigravity", "claude"):
         raise IDEError("Unknown engine.")
     if mode not in ("review", "autopilot"):
         mode = "review"
     if engine == "jarvis" and not model:
-        model = engines()["model"]
+        model = m.get("model") or engines()["model"]
+    m["kind"], m["engine"], m["mode"] = "ultra", engine, mode
+    if engine == "jarvis":
+        m["model"] = model
     remember_choice(engine, model if engine == "jarvis" else None)
+
+
+def start_mission(project: str, prompt: str, engine: str = "jarvis", model: str = "",
+                  mode: str = "review", context: dict | None = None, background: bool = True) -> dict:
+    """Without /ultra this is a chat: Jarvis answers with his own model and
+    changes nothing. With /ultra it is a mission on the chosen engine."""
+    project_root(project)
+    ultra, prompt = split_ultra(prompt)
+    if not prompt:
+        raise IDEError("Say what you want Jarvis to do after /ultra." if ultra else "Ask Jarvis something first.")
+    # The model picker is always Jarvis's own model, whichever engine is picked.
+    chat_model = model or engines()["model"]
     m = {
-        "id": uuid.uuid4().hex[:12], "project": project, "engine": engine, "model": model,
-        "mode": mode, "title": _title(prompt), "status": "planning",
+        "id": uuid.uuid4().hex[:12], "project": project, "kind": "chat", "engine": "jarvis",
+        "model": chat_model, "mode": "review", "title": _title(prompt), "status": "working",
         "created_at": _now(), "updated_at": _now(),
-        "conversation": [{"role": "owner", "text": prompt}],
+        "conversation": [{"role": "owner", "text": prompt, **({"ultra": True} if ultra else {})}],
         "context": {k: v for k, v in (context or {}).items() if k in ("open_file", "selection") and v},
         "plan": None, "changes": [], "commands": [], "log": [], "result": "", "error": "",
     }
+    if ultra:
+        _go_ultra(m, engine, model, mode)
+        m["status"] = "planning"
+    else:
+        m["chat_model"] = chat_model
+        remember_choice(None, chat_model)
     _save(m)
-    step = _plan_round if engine == "jarvis" else _cli_round
+    step = _chat_round if not ultra else (_plan_round if m["engine"] == "jarvis" else _cli_round)
     if background:
         _run(m, step)
     else:
@@ -915,20 +1167,29 @@ def approve_plan(mission_id: str, feedback: str = "", background: bool = True) -
 
 
 def follow_up(mission_id: str, message: str, context: dict | None = None,
-              background: bool = True) -> dict:
-    """Keep talking to Jarvis on the same mission: another plan-and-edit round
-    that knows everything said so far."""
+              background: bool = True, engine: str = "", model: str = "", mode: str = "") -> dict:
+    """Keep talking to Jarvis on the same conversation. Each message is judged
+    on its own: /ultra runs another plan-and-edit round that knows everything
+    said so far; anything else gets a plain answer. The first /ultra on a chat
+    takes the engine and mode picked on the page at that moment."""
     m = get_mission(mission_id)
     if m["status"] in ("planning", "working"):
-        raise IDEError("Jarvis is still working on this mission. Stop it first or wait.")
-    message = (message or "").strip()
+        raise IDEError("Jarvis is still working on this. Stop it first or wait.")
+    ultra, message = split_ultra(message)
     if not message:
-        raise IDEError("Say what you want next.")
-    m["conversation"].append({"role": "owner", "text": message})
+        raise IDEError("Say what you want Jarvis to do after /ultra." if ultra else "Say what you want next.")
+    if ultra and m.get("kind", "ultra") == "chat":
+        _go_ultra(m, engine or "jarvis", model, mode or "review")
+    m["conversation"].append({"role": "owner", "text": message, **({"ultra": True} if ultra else {})})
     if context is not None:
         m["context"] = {k: v for k, v in context.items() if k in ("open_file", "selection") and v}
     m["error"] = ""
-    step = _plan_round if m["engine"] == "jarvis" else _cli_round
+    if not ultra:
+        if model:
+            m["chat_model"] = model
+        step = _chat_round
+    else:
+        step = _plan_round if m["engine"] == "jarvis" else _cli_round
     if background:
         _run(m, step)
     else:
@@ -1155,6 +1416,56 @@ def r_create_project():
     return jsonify(create_project(_body().get("name", "")))
 
 
+@blueprint.route("/ide/open", methods=["POST"])
+def r_open():
+    return jsonify(open_path(_body().get("path", "")))
+
+
+@blueprint.route("/ide/close", methods=["POST"])
+def r_close():
+    return jsonify(close_folder(_body().get("path", "")))
+
+
+@blueprint.route("/ide/browse", methods=["GET"])
+def r_browse():
+    return jsonify(browse(request.args.get("path", "")))
+
+
+@blueprint.route("/ide/pick", methods=["POST"])
+def r_pick():
+    return jsonify(pick_native(_body().get("kind", "folder")))
+
+
+@blueprint.route("/ide/upload", methods=["POST"])
+def r_upload():
+    """Files dropped on the explorer or picked with the page's file input.
+    Each part's filename is its path under the target folder (folders keep
+    their inner layout)."""
+    project = request.form.get("project", "")
+    base = (request.form.get("dir", "") or "").strip("/")
+    overwrite = request.form.get("overwrite") == "1"
+    project_root(project)
+    results = []
+    parts = request.files.getlist("files")
+    names = request.form.getlist("paths")
+    for i, part in enumerate(parts):
+        name = (names[i] if i < len(names) and names[i] else part.filename or "").replace("\\", "/").strip("/")
+        if not name:
+            continue
+        results.append(save_upload(project, f"{base}/{name}" if base else name, part.stream, overwrite))
+    if not results:
+        raise IDEError("No files arrived.")
+    return jsonify({"saved": [r["path"] for r in results if r["status"] == "saved"],
+                    "exists": [r["path"] for r in results if r["status"] == "exists"]})
+
+
+@blueprint.route("/ide/import", methods=["POST"])
+def r_import():
+    b = _body()
+    return jsonify(import_paths(b.get("project", ""), b.get("dir", ""), b.get("paths") or [],
+                                bool(b.get("overwrite"))))
+
+
 @blueprint.route("/ide/engines", methods=["GET"])
 def r_engines():
     return jsonify(engines())
@@ -1222,7 +1533,8 @@ def r_approve(mission_id):
 @blueprint.route("/ide/missions/<mission_id>/followup", methods=["POST"])
 def r_followup(mission_id):
     b = _body()
-    return jsonify(follow_up(mission_id, b.get("message", ""), b.get("context")))
+    return jsonify(follow_up(mission_id, b.get("message", ""), b.get("context"),
+                             engine=b.get("engine", ""), model=b.get("model", ""), mode=b.get("mode", "")))
 
 
 @blueprint.route("/ide/missions/<mission_id>/stop", methods=["POST"])

@@ -37,7 +37,7 @@ To go back to your old version at any time: `git checkout main`.
 | 6 | Suggestions: other ways to do each part of a plan | **Suggestions** button in the top nav |
 | 7 | Sections plan a whole project | Plan page, a finished pipeline's "make a section" button, then the section's dashboard |
 | 8 | Start a section from a folder | **IDE** page, "◆ Make a section from this folder" |
-| 9 | The in-app IDE (Workbench) | **IDE** button in the top nav |
+| 9 | The in-app IDE (Workbench): open any folder, chat, /ultra | **IDE** button in the top nav |
 | 10 | The coding agent can run on the Claude CLI | `.env` settings |
 
 The branch also carries earlier work that was already waiting on other branches and is not in `main` yet: the pipeline details and clarification window, the pipeline review fixes, the website inspector, the Antigravity CLI connection, your own "Logic Changes" and "Finished sections" commits, and your 6 September install script update from `main`.
@@ -139,16 +139,26 @@ The branch also carries earlier work that was already waiting on other branches 
 ## 9. The in-app IDE (Workbench)
 
 **What changed**
-- **New IDE page.** It has an **IDE** button in the nav on every page (`ide.html`, backend `ide.py`). It opens any project folder under `Let Jarvis Handle It/` and has three panes:
+- **New IDE page.** It has an **IDE** button in the nav on every page (`ide.html`, backend `ide.py`). It opens any project folder under `Let Jarvis Handle It/`, or any folder on your PC, and has three panes:
   - **Files** on the left. You can add a file or folder, and rename or delete anything.
   - **Code editor** in the middle, with tabs. `Ctrl+S` saves. If Jarvis or a CLI changed the file on disk since you opened it, saving asks you first instead of overwriting.
   - **Terminal** underneath, toggled with `Ctrl+backtick`. It runs in the project folder. It still refuses the hard-denylist commands from the Commands page.
-- **Missions** (the right-hand panel). Tell Jarvis what to build, fix or explain.
+- **Open a folder or file from your PC.** **Open…** next to the project dropdown has "Folder on this PC…" and "File on this PC…".
+  - It uses Windows' own Open dialog. If that isn't available (for example when the page is opened in a normal browser), a folder browser opens inside the page instead, where you can also paste a full path.
+  - The folder is worked on where it is. Nothing is copied, and saving writes straight to your files.
+  - Opening a file opens its folder, with that file in a tab.
+  - Opened folders appear in the dropdown under "Opened from this PC". The ✕ next to Open… takes one off the list and doesn't touch the files.
+- **Copy files in.** **⤓ import** at the top of the file list copies files or a whole folder from your PC into the open project. You can also drag files or folders from Explorer onto the file list; drop them on a folder to put them inside it. If something with the same name is already there, it asks before replacing it.
+- **A normal IDE by default, /ultra for Jarvis's agent mode.** The right-hand panel is now called **Jarvis**.
+  - **Chat (the default).** A message there is answered like a chat about your code. He reads the open file and your selection, and he never changes files or suggests commands. Chat always uses the model picked in **Model**.
+  - **/ultra.** Start a message with `/ultra` to have him do the work. Typing `/` offers it, and Tab fills it in. The box lights up, and the button reads **Run /ultra**. Then it works like the missions below, with the engine and Review or Autopilot picked on the **/ultra** row.
+  - You can `/ultra` in the middle of a chat, and he plans with everything said so far. After that, messages without `/ultra` get a chat answer again and don't touch a plan that's waiting for approval.
+- **Missions (after /ultra).** Tell Jarvis what to build, fix or explain.
   - **Review** mode: he shows what he understood and his plan first. You approve it, optionally with notes, and then accept or reject each change as a side-by-side diff.
   - **Autopilot**: he applies his changes, and each one can be reverted.
   - **Commands**: the ones he suggests are never run by him. Each has a "Run in terminal" button.
-  - **Other controls**: reply on the same mission to keep going, and use Stop while he's working. The **Missions** switch at the top makes this panel fill the whole screen.
-- **Who does the work** (the dropdown in the Missions panel):
+  - **Other controls**: reply on the same conversation to keep going, and use Stop while he's working. The **Jarvis** switch at the top makes this panel fill the whole screen.
+- **Who does the work on /ultra** (the dropdown on the /ultra row):
   - **Jarvis:** his own model, either a Gemini model or a local Ollama model, so the IDE works with no CLI connected.
   - **Antigravity CLI:** its edits arrive already applied, still with diffs and Revert.
   - **Claude:** the coding agent from section 10. It needs the Claude CLI or the SDK set up, and shows "not set up" otherwise.
@@ -159,19 +169,28 @@ The branch also carries earlier work that was already waiting on other branches 
 - **Offline:** the code editor loads from the internet (cdnjs). Without it, you get a plain text box and everything else still works.
 
 **How to test**
-1. Offline checks: `python scripts/test_ide.py` should give 61 passed. It spends no tokens.
+1. Offline checks: `python scripts/test_ide.py` should give 95 passed. It spends no tokens.
 2. Start Jarvis and click **IDE** in the nav. Pick a project from the dropdown at the top, or make one with ＋.
 3. Open a file, type something and press `Ctrl+S`. The dot on the tab goes away, and the file on disk changes.
-4. Pick the Jarvis engine and a model at the top of the Missions panel. Leave the mode on **Review**, and ask something like "add a function that adds two numbers and a test for it". Then:
+4. Click **Open…**, then **Folder on this PC…**, and pick any folder, for example a project on your Desktop. Then:
+   - Its files show on the left, and the dropdown lists it under "Opened from this PC".
+   - Edit a file and save. Check it changed in that folder in Explorer.
+   - Try **Open…**, then **File on this PC…** too.
+   - Press ✕ to take the folder off the list. The files stay where they are.
+5. Copy files in:
+   - Click **⤓ import**, then **Files from this PC…**, and pick a file. It's copied into the project.
+   - Drag a file or folder from Explorer onto a folder in the file list. It lands inside that folder.
+   - Import the same file again. It asks before replacing it.
+6. Chat: with a file open, ask "what does this file do?". He answers, shows code in code blocks, and changes nothing.
+7. /ultra: type `/`, press Tab, and finish the message with something like "add a function that adds two numbers and a test for it". Leave the /ultra mode on **Review**. Then:
    - You'll see what he understood and his plan. Click **Approve plan**.
    - Click a changed file to see the diff, then **Accept** it.
    - Click **Run in terminal** on the command he suggests.
    - Try **Revert** on one change.
-5. Switch to **Autopilot** and ask for another small change. It's applied straight away, and each change has **Revert**.
-6. Ask a question with no edits, such as "what does this file do?". He answers and changes nothing.
-7. In the terminal, run something long (`ping -t localhost` on Windows) and press **stop**.
-8. Click **◆ Make a section from this folder** and go through the window all the way to **Create section**. You land in the new section. Back in the IDE, the top of the file list now shows the section's name.
-9. If Antigravity (`agy`) is installed, choose "Antigravity CLI" as the engine and give it a small task. Its changes show as applied, with diffs.
+8. Switch to **Autopilot** and send another small change starting with `/ultra`. It's applied straight away, and each change has **Revert**.
+9. In the terminal, run something long (`ping -t localhost` on Windows) and press **stop**.
+10. Click **◆ Make a section from this folder** and go through the window all the way to **Create section**. You land in the new section. Back in the IDE, the top of the file list now shows the section's name.
+11. If Antigravity (`agy`) is installed, choose "Antigravity CLI" on the /ultra row and give it a small task with `/ultra`. Its changes show as applied, with diffs.
 
 ## 10. The coding agent can run on the Claude CLI
 
