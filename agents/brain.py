@@ -55,6 +55,7 @@ When given a task, output a JSON object with this exact structure:
       "service": "youtube_api",
       "purpose": "Upload final video to YouTube channel",
       "doc_url": "official developer website or documentation URL",
+      "key_url": "the page where a developer creates the API key (the dashboard page, not docs), or the sign-up page if an account comes first",
       "recommended_by": ["brand_strategist_cycle1_lead", "competitor_analyst_cycle1_adv_1"],
       "pros": ["Direct upload", "Metadata control", "Playlist management"],
       "cons": ["Requires OAuth setup", "Rate limited"],

@@ -1238,6 +1238,41 @@
             return html;
         }
 
+        // The "get your key" link on the Plugging Gate. r.key_page comes from the
+        // server; when an older plan has none, the link asks /api/key-page after render.
+        function keyPageLinkHtml(r) {
+            const kp = r.key_page;
+            const style = "color: #06b6d4; text-decoration: underline; font-weight: 500; display: inline-block; margin-top: 4px;";
+            if (!kp) {
+                const hints = [r.key_url, r.doc_url, r.website_url].filter(Boolean).map(h => htmlAttrEscape(h)).join(' ');
+                return `<br><a class="key-page-link" data-service="${htmlAttrEscape(r.service)}" data-hints="${hints}" target="_blank" style="${style}; opacity: 0.6;">Finding where to get the key…</a>`;
+            }
+            if (kp.kind === 'none') return `<br><span style="color: var(--text-muted); font-size: 11px;">No API key needed.</span>`;
+            if (!kp.url) return `<br><span style="color: var(--text-muted); font-size: 11px;">${htmlAttrEscape(kp.note || "Jarvis could not find where to get this key.")}</span>`;
+            const signup = kp.signup_url && kp.signup_url !== kp.url
+                ? ` <a href="${htmlAttrEscape(kp.signup_url)}" target="_blank" style="${style}; margin-left: 10px; color: #94a3b8;">No account yet? Sign up ↗</a>` : "";
+            const warn = kp.confirmed ? "" : `<br><span style="color: #fcd34d; font-size: 10px;">${htmlAttrEscape(kp.note || "Not confirmed as the key page.")}</span>`;
+            return `<br><a href="${htmlAttrEscape(kp.url)}" target="_blank" style="${style}">${htmlAttrEscape(kp.label || "Create your API key")} ↗</a>${signup}${warn}`;
+        }
+
+        const keyPageCache = {};   // service -> answer, so a repaint doesn't ask again
+        async function fillKeyPageLinks(root) {
+            const links = (root || document).querySelectorAll('a.key-page-link[data-service]');
+            for (const a of links) {
+                const params = new URLSearchParams({ service: a.dataset.service });
+                (a.dataset.hints || "").split(' ').filter(Boolean).forEach(h => params.append('hint', h));
+                try {
+                    const kp = keyPageCache[a.dataset.service]
+                        || (keyPageCache[a.dataset.service] = await (await fetch('/api/key-page?' + params.toString())).json());
+                    const holder = document.createElement('span');
+                    holder.innerHTML = keyPageLinkHtml({ key_page: kp });
+                    a.replaceWith(holder);
+                } catch (e) {
+                    a.textContent = "Could not look up where to get the key";
+                }
+            }
+        }
+
         function htmlAttrEscape(s) {
             return String(s)
                 .replace(/&/g, '&amp;')
@@ -2556,48 +2591,10 @@
                             // Check live status from r.current_status or registry if available
                             const isUp = r.current_status === 'up' || r.configured === true;
 
-                            // Map common services to credentials/setup URL (prioritizing AI-generated doc_url)
-                            let url = r.doc_url || r.website_url || r.url || "";
-                            if (!url) {
-                                const sLower = r.service.toLowerCase();
-                                if (sLower.includes("arxiv")) url = "https://arxiv.org/help/api/index";
-                                else if (sLower.includes("stripe")) url = "https://dashboard.stripe.com/apikeys";
-                                else if (sLower.includes("google_docs") || sLower.includes("google-docs") || sLower.includes("docs")) url = "https://console.cloud.google.com/apis/credentials";
-                                else if (sLower.includes("google_drive") || sLower.includes("google-drive") || sLower.includes("drive")) url = "https://console.cloud.google.com/apis/credentials";
-                                else if (sLower.includes("google_maps") || sLower.includes("google-maps")) url = "https://console.cloud.google.com/google/maps-apis/credentials";
-                                else if (sLower.includes("google_search") || sLower.includes("google-search")) url = "https://developers.google.com/custom-search/v1/overview";
-                                else if (sLower.includes("youtube")) url = "https://console.cloud.google.com/apis/credentials";
-                                else if (sLower.includes("aws") || sLower.includes("amazon web services")) url = "https://console.aws.amazon.com/";
-                                else if (sLower.includes("github")) url = "https://github.com/settings/tokens";
-                                else if (sLower.includes("paypal")) url = "https://developer.paypal.com/dashboard/applications/sandbox";
-                                else if (sLower.includes("supadata")) url = "https://supadata.ai/";
-                                else if (sLower.includes("notion")) url = "https://www.notion.so/my-integrations";
-                                else if (sLower.includes("slack")) url = "https://api.slack.com/apps";
-                                else if (sLower.includes("discord")) url = "https://discord.com/developers/applications";
-                                else if (sLower.includes("huggingface")) url = "https://huggingface.co/settings/tokens";
-                                else if (sLower.includes("replicate")) url = "https://replicate.com/account/api-tokens";
-                                else if (sLower.includes("cohere")) url = "https://dashboard.cohere.com/api-keys";
-                                else if (sLower.includes("elevenlabs")) url = "https://elevenlabs.io/app/settings/api-keys";
-                                else if (sLower.includes("kafka")) url = "https://kafka.apache.org/";
-                                else if (sLower.includes("apache")) url = "https://apache.org/";
-                                else if (sLower.includes("redis")) url = "https://redis.io/";
-                                else if (sLower.includes("postgres")) url = "https://www.postgresql.org/";
-                                else if (sLower.includes("mysql")) url = "https://www.mysql.com/";
-                                else if (sLower.includes("mongodb") || sLower.includes("mongo")) url = "https://www.mongodb.com/";
-                                else if (sLower.includes("docker")) url = "https://www.docker.com/";
-                                else if (sLower.includes("kubernetes") || sLower.includes("k8s")) url = "https://kubernetes.io/";
-                                else if (sLower.includes("react")) url = "https://react.dev/";
-                                else if (sLower.includes("next.js") || sLower.includes("nextjs")) url = "https://nextjs.org/";
-                                else if (sLower.includes("tailwind")) url = "https://tailwindcss.com/";
-                                else if (sLower.includes("typescript")) url = "https://www.typescriptlang.org/";
-                                else if (sLower.includes("styled-components") || sLower.includes("styled_components")) url = "https://styled-components.com/";
-                                else if (sLower.includes("sqlite")) url = "https://sqlite.org/";
-                                else if (sLower.includes("openai")) url = "https://platform.openai.com/api-keys";
-                                else if (sLower.includes("anthropic") || sLower.includes("claude")) url = "https://console.anthropic.com/";
-                                else if (sLower.includes("gemini") || sLower.includes("google-ai")) url = "https://aistudio.google.com/";
-                            }
-
-                            const urlHtml = url ? `<br><a href="${url}" target="_blank" style="color: #06b6d4; text-decoration: underline; font-weight: 500; display: inline-block; margin-top: 4px;">Get API key / Credentials ↗</a>` : "";
+                            // Where to get the key: the page that creates it, found and checked by
+                            // connectors/key_pages.py, never the research's documentation link.
+                            // Plans from before key_page existed fill the link in after rendering.
+                            const urlHtml = isUp ? "" : keyPageLinkHtml(r);
 
                             // Brain's free-text tool descriptions (purpose/pros/cons/etc.) routinely
                             // contain apostrophes ("Google's API", "won't work without...") — the
@@ -2700,6 +2697,7 @@
                 });
             }
             content.innerHTML = html || '<div style="padding:16px; text-align:center; font-size:12px; color:var(--text-muted);">No detailed items to select. Press approve or reject directly.</div>';
+            fillKeyPageLinks(content);
         }
 
         function toggleRejectionFeedback() {

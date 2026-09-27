@@ -261,6 +261,7 @@ Output format:
       "service": "youtube_api",
       "purpose": "why it is needed",
       "doc_url": "official developer website or documentation URL",
+      "key_url": "the page where a developer creates the API key (the dashboard page, not docs), or the sign-up page if an account comes first",
       "pros": ["pro1", "pro2"],
       "cons": ["con1", "con2"],
       "why": "specific reason",

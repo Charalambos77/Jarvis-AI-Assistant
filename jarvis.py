@@ -5933,6 +5933,16 @@ def _observe_api_later(service_name: str) -> None:
     threading.Thread(target=_run, name=f"api-observe-{service}", daemon=True).start()
 
 
+@app.route("/api/key-page", methods=["GET"])
+def key_page_route():
+    """Where to get a service's API key: the page that creates it, or the sign-up page."""
+    from connectors import key_pages
+    service = (request.args.get("service") or "").strip()
+    if not service:
+        return jsonify({"error": "service is required"}), 400
+    return jsonify(key_pages.key_page(service, hints=request.args.getlist("hint")))
+
+
 @app.route("/control/api_spec", methods=["POST"])
 def control_api_spec():
     """Save where a connected API's spec lives, and read its tools from there."""

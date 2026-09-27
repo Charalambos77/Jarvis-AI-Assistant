@@ -670,7 +670,27 @@ function openConnect(service, auth) {
            <input type="text" id="cf-secret" placeholder="OAuth Client Secret">`
         : `<input type="text" id="cf-key" placeholder="${esc(service)} API key">`) +
         `<button class="btn go" onclick="submitConnect('${esc(service)}','${esc(auth)}', this)">Connect</button>
-         <button class="btn" onclick="closeConnect()">Cancel</button>`;
+         <button class="btn" onclick="closeConnect()">Cancel</button>
+         <span id="cf-keypage" class="note" style="margin:0;flex-basis:100%">Finding where to get the key…</span>`;
+    showKeyPage(service);
+}
+
+// The page that creates this service's key (or signs you up first), checked by
+// connectors/key_pages.py, so the link never lands on documentation.
+async function showKeyPage(service) {
+    const slot = () => document.getElementById('cf-keypage');
+    try {
+        const kp = await fetch('/api/key-page?' + new URLSearchParams({ service })).then(x => x.json());
+        if (!slot()) return;
+        if (kp.kind === 'none') { slot().textContent = "No API key needed."; return; }
+        if (!kp.url) { slot().textContent = kp.note || "Jarvis could not find where to get this key."; return; }
+        const signup = kp.signup_url && kp.signup_url !== kp.url
+            ? ` · <a href="${esc(kp.signup_url)}" target="_blank" rel="noopener" style="color:inherit">No account yet? Sign up ↗</a>` : "";
+        const warn = kp.confirmed ? "" : ` <span style="color:var(--warn)">${esc(kp.note || "Not confirmed as the key page.")}</span>`;
+        slot().innerHTML = `<a href="${esc(kp.url)}" target="_blank" rel="noopener" style="color:var(--go)">${esc(kp.label || "Create your API key")} ↗</a>${signup}${warn}`;
+    } catch (e) {
+        if (slot()) slot().textContent = "";
+    }
 }
 
 function openSpec(service) {

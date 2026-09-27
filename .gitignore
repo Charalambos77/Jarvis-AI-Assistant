@@ -35,6 +35,8 @@ data/tts_cache/
 # Tool catalogue and spending: this machine's decisions, not source
 data/tool_catalog.json
 data/tool_catalog.json.tmp
+data/key_pages.json
+data/key_pages.json.tmp
 data/spending.json
 
 # The Workbench (ide.html) keeps its missions here; they belong to this PC.

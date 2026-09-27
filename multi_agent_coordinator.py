@@ -533,6 +533,22 @@ async def identify_rejected_agents(redirect_note: str, agent_plan: dict) -> list
         return [a.get("agent_id") for a in agent_plan.get("execution_agents", [])]
 
 
+async def attach_key_pages(tool_recs: list) -> None:
+    """Give every API the user still has to connect a `key_page` (see connectors/key_pages.py)."""
+    from connectors import key_pages
+
+    def _one(rec):
+        try:
+            rec["key_page"] = key_pages.key_page(
+                rec.get("service", ""), hints=[rec.get("key_url"), rec.get("doc_url"), rec.get("website_url")])
+        except Exception as e:
+            print(f"[Pipeline] Could not find where to get {rec.get('service')}'s key: {e}")
+
+    todo = [r for r in tool_recs if r.get("kind") != "mcp" and not r.get("configured")]
+    if todo:
+        await asyncio.gather(*(asyncio.to_thread(_one, r) for r in todo))
+
+
 REVIEW_POLL_SECONDS = 2.0
 
 
@@ -1729,6 +1745,10 @@ async def run_full_pipeline(
                     "required_by_agents": required_tools["requested_by"].get(canonical, []),
                 })
                 tool_recs.append(meta)
+
+            # Where to get each missing key: the page that creates it, checked, not
+            # the docs link the research wrote. Looked up side by side, off the loop.
+            await attach_key_pages(tool_recs)
 
             if required_tools["not_a_service"]:
                 print(f"[Pipeline] Not asking about non-connectable requests: {required_tools['not_a_service']}")

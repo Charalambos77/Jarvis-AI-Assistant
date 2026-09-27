@@ -54,6 +54,7 @@ The branch also carries earlier work that was already waiting on other branches 
 - **Spending limits** per service and per pipeline. A money call over the limit is held even if the tool is on "always allow".
 - When Jarvis starts, he checks every connected service again. Only new or changed tools go up for review.
 - After the Plugging Gate, a pipeline waits while a service it needs still has tools being researched or reviewed, and says so in its log.
+- The "get your key" link in the Plugging Gate and in the Control room's Connect form now opens the page that creates the key (or the sign-up page when you need an account first), not the docs. 51 common providers come from a checked list. For any other service Jarvis tries likely key pages and a web search, rejects docs, reference and pricing pages, and remembers the answer. When he can't confirm a page, the link says "Find your API key" and opens the service's own site with a warning.
 
 **How to test**
 1. Open the **Control room**. You should see sections for waiting calls, new risky tools, tools to review, spending limits, rules and connected services.
@@ -62,6 +63,7 @@ The branch also carries earlier work that was already waiting on other branches 
 4. Connect an API (for example YouTube). Jarvis finds its description and it gets tools. For a service with no description, paste its spec link and check the tools appear.
 5. Set a spending limit on a service, then run a pipeline that would use a paid tool. The call should wait in "waiting calls". Try **Deny** and check the agent says the action did not happen.
 6. Close and reopen Jarvis. Your decisions should still be there.
+7. In the Control room press **Connect** on a service that needs a key (for example YouTube or OpenAI). Under the key box, **Create your API key** should open the page where you make the key, and **Sign up** the account page. Do the same from a pipeline's Plugging Gate.
 
 ## 4. Pause, resume and stop a pipeline
 
@@ -222,7 +224,7 @@ for %f in (scripts\test_*.py) do venv\Scripts\python %f
 
 Each script ends with "All ... checks passed" when it passes.
 
-Before pushing, all 35 test scripts passed on Linux with Python 3.12 (the desktop-only modules stood in, `GEMINI_API_KEY=fake`, `mcp<2`, Playwright 1.62). Every page (Control room, Suggestions, IDE, Plan, Library, Section) also loaded in the merged app.
+Before pushing, all 36 test scripts passed on Linux with Python 3.12 (the desktop-only modules stood in, `GEMINI_API_KEY=fake`, `mcp<2`, Playwright 1.62). Every page (Control room, Suggestions, IDE, Plan, Library, Section) also loaded in the merged app.
 
 Fixes made while merging, so you know they're there:
 - A coding agent's built folder shows up as a clickable result again.
@@ -235,5 +237,6 @@ Fixes made while merging, so you know they're there:
 - The desktop-only parts (voice, microphone, the PyWebView window) were stood in for during the tests, so they were not exercised.
 - Held money and destructive calls are kept in memory. If you close Jarvis while one is waiting, the agent that made it has stopped anyway, and the call is gone.
 - Semantic Scholar and Supadata have no known description address yet, so they rely on a web search or a link you paste in the Control room.
+- The key page links could not be opened from where they were built (no web access there). They come from each provider's own docs and search results. Click each one you use once while logged in. These 11 are the least certain: Google Docs/Drive OAuth client, Supadata, Mistral, Perplexity, Pexels, AssemblyAI, Deepgram, Pinecone, X/Twitter, Shopify, HubSpot. If one is wrong, the fix is one line in `connectors/key_pages.py`.
 - The Suggestions page and a section's plan parts are separate for now: swapping an idea on the Suggestions page doesn't change a section's plan.
 - If something breaks, tell Claude in the project what you did and what you saw, and `git checkout main` takes you back.
