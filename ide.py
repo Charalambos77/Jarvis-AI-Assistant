@@ -70,6 +70,12 @@ MAX_MISSIONS = 200
 SNAPSHOT_TEXT_LIMIT = 300_000       # per file, when watching a CLI engine work
 
 GEMINI_MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"]
+CLAUDE_MODELS = [
+    {"id": "", "label": "Claude's default"},
+    {"id": "opus", "label": "Claude Opus"},
+    {"id": "sonnet", "label": "Claude Sonnet"},
+    {"id": "haiku", "label": "Claude Haiku"},
+]
 
 _LOCK = threading.RLock()
 _MISSIONS: dict[str, dict] = {}
@@ -539,6 +545,18 @@ def engines(refresh: bool = False) -> dict:
         "reason": "" if claude_ok else why,
         "detail": "Claude's coding agent, working in the project's Deliverables folder.",
     })
+    # Each engine has its own model menu: Jarvis uses Gemini or a local AI,
+    # Claude uses a Claude model, and Antigravity picks its own model.
+    claude_model = s.get("ide_claude_model") or ""
+    if claude_model not in {m["id"] for m in CLAUDE_MODELS}:
+        claude_model = ""
+    for e in out:
+        if e["id"] == "jarvis":
+            e["models"], e["model"] = models, default_model
+        elif e["id"] == "claude":
+            e["models"], e["model"] = CLAUDE_MODELS, claude_model
+        else:
+            e["models"], e["model"] = [{"id": "", "label": "Set in Antigravity"}], ""
     engine = s.get("ide_engine") or "jarvis"
     if not any(e["id"] == engine and e["available"] for e in out):
         engine = next((e["id"] for e in out if e["available"]), "jarvis")
@@ -548,7 +566,9 @@ def engines(refresh: bool = False) -> dict:
 def remember_choice(engine: str | None, model: str | None) -> None:
     if engine:
         _save_setting("ide_engine", engine)
-    if model:
+    if engine == "claude" and model is not None:
+        _save_setting("ide_claude_model", model)
+    elif model and engine in (None, "", "jarvis"):
         _save_setting("ide_model", model)
 
 
@@ -1028,7 +1048,8 @@ def _cli_round(m: dict) -> None:
         ca = _code_agent()
         if not ca:
             raise IDEError("The Claude coding agent is not in this version of Jarvis.")
-        result = ca.run_coding_task(m["project"], "ide", task)
+        kw = {"model": m["claude_model"]} if m.get("claude_model") else {}
+        result = ca.run_coding_task(m["project"], "ide", task, **kw)
     _diff_snapshots(m, before, _snapshot(root))
     text = (result.get("output") or result.get("summary") or result.get("error")
             or "Finished.")
@@ -1081,10 +1102,14 @@ def _go_ultra(m: dict, engine: str, model: str, mode: str) -> None:
         mode = "review"
     if engine == "jarvis" and not model:
         model = m.get("model") or engines()["model"]
+    if engine == "claude" and model not in {c["id"] for c in CLAUDE_MODELS}:
+        model = ""
     m["kind"], m["engine"], m["mode"] = "ultra", engine, mode
     if engine == "jarvis":
         m["model"] = model
-    remember_choice(engine, model if engine == "jarvis" else None)
+    elif engine == "claude":
+        m["claude_model"] = model
+    remember_choice(engine, model if engine in ("jarvis", "claude") else None)
 
 
 def start_mission(project: str, prompt: str, engine: str = "jarvis", model: str = "",
@@ -1138,6 +1163,14 @@ def follow_up(mission_id: str, message: str, context: dict | None = None,
         raise IDEError("Say what you want next.")
     if m.get("kind") == "chat":
         _go_ultra(m, engine or "jarvis", model, mode or "review")
+    elif engine and engine == m.get("engine"):
+        # The model menu may have changed since the last round; use what it shows.
+        if engine == "jarvis" and model:
+            m["model"] = model
+            remember_choice(engine, model)
+        elif engine == "claude" and model in {c["id"] for c in CLAUDE_MODELS}:
+            m["claude_model"] = model
+            remember_choice(engine, model)
     m["conversation"].append({"role": "owner", "text": message})
     if context is not None:
         m["context"] = {k: v for k, v in context.items() if k in ("open_file", "selection") and v}

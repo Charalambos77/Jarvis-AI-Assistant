@@ -287,13 +287,29 @@ try:
 
         @staticmethod
         def run_coding_task(project, agent_id, task, **kw):
+            FakeAgent.kw = kw
             with open(os.path.join(ROOT, "built.py"), "w", encoding="utf-8") as f:
                 f.write("print('built')\n")
             return {"status": "ok", "summary": "Built it.", "files_changed": ["built.py"]}
 
     ide._code_agent = lambda: FakeAgent
     check("claude engine available when the module is", {e["id"]: e for e in ide.engines()["engines"]}["claude"]["available"])
-    c = ide.start_mission(PROJECT, "build it", engine="claude", background=False)
+    by_id = {e["id"]: e for e in ide.engines()["engines"]}
+    check("each engine has its own model menu",
+          [m["id"] for m in by_id["claude"]["models"]] == ["", "opus", "sonnet", "haiku"]
+          and by_id["jarvis"]["models"] == ide.engines()["models"]
+          and by_id["antigravity"]["models"] == [{"id": "", "label": "Set in Antigravity"}])
+    c = ide.start_mission(PROJECT, "build it", engine="claude", model="sonnet", background=False)
+    check("the Claude model picked in the menu reaches the coding agent", FakeAgent.kw.get("model") == "sonnet")
+    check("the Claude pick is remembered for the Claude engine only",
+          ide._settings().get("ide_claude_model") == "sonnet"
+          and {e["id"]: e for e in ide.engines()["engines"]}["claude"]["model"] == "sonnet")
+    ide.follow_up(c["id"], "use opus now", engine="claude", model="opus", background=False)
+    check("a follow-up uses the model the menu shows now", FakeAgent.kw.get("model") == "opus")
+    ide.start_mission(PROJECT, "a default one", engine="claude", model="", background=False)
+    check("Claude's default passes no model", "model" not in FakeAgent.kw)
+    ide.start_mission(PROJECT, "a Gemini id", engine="claude", model="gemini:gemini-2.5-pro", background=False)
+    check("a Jarvis model sent with Claude is not passed to Claude", "model" not in FakeAgent.kw)
     c = ide.get_mission(c["id"])
     check("CLI engine changes show as applied diffs",
           c["status"] == "done" and [x["path"] for x in c["changes"]] == ["built.py"] and c["changes"][0]["status"] == "applied",

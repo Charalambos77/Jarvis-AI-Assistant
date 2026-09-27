@@ -589,6 +589,7 @@
         active: null,
         engine: "jarvis",
         model: "",
+        pick: {},            // engine id -> model picked for it
         mode: "review",
         engines: [],
         missions: [],
@@ -1323,20 +1324,41 @@
     function loadEngines() {
         return api("GET", "/ide/engines").then(function (data) {
             S.engines = data.engines || [];
-            S.engine = data.engine; S.model = data.model;
+            S.engine = data.engine;
+            // Each engine has its own model menu and remembers its own pick.
+            S.pick = {};
+            S.engines.forEach(function (e) { S.pick[e.id] = e.model || ""; });
+            S.pick.jarvis = data.model || S.pick.jarvis || "";
             $("engineSelect").innerHTML = S.engines.map(function (e) {
                 return '<option value="' + e.id + '"' + (e.available ? "" : " disabled") + ">" +
                     esc(e.label) + (e.available ? "" : " (not set up)") + "</option>";
             }).join("");
             $("engineSelect").value = S.engine;
-            $("modelSelect").innerHTML = (data.models || []).map(function (m) {
-                return '<option value="' + esc(m.id) + '">' + esc(m.label) + "</option>";
-            }).join("") || '<option value="">No model found</option>';
-            $("modelSelect").value = S.model;
+            renderModels();
             var mode = recall("mode");
             if (mode) setMode(mode);
             renderEngineNote();
         }).catch(function (e) { toast(e.message, true); });
+    }
+
+    function engineModels(id) {
+        var e = S.engines.find(function (x) { return x.id === id; }) || {};
+        return e.models || [];
+    }
+
+    function renderModels() {
+        var models = engineModels(S.engine);
+        var sel = $("modelSelect");
+        sel.innerHTML = models.map(function (m) {
+            return '<option value="' + esc(m.id) + '">' + esc(m.label) + "</option>";
+        }).join("") || '<option value="">No model found</option>';
+        var want = S.pick[S.engine] || "";
+        S.model = models.some(function (m) { return m.id === want; }) ? want : (models[0] ? models[0].id : "");
+        sel.value = S.model;
+        // Antigravity chooses its model itself; there is nothing to pick.
+        sel.disabled = S.engine === "antigravity";
+        sel.title = S.engine === "claude" ? "Claude's model" : S.engine === "antigravity"
+            ? "Antigravity uses the model set in Antigravity" : "Jarvis's model";
     }
 
     function renderEngineNote() {
@@ -1353,32 +1375,26 @@
         updateComposer();
     }
 
-    $("engineSelect").addEventListener("change", function () { S.engine = this.value; renderEngineNote(); });
-    $("modelSelect").addEventListener("change", function () { S.model = this.value; });
+    $("engineSelect").addEventListener("change", function () { S.engine = this.value; renderModels(); renderEngineNote(); });
+    $("modelSelect").addEventListener("change", function () { S.model = this.value; S.pick[S.engine] = this.value; });
 
     // Local AI apps (Ollama, LM Studio, ...) are found on their own. Look again
     // when the model menu is about to open or Jarvis's window comes back, so a
     // model downloaded meanwhile is in the list without reloading the page.
     var lastModelCheck = 0;
     function refreshModels() {
-        if (Date.now() - lastModelCheck < 5000) return;
+        if (S.engine !== "jarvis" || Date.now() - lastModelCheck < 5000) return;
         lastModelCheck = Date.now();
         api("GET", "/ide/engines?refresh=1").then(function (data) {
+            var before = engineModels("jarvis").map(function (m) { return m.id; });
             var models = data.models || [];
-            var sel = $("modelSelect");
-            var before = Array.prototype.map.call(sel.options, function (o) { return o.value; }).join("|");
-            var after = models.map(function (m) { return m.id; }).join("|");
-            if (before === after) return;
-            var keep = S.model;
-            var added = models.filter(function (m) { return before.split("|").indexOf(m.id) === -1; });
-            sel.innerHTML = models.map(function (m) {
-                return '<option value="' + esc(m.id) + '">' + esc(m.label) + "</option>";
-            }).join("") || '<option value="">No model found</option>';
-            S.model = models.some(function (m) { return m.id === keep; }) ? keep : data.model;
-            sel.value = S.model;
+            if (before.join("|") === models.map(function (m) { return m.id; }).join("|")) return;
+            var added = models.filter(function (m) { return before.indexOf(m.id) === -1; });
             S.engines = data.engines || S.engines;
+            if (!models.some(function (m) { return m.id === S.pick.jarvis; })) S.pick.jarvis = data.model;
+            if (S.engine === "jarvis") renderModels();
             renderEngineNote();
-            if (added.length && before) toast("New model" + (added.length > 1 ? "s" : "") + " found: " +
+            if (added.length && before.length) toast("New model" + (added.length > 1 ? "s" : "") + " found: " +
                 added.slice(0, 3).map(function (m) { return m.label; }).join(", "));
         }).catch(function () {});
     }

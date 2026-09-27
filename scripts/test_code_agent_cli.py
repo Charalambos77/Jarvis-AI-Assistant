@@ -149,6 +149,12 @@ check("the whole multi-line task arrives on stdin, not argv",
 check("along with the coding agent's instructions",
       "coding agent for the Jarvis" in call["stdin"])
 
+check("no model flag unless one is picked", "--model" not in argv)
+code_agent.run_coding_task(PROJECT, "exec_1", "with a model", model="sonnet")
+with open(LOG) as f:
+    argv = json.load(f)["argv"]
+check("the model picked in the IDE is passed to the CLI", argv[argv.index("--model") + 1] == "sonnet")
+
 events = []
 code_agent.run_coding_task(PROJECT, "exec_1", "again", event_logger=events.append)
 check("progress narratives name the backend",

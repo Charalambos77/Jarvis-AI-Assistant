@@ -250,7 +250,8 @@ def _extract_text(message) -> str:
     return ""
 
 
-async def _run_query(task: str, workspace: str, event_logger, agent_id: str) -> str:
+async def _run_query(task: str, workspace: str, event_logger, agent_id: str,
+                     model: str | None = None) -> str:
     from claude_agent_sdk import query, ClaudeAgentOptions
 
     option_kwargs = dict(
@@ -259,8 +260,8 @@ async def _run_query(task: str, workspace: str, event_logger, agent_id: str) -> 
         allowed_tools=list(_TOOLS),
         permission_mode="acceptEdits",
     )
-    if CODE_AGENT_MODEL:
-        option_kwargs["model"] = CODE_AGENT_MODEL
+    if model or CODE_AGENT_MODEL:
+        option_kwargs["model"] = model or CODE_AGENT_MODEL
 
     options = ClaudeAgentOptions(**option_kwargs)
 
@@ -286,7 +287,7 @@ async def _run_query(task: str, workspace: str, event_logger, agent_id: str) -> 
     return "\n".join(transcript).strip()
 
 
-def _run_cli(task: str, workspace: str, timeout: int) -> str:
+def _run_cli(task: str, workspace: str, timeout: int, model: str | None = None) -> str:
     """
     Run the task through `claude -p` in the workspace and return its final text.
 
@@ -310,8 +311,8 @@ def _run_cli(task: str, workspace: str, timeout: int) -> str:
         "--permission-mode", "acceptEdits",
         "--output-format", "json",
     ]
-    if CODE_AGENT_MODEL:
-        cmd += ["--model", CODE_AGENT_MODEL]
+    if model or CODE_AGENT_MODEL:
+        cmd += ["--model", model or CODE_AGENT_MODEL]
 
     proc = subprocess.run(
         cmd,
@@ -357,9 +358,13 @@ def run_coding_task(
     subdirectory: str | None = None,
     event_logger=None,
     timeout: int | None = None,
+    model: str | None = None,
 ) -> dict:
     """
     Run one coding task to completion and report what changed on disk.
+
+    `model` (e.g. "opus", "sonnet", "haiku") overrides JARVIS_CODE_AGENT_MODEL
+    for this task; the IDE passes the model picked in its menu.
 
     Synchronous by design: execution_agent.py calls its tools synchronously from
     inside an already-running event loop, so the SDK's async work happens on a
@@ -400,14 +405,14 @@ def run_coding_task(
     def _worker() -> str:
         return asyncio.run(
             asyncio.wait_for(
-                _run_query(task, workspace, event_logger, agent_id),
+                _run_query(task, workspace, event_logger, agent_id, model),
                 timeout=limit,
             )
         )
 
     try:
         if backend == "cli":
-            summary = _run_cli(task, workspace, limit)
+            summary = _run_cli(task, workspace, limit, model)
         else:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 summary = pool.submit(_worker).result()

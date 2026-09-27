@@ -222,6 +222,7 @@ The branch also carries earlier work that was already waiting on other branches 
   - The IDE's model menu lists every local model next to Gemini, labelled with the app it comes from. It refreshes when you click the menu, and pops up "New model found" when something new appeared.
   - **Settings** now says "Local AI on this PC" instead of "Ollama (Local)", and has a **Local model** menu plus a list of the apps Jarvis found. "Automatic" uses your Ollama model first, then any running local AI.
   - The voice/chat assistant uses that local model. If Ollama isn't there but LM Studio is running, he uses LM Studio. If there's no local AI at all and you have a Gemini key, he uses Gemini instead of failing.
+- **The IDE's Model menu follows the Engine menu.** With **Jarvis** it lists Gemini and your local models. With **Claude** it lists Claude's default, Opus, Sonnet and Haiku, and the one you pick is what the Claude coding agent runs on (before, the menu still showed Jarvis's models and Claude ignored them). With **Antigravity** it's greyed out, because Antigravity uses the model set in Antigravity. Each engine remembers its own pick, and a follow-up message uses whatever the menu shows at that moment.
 - A server on another address can be added in `settings.json`: `"local_ai_servers": [{"name": "My box", "url": "http://192.168.1.5:8080/v1"}]`.
 
 **How to test**
@@ -231,7 +232,8 @@ The branch also carries earlier work that was already waiting on other branches 
 4. Pick the LM Studio model in the IDE and send a message. The answer comes from LM Studio (its Developer tab shows the request).
 5. Quit Ollama (tray icon, Quit), then pick an Ollama model in the IDE and send a message. Jarvis starts Ollama and answers.
 6. Open **Settings** (gear). Under **Local model** you see every model found, and under it each app with "running" or "installed". Pick one, **Save**, set the provider to "Local AI on this PC" and talk to Jarvis.
-7. Offline check: `python scripts/test_local_ai.py` (uses fake servers, no real AI needed).
+7. In the IDE, switch the Engine to **Claude**. The Model menu changes to the Claude models. Pick **Claude Sonnet**, send a small task and it runs on Sonnet. Switch back to **Jarvis** and your Jarvis model is still selected.
+8. Offline check: `python scripts/test_local_ai.py` (uses fake servers, no real AI needed).
 
 ## 12. Run the automatic checks
 
