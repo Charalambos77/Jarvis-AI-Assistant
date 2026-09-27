@@ -12,8 +12,8 @@
          * instead of a separate agent manager: files on the left, the editor
          * in the middle, Jarvis's deck on the right, a terminal dock
          * underneath. "Jarvis" focus turns the deck into the whole screen.
-         * The deck is a plain chat about the code unless a message starts
-         * with /ultra; only then does Jarvis plan and make changes.
+         * Every message there is a mission: Jarvis plans, then proposes
+         * the changes ("/ultra ..." is accepted and means the same).
          */
         :root {
             --bg: #05070A;
@@ -356,22 +356,10 @@
 
         .explorer .pane-title { gap: 2px; }
         .explorer .pane-title .icon-btn { white-space: nowrap; padding-left: 5px; padding-right: 5px; }
-        .composer.ultra textarea { border-color: rgba(56,189,248,0.55); box-shadow: 0 0 0 1px rgba(56,189,248,0.18), 0 0 18px rgba(56,189,248,0.12); }
-        .composer.ultra .hint { color: var(--arc); }
         .composer { position: relative; }
-        .slash {
-            position: absolute; left: 12px; right: 12px; bottom: calc(100% - 4px); display: none;
-            background: #0B1017; border: 1px solid rgba(56,189,248,0.35); border-radius: 9px; padding: 4px; z-index: 5;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
-        .slash.show { display: block; }
-        .slash div { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--muted); }
-        .slash div b { color: var(--arc); font-family: var(--mono); margin-right: 8px; }
-        .slash div:hover, .slash div.on { background: var(--arc-soft); color: #FFF; }
         .ctl-row { display: flex; gap: 8px; align-items: center; flex-basis: 100%; }
         .ctl-row select { flex: 1 1 120px; min-width: 0; }
         .ctl-label { font-size: 9.5px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); width: 44px; flex: 0 0 auto; }
-        .ctl-label.ultra { color: var(--arc); font-family: var(--mono); letter-spacing: 0; text-transform: none; font-size: 11px; }
         .bubble pre {
             font-family: var(--mono); font-size: 11.5px; background: rgba(0,0,0,0.45); border: 1px solid var(--line);
             border-radius: 7px; padding: 9px 11px; margin: 8px 0; overflow-x: auto; white-space: pre; color: #E5EDF5;
@@ -509,7 +497,7 @@
                         <h2>Work with Jarvis</h2>
                         Open a file on the left, or use <b>Open…</b> at the top for any folder on this PC.
                         Drag files onto the file list to copy them in. Ask Jarvis about the code on the right;
-                        start a message with <b>/ultra</b> when you want him to plan and make the changes.<br><br>
+                        he writes down what he understood and his plan, then proposes the changes.<br><br>
                         <kbd>Ctrl</kbd> <kbd>S</kbd> save &nbsp; <kbd>Ctrl</kbd> <kbd>I</kbd> ask about the selection
                         &nbsp; <kbd>Ctrl</kbd> <kbd>`</kbd> terminal
                     </div>
@@ -539,11 +527,11 @@
             <div class="deck-controls">
                 <div class="ctl-row">
                     <span class="ctl-label">Model</span>
-                    <select id="modelSelect" title="Jarvis's model, for chat and for /ultra with Jarvis"></select>
+                    <select id="modelSelect" title="Jarvis's model"></select>
                 </div>
-                <div class="ctl-row" title="Only used when a message starts with /ultra">
-                    <span class="ctl-label ultra">/ultra</span>
-                    <select id="engineSelect" title="Who does the work on /ultra"></select>
+                <div class="ctl-row">
+                    <span class="ctl-label">Engine</span>
+                    <select id="engineSelect" title="Who does the work"></select>
                     <div class="mode" id="modeSwitch" title="Review: approve the plan and each change. Autopilot: Jarvis applies his changes; you can still revert them.">
                         <button data-mode="review" class="on">Review</button>
                         <button data-mode="autopilot">Autopilot</button>
@@ -555,13 +543,12 @@
                 <div class="mission-list" id="missionList"></div>
                 <div class="mission-detail" id="missionDetail"></div>
             </div>
-            <div class="composer" id="composer">
-                <div class="slash" id="slash"><div class="on" data-slash="/ultra "><b>/ultra</b>Let Jarvis plan and make the changes</div></div>
+            <div class="composer">
                 <div class="ctx" id="ctx"></div>
-                <textarea id="prompt" placeholder="Ask about your code… start with /ultra to have Jarvis make changes"></textarea>
+                <textarea id="prompt" placeholder="Tell Jarvis what to build, fix or explain…"></textarea>
                 <div class="composer-foot">
-                    <span class="hint" id="composerHint">Ctrl+Enter to send · starts a new chat</span>
-                    <button class="btn" id="newMissionBtn" style="display:none">New chat</button>
+                    <span class="hint" id="composerHint">Ctrl+Enter to send · starts a new mission</span>
+                    <button class="btn" id="newMissionBtn" style="display:none">New mission</button>
                     <button class="btn arc" id="sendBtn">Send</button>
                 </div>
             </div>
@@ -1040,7 +1027,7 @@
             return;
         }
         if (!S.entries.length) {
-            el.innerHTML = '<div class="tree-empty">This project is empty. Add a file, drop files here from your PC, or ask Jarvis to build something with /ultra.</div>';
+            el.innerHTML = '<div class="tree-empty">This project is empty. Add a file, drop files here from your PC, or ask Jarvis to build something.</div>';
             return;
         }
         var touched = touchedPaths();
@@ -1427,9 +1414,8 @@
     function renderMissionList() {
         var el = $("missionList");
         if (!S.missions.length) {
-            el.innerHTML = '<div class="empty-deck">Ask Jarvis anything about this project\'s code below. He reads the open file ' +
-                "and your selection, and answers without changing anything.<br><br>" +
-                "Start a message with <b>/ultra</b> when you want him to do the work. He writes down what he understood and his plan, " +
+            el.innerHTML = '<div class="empty-deck">No missions on this project yet.<br><br>' +
+                "Describe what you want below, or ask a question about the code. Jarvis writes down what he understood and his plan, " +
                 "then in <b>Review</b> shows each change as a diff you accept or reject, or in <b>Autopilot</b> applies them " +
                 "and you can revert any of them.</div>";
             return;
@@ -1441,7 +1427,7 @@
                 '<span class="ring ' + esc(m.status) + '"></span><div style="min-width:0;flex:1">' +
                 '<div class="t">' + esc(m.title) + "</div>" +
                 '<div class="s">' + esc(st[0]) + (pending ? " · " + pending + " to review" : "") +
-                (isChat(m) ? "" : " · /ultra · " + esc(ENGINE_LABEL[m.engine] || m.engine)) + " · " + ago(m.created_at) + "</div></div></div>";
+                (isChat(m) ? "" : " · " + esc(ENGINE_LABEL[m.engine] || m.engine)) + " · " + ago(m.created_at) + "</div></div></div>";
         }).join("");
     }
 
@@ -1495,7 +1481,7 @@
         out.push('<div class="row-actions" style="margin:-4px 0 14px">' +
             (isChat(m)
                 ? '<span class="badge">Chat · changes nothing</span><span class="badge">' + esc((m.chat_model || m.model || "").replace(/^\w+:/, "")) + "</span>"
-                : '<span class="badge arc">/ultra · ' + esc(ENGINE_LABEL[m.engine] || m.engine) + "</span>" +
+                : '<span class="badge arc">' + esc(ENGINE_LABEL[m.engine] || m.engine) + "</span>" +
                   (m.engine === "jarvis" ? '<span class="badge">' + esc((m.model || "").replace(/^\w+:/, "")) + "</span>" : "") +
                   '<span class="badge">' + (m.mode === "autopilot" ? "Autopilot" : "Review") + "</span>") +
             '<span class="spacer" style="flex:1"></span>' +
@@ -1526,7 +1512,7 @@
 
         if (isBusy(m)) {
             var lastTurn = (m.conversation || []).filter(function (t) { return t.role === "owner"; }).pop() || {};
-            mid.push('<div class="step"><div class="step-label">' + (m.status === "planning" ? "Understanding and planning" : (lastTurn.ultra ? "Working" : "Thinking")) +
+            mid.push('<div class="step"><div class="step-label">' + (m.status === "planning" ? "Understanding and planning" : (isChat(m) && !lastTurn.ultra ? "Thinking" : "Working")) +
                 '</div><div class="bubble" style="color:var(--muted)"><span class="ring working" style="display:inline-block;vertical-align:-2px;margin-right:8px"></span>' +
                 esc((m.log && m.log.length ? m.log[m.log.length - 1].text : "Starting…")) + "</div></div>");
         }
@@ -1721,39 +1707,16 @@
         $("prompt").focus();
     }
 
-    var ULTRA = /^\s*\/ultra\b/i;
     function updateComposer() {
         var m = S.mission;
         var following = !!(S.selected && m && !isBusy(m));
-        var ultra = ULTRA.test($("prompt").value);
-        $("composer").classList.toggle("ultra", ultra);
         $("newMissionBtn").style.display = S.selected ? "" : "none";
-        var eng = ENGINE_LABEL[S.engine] || S.engine;
-        $("composerHint").textContent = S.selected && m && isBusy(m) ? "Jarvis is working on this…"
-            : ultra ? "/ultra · " + eng + (S.engine === "jarvis" ? " plans and makes the changes (" + (S.mode === "autopilot" ? "Autopilot" : "Review") + ")" : " does the work") + " · Ctrl+Enter"
-            : "Ctrl+Enter to send · " + (S.selected ? "continues this chat" : "starts a new chat") + " · /ultra to make changes";
+        $("composerHint").textContent = S.selected
+            ? (isBusy(m) ? "Jarvis is working on this mission…" : "Ctrl+Enter to send · continues this mission")
+            : "Ctrl+Enter to send · starts a new mission";
         $("sendBtn").disabled = !!(S.selected && m && isBusy(m));
-        $("sendBtn").textContent = ultra ? "Run /ultra" : "Send";
-        $("prompt").placeholder = following ? "Reply to Jarvis… start with /ultra to have him make changes"
-            : "Ask about your code… start with /ultra to have Jarvis make changes";
+        $("prompt").placeholder = following ? "Reply to Jarvis on this mission…" : "Tell Jarvis what to build, fix or explain…";
     }
-
-    // Typing "/" offers /ultra, like a slash command.
-    function renderSlash() {
-        var v = $("prompt").value;
-        var show = /^\/\w*$/.test(v) && "/ultra".indexOf(v.toLowerCase()) === 0 && v.toLowerCase() !== "/ultra ";
-        $("slash").classList.toggle("show", show);
-        return show;
-    }
-    function completeSlash() {
-        $("prompt").value = "/ultra ";
-        $("slash").classList.remove("show");
-        $("prompt").focus();
-        updateComposer();
-    }
-    $("slash").addEventListener("mousedown", function (ev) { ev.preventDefault(); completeSlash(); });
-    $("prompt").addEventListener("input", function () { renderSlash(); updateComposer(); });
-    $("prompt").addEventListener("blur", function () { $("slash").classList.remove("show"); });
 
     $("newMissionBtn").addEventListener("click", function () { selectMission(null); $("prompt").focus(); });
 
@@ -1775,7 +1738,6 @@
         }
         req.then(function (m) {
             $("prompt").value = "";
-            $("slash").classList.remove("show");
             S.includeFile = true; S.includeSelection = true;
             return loadMissions().then(function () { selectMission(m.id); });
         }).catch(function (e) { toast(e.message, true); })
@@ -1783,10 +1745,6 @@
     }
     $("sendBtn").addEventListener("click", send);
     $("prompt").addEventListener("keydown", function (ev) {
-        if ($("slash").classList.contains("show") && (ev.key === "Tab" || (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey))) {
-            ev.preventDefault(); completeSlash(); return;
-        }
-        if (ev.key === "Escape") $("slash").classList.remove("show");
         if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") { ev.preventDefault(); send(); }
     });
 

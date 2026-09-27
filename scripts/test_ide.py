@@ -11,8 +11,8 @@ or the rest of Jarvis. What is worth proving:
     puts it back;
   * Autopilot applies, and a stale proposal is refused rather than clobbering;
   * a question gets an answer and no changes;
-  * without /ultra the prompt box is a plain chat that changes nothing; /ultra
-    starts (or turns a chat into) a mission;
+  * every message is a plan-and-edit mission; "/ultra ..." is accepted as an
+    alias and stripped;
   * a folder from anywhere on the PC opens in place, only once it was opened,
     and files can be copied in without silently replacing anything;
   * the terminal runs in the project folder, streams output, and refuses the
@@ -83,9 +83,9 @@ CALLS = []
 REPLIES = {}
 
 
-def fake_model(model_id, system, prompt, json_mode=True):
-    CALLS.append({"model": model_id, "system": system, "prompt": prompt, "json_mode": json_mode})
-    key = "plan" if system is ide.PLAN_SYSTEM else "chat" if system is ide.CHAT_SYSTEM else "edit"
+def fake_model(model_id, system, prompt):
+    CALLS.append({"model": model_id, "system": system, "prompt": prompt})
+    key = "plan" if system is ide.PLAN_SYSTEM else "edit"
     return REPLIES[key]
 
 
@@ -155,7 +155,7 @@ try:
         ],
         "commands": [{"command": "python -c \"print('hi')\"", "why": "smoke test"}],
         "summary": "Fixed add and added a README."}) + "\n```"
-    m = ide.start_mission(PROJECT, "/ultra add() is broken, fix it", engine="jarvis", model="gemini:gemini-2.5-flash",
+    m = ide.start_mission(PROJECT, "add() is broken, fix it", engine="jarvis", model="gemini:gemini-2.5-flash",
                           mode="review", context={"open_file": "src/app.py", "selection": "return a - b"},
                           background=False)
     m = ide.get_mission(m["id"])
@@ -193,7 +193,7 @@ try:
     print("follow-up, stale proposal, autopilot")
     REPLIES["edit"] = json.dumps({"edits": [{"path": "src/app.py", "action": "write", "content": "print('v2')\n"}],
                                   "summary": "Rewrote it."})
-    ide.follow_up(m["id"], "/ultra now rewrite it", background=False)
+    ide.follow_up(m["id"], "now rewrite it", background=False)
     m = ide.get_mission(m["id"])
     check("follow-up plans again and waits", m["status"] == "awaiting_plan", m["status"])
     check("follow-up prompt has the history", "add() is broken" in CALLS[-1]["prompt"] and "now rewrite it" in CALLS[-1]["prompt"])
@@ -208,7 +208,7 @@ try:
     REPLIES["edit"] = json.dumps({"edits": [{"path": "notes/todo.md", "action": "write", "content": "- ship\n"},
                                             {"path": "src/app.py", "action": "replace", "find": "not there", "replace": "x"}],
                                   "summary": "Added notes."})
-    a = ide.start_mission(PROJECT, "/ultra add a todo", model="gemini:gemini-2.5-flash", mode="autopilot", background=False)
+    a = ide.start_mission(PROJECT, "add a todo", model="gemini:gemini-2.5-flash", mode="autopilot", background=False)
     a = ide.get_mission(a["id"])
     check("autopilot applies without asking", a["status"] == "done" and read("notes/todo.md") == "- ship\n", a["status"])
     check("replace that doesn't match is reported, not applied",
@@ -220,7 +220,7 @@ try:
     REPLIES["edit"] = json.dumps({"edits": [
         {"path": "src/app.py", "action": "replace", "find": "someone else", "replace": "Jarvis"},
         {"path": "src/app.py", "action": "replace", "find": "not there", "replace": "x"}], "summary": "Half fits."})
-    h = ide.start_mission(PROJECT, "/ultra half an edit", model="gemini:gemini-2.5-flash", mode="autopilot", background=False)
+    h = ide.start_mission(PROJECT, "half an edit", model="gemini:gemini-2.5-flash", mode="autopilot", background=False)
     h = ide.get_mission(h["id"])
     check("autopilot holds a half-fitting edit for review",
           h["status"] == "review" and h["changes"][0]["status"] == "pending" and "someone else" in read("src/app.py"),
@@ -228,12 +228,12 @@ try:
     ide.decide_change(h["id"], "all", "reject")
 
     REPLIES["plan"] = json.dumps({"kind": "answer", "understanding": "A question.", "answer": "It adds two numbers."})
-    q = ide.start_mission(PROJECT, "/ultra what does add do?", model="gemini:gemini-2.5-flash", background=False)
+    q = ide.start_mission(PROJECT, "what does add do?", model="gemini:gemini-2.5-flash", background=False)
     q = ide.get_mission(q["id"])
     check("question answered with no changes", q["status"] == "done" and q["result"] == "It adds two numbers." and not q["changes"])
 
     REPLIES["plan"] = "this is not json"
-    bad = ide.start_mission(PROJECT, "/ultra anything", model="gemini:gemini-2.5-flash", background=True)
+    bad = ide.start_mission(PROJECT, "anything", model="gemini:gemini-2.5-flash", background=True)
     for _ in range(50):
         if ide.get_mission(bad["id"])["status"] not in ("planning", "working"):
             break
@@ -241,39 +241,29 @@ try:
     bad = ide.get_mission(bad["id"])
     check("bad model output fails the mission, doesn't hang", bad["status"] == "failed" and "JSON" in bad["error"], bad)
 
-    print("chat by default, /ultra for missions")
-    REPLIES["chat"] = "It adds `a` and `b`.\n```python\nadd(1, 2)\n```"
-    before_calls = len(CALLS)
-    ch = ide.start_mission(PROJECT, "what does add do?", engine="antigravity", model="gemini:gemini-2.5-flash",
-                           context={"open_file": "src/app.py"}, background=False)
-    ch = ide.get_mission(ch["id"])
-    check("a message without /ultra is a chat", ch["kind"] == "chat" and ch["status"] == "done" and ch["engine"] == "jarvis", ch)
-    check("chat answers with Jarvis's model even with a CLI engine picked",
-          CALLS[-1]["system"] is ide.CHAT_SYSTEM and CALLS[-1]["model"] == "gemini:gemini-2.5-flash" and len(CALLS) == before_calls + 1)
-    check("chat sees the open file", "=== src/app.py ===" in CALLS[-1]["prompt"])
-    check("chat asks for plain text, missions for JSON", CALLS[-1]["json_mode"] is False
-          and all(c["json_mode"] for c in CALLS if c["system"] is not ide.CHAT_SYSTEM))
-    check("chat changes nothing and suggests nothing", not ch["changes"] and not ch["commands"] and ch["result"].startswith("It adds"))
-    ide.follow_up(ch["id"], "and what about negatives?", background=False)
-    ch = ide.get_mission(ch["id"])
-    check("chat follow-up is still a chat", ch["kind"] == "chat" and CALLS[-1]["system"] is ide.CHAT_SYSTEM
-          and "what does add do?" in CALLS[-1]["prompt"] and len(ch["conversation"]) == 4)
+    print("every message plans; /ultra is an alias")
     REPLIES["plan"] = json.dumps({"kind": "change", "understanding": "Handle negatives.", "steps": ["Edit add"],
                                   "read": ["src/app.py"], "change": ["src/app.py"], "questions": []})
-    ide.follow_up(ch["id"], "/ultra make it handle negatives", engine="jarvis", model="gemini:gemini-2.5-pro",
-                  mode="review", background=False)
-    ch = ide.get_mission(ch["id"])
-    check("/ultra on a chat turns it into a mission that plans",
-          ch["kind"] == "ultra" and ch["status"] == "awaiting_plan" and CALLS[-1]["system"] is ide.PLAN_SYSTEM
-          and ch["model"] == "gemini:gemini-2.5-pro", ch["status"])
-    check("the /ultra prefix is stripped and marked", ch["conversation"][-1] == {"role": "owner", "text": "make it handle negatives", "ultra": True})
-    check("the plan knows the chat before it", "and what about negatives?" in CALLS[-1]["prompt"])
-    ide.follow_up(ch["id"], "why that approach?", background=False)
-    ch = ide.get_mission(ch["id"])
-    check("chatting on a mission keeps its plan waiting", ch["status"] == "awaiting_plan" and CALLS[-1]["system"] is ide.CHAT_SYSTEM, ch["status"])
-    ide.stop_mission(ch["id"])
+    u = ide.start_mission(PROJECT, "make add handle negatives", model="gemini:gemini-2.5-flash", background=False)
+    u = ide.get_mission(u["id"])
+    check("a plain message plans like /ultra did", u["status"] == "awaiting_plan" and CALLS[-1]["system"] is ide.PLAN_SYSTEM, u["status"])
+    u2 = ide.start_mission(PROJECT, "/ultra make add handle negatives", model="gemini:gemini-2.5-flash", background=False)
+    u2 = ide.get_mission(u2["id"])
+    check("/ultra still works and is stripped", u2["status"] == "awaiting_plan"
+          and u2["conversation"][0] == {"role": "owner", "text": "make add handle negatives"}
+          and "/ultra" not in CALLS[-1]["prompt"])
+    ide.stop_mission(u["id"]); ide.stop_mission(u2["id"])
+    # A conversation saved by the chat-only version becomes a normal mission on its next message.
+    old = dict(u2, id="oldchat00001", kind="chat", engine="jarvis", status="done", plan=None,
+               conversation=[{"role": "owner", "text": "what is add?"}, {"role": "jarvis", "text": "It adds."}])
+    ide._save(old)
+    ide.follow_up("oldchat00001", "now make it handle negatives", engine="jarvis", model="gemini:gemini-2.5-pro", background=False)
+    old = ide.get_mission("oldchat00001")
+    check("an old chat continues as a mission", old["kind"] == "ultra" and old["status"] == "awaiting_plan"
+          and old["model"] == "gemini:gemini-2.5-pro" and "what is add?" in CALLS[-1]["prompt"], old["status"])
+    ide.stop_mission("oldchat00001")
     code, r = post("/ide/missions", {"project": PROJECT, "prompt": "/ultra   "})
-    check("/ultra with nothing after it refused", code == 400 and "/ultra" in r["error"], r)
+    check("/ultra with nothing after it refused", code == 400, r)
     check("/ULTRA: works too", ide.split_ultra("  /ULTRA: fix it") == (True, "fix it") and ide.split_ultra("/ultrafast") == (False, "/ultrafast"))
 
     code, r = post("/ide/missions", {"project": PROJECT, "prompt": "   "})
@@ -303,7 +293,7 @@ try:
 
     ide._code_agent = lambda: FakeAgent
     check("claude engine available when the module is", {e["id"]: e for e in ide.engines()["engines"]}["claude"]["available"])
-    c = ide.start_mission(PROJECT, "/ultra build it", engine="claude", background=False)
+    c = ide.start_mission(PROJECT, "build it", engine="claude", background=False)
     c = ide.get_mission(c["id"])
     check("CLI engine changes show as applied diffs",
           c["status"] == "done" and [x["path"] for x in c["changes"]] == ["built.py"] and c["changes"][0]["status"] == "applied",
@@ -362,9 +352,9 @@ try:
     check("a relative path is refused", code == 400, r)
     code, r = post("/ide/open", {"path": os.path.join(TMP, "nope")})
     check("a missing path is refused", code == 400 and "does not exist" in r["error"], r)
-    REPLIES["chat"] = "Sure."
+    REPLIES["plan"] = json.dumps({"kind": "answer", "understanding": "A question.", "answer": "X is 2."})
     c2 = ide.start_mission(ext, "what is X?", background=False)
-    check("chat works on an opened folder", ide.get_mission(c2["id"])["status"] == "done" and "lib/util.py" in CALLS[-1]["prompt"])
+    check("missions work on an opened folder", ide.get_mission(c2["id"])["result"] == "X is 2." and "lib/util.py" in CALLS[-1]["prompt"])
 
     code, r = get("/ide/browse?path=" + urllib.parse.quote(os.path.dirname(outside)))
     check("the page's folder browser lists folders", code == 200 and r["dirs"] == ["My App"] and r["parent"], r)

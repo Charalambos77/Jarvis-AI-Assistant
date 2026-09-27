@@ -30,9 +30,9 @@ Handle It", or a folder the owner opened from elsewhere on the PC. Paths are
 resolved and checked before every read and write, so neither the owner's typo
 nor a model's invention can reach outside it.
 
-By default the IDE behaves like a normal IDE: the prompt box is a chat about
-the open code that never edits anything. Jarvis only works as an agent (plans,
-proposes edits and commands) on a message that starts with /ultra.
+Every message in the prompt box is a mission: Jarvis plans, then proposes
+edits and commands (a plain question still just gets an answer). Starting a
+message with /ultra is accepted and means the same thing.
 """
 import difflib
 import hashlib
@@ -553,9 +553,8 @@ def remember_choice(engine: str | None, model: str | None) -> None:
         _save_setting("ide_model", model)
 
 
-def call_model(model_id: str, system: str, prompt: str, json_mode: bool = True) -> str:
-    """One completion from Jarvis's own model: JSON mode for missions, plain
-    text for chat. Tests replace this."""
+def call_model(model_id: str, system: str, prompt: str) -> str:
+    """One JSON-mode completion from Jarvis's own model. Tests replace this."""
     provider, _, name = (model_id or "").partition(":")
     if provider == "gemini":
         from google import genai
@@ -564,16 +563,16 @@ def call_model(model_id: str, system: str, prompt: str, json_mode: bool = True) 
         resp = client.models.generate_content(
             model=name or "gemini-2.5-flash", contents=prompt,
             config=types.GenerateContentConfig(system_instruction=system,
-                                               response_mime_type="application/json" if json_mode else None,
+                                               response_mime_type="application/json",
                                                temperature=0.2))
         return resp.text or ""
     if provider == "ollama":
         from openai import OpenAI
         url, default = _ollama_config()
         client = OpenAI(base_url=f"{url}/v1", api_key="ollama")
-        extra = {"response_format": {"type": "json_object"}} if json_mode else {}
         resp = client.chat.completions.create(
-            model=name or default, temperature=0.2, **extra,
+            model=name or default, temperature=0.2,
+            response_format={"type": "json_object"},
             messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}])
         return resp.choices[0].message.content or ""
     raise IDEError("No model picked for Jarvis. Choose one in the engine menu.")
@@ -712,19 +711,13 @@ Rules:
 - Stay inside the project folder. Do not invent files you were not shown unless you are creating them."""
 
 
-CHAT_SYSTEM = """You are Jarvis, the assistant inside the owner's IDE, answering questions about one project folder.
-Answer the owner's latest message directly and concisely, using the files, the open file and the selection you
-are shown. Markdown is fine; put code in fenced blocks.
-
-You can't change anything in this mode: never claim to have edited a file or run a command. When the owner wants
-you to make the change yourself, show the code they could use, and tell them they can start their message with
-/ultra to have you plan it and make the edits."""
-
 ULTRA = re.compile(r"^\s*/ultra\b[:\s]*", re.IGNORECASE)
 
 
 def split_ultra(text: str) -> tuple[bool, str]:
-    """(True, the rest) when a message starts with /ultra."""
+    """(True, the rest) when a message starts with /ultra. Every message is a
+    plan-and-edit mission now, so /ultra is only an alias kept so a typed
+    "/ultra ..." still works; it is stripped, not sent to the model."""
     text = (text or "").strip()
     match = ULTRA.match(text)
     return (True, text[match.end():].strip()) if match else (False, text)
@@ -889,43 +882,6 @@ def _apply(m: dict, change: dict) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(change["after"])
-
-
-def _chat_prompt(m: dict) -> str:
-    ctx = m.get("context") or {}
-    parts = [f"PROJECT: {m['project']}", "FILES:\n" + _listing(m["project"])]
-    if ctx.get("open_file"):
-        parts.append(f"THE OWNER HAS THIS FILE OPEN: {ctx['open_file']}")
-        opened = _file_context(m["project"], [ctx["open_file"]])
-        if opened:
-            parts.append(opened)
-    if ctx.get("selection"):
-        parts.append("THE OWNER SELECTED:\n" + ctx["selection"][:6000])
-    parts.append("CONVERSATION SO FAR:\n" + _history(m))
-    return "\n\n".join(parts)
-
-
-def _chat_round(m: dict) -> None:
-    """A plain answer: no plan, no edits, no commands. A plan still waiting
-    on approval, or changes still waiting on review, keep waiting."""
-    before = m["status"]
-    m["status"] = "working"
-    _log(m, "phase", "Thinking.")
-    _save(m)
-    answer = (call_model(m.get("chat_model") or (m["model"] if m["engine"] == "jarvis" else "") or engines()["model"],
-                         CHAT_SYSTEM, _chat_prompt(m), json_mode=False) or "").strip()
-    if _stopped(m):
-        return
-    m["conversation"].append({"role": "jarvis", "text": answer or "(no answer)"})
-    m["result"] = answer
-    if before == "awaiting_plan":
-        m["status"] = "awaiting_plan"
-    elif any(c["status"] == "pending" for c in m.get("changes", [])):
-        m["status"] = "review"
-    else:
-        m["status"] = "done"
-    _log(m, "answer", "Answered.")
-    _save(m)
 
 
 def _plan_round(m: dict) -> None:
@@ -1105,7 +1061,8 @@ def _title(prompt: str) -> str:
 
 
 def _go_ultra(m: dict, engine: str, model: str, mode: str) -> None:
-    """Turn a chat into an agent mission, with the engine and mode picked now."""
+    """Set the mission's engine and mode (also turns a conversation saved by
+    the earlier chat-only version into a normal mission)."""
     if engine not in ("jarvis", "antigravity", "claude"):
         raise IDEError("Unknown engine.")
     if mode not in ("review", "autopilot"):
@@ -1120,30 +1077,21 @@ def _go_ultra(m: dict, engine: str, model: str, mode: str) -> None:
 
 def start_mission(project: str, prompt: str, engine: str = "jarvis", model: str = "",
                   mode: str = "review", context: dict | None = None, background: bool = True) -> dict:
-    """Without /ultra this is a chat: Jarvis answers with his own model and
-    changes nothing. With /ultra it is a mission on the chosen engine."""
     project_root(project)
-    ultra, prompt = split_ultra(prompt)
+    _, prompt = split_ultra(prompt)
     if not prompt:
-        raise IDEError("Say what you want Jarvis to do after /ultra." if ultra else "Ask Jarvis something first.")
-    # The model picker is always Jarvis's own model, whichever engine is picked.
-    chat_model = model or engines()["model"]
+        raise IDEError("Tell Jarvis what you want done.")
     m = {
-        "id": uuid.uuid4().hex[:12], "project": project, "kind": "chat", "engine": "jarvis",
-        "model": chat_model, "mode": "review", "title": _title(prompt), "status": "working",
+        "id": uuid.uuid4().hex[:12], "project": project, "kind": "ultra", "engine": "jarvis",
+        "model": model, "mode": "review", "title": _title(prompt), "status": "planning",
         "created_at": _now(), "updated_at": _now(),
-        "conversation": [{"role": "owner", "text": prompt, **({"ultra": True} if ultra else {})}],
+        "conversation": [{"role": "owner", "text": prompt}],
         "context": {k: v for k, v in (context or {}).items() if k in ("open_file", "selection") and v},
         "plan": None, "changes": [], "commands": [], "log": [], "result": "", "error": "",
     }
-    if ultra:
-        _go_ultra(m, engine, model, mode)
-        m["status"] = "planning"
-    else:
-        m["chat_model"] = chat_model
-        remember_choice(None, chat_model)
+    _go_ultra(m, engine, model, mode)
     _save(m)
-    step = _chat_round if not ultra else (_plan_round if m["engine"] == "jarvis" else _cli_round)
+    step = _plan_round if m["engine"] == "jarvis" else _cli_round
     if background:
         _run(m, step)
     else:
@@ -1168,28 +1116,21 @@ def approve_plan(mission_id: str, feedback: str = "", background: bool = True) -
 
 def follow_up(mission_id: str, message: str, context: dict | None = None,
               background: bool = True, engine: str = "", model: str = "", mode: str = "") -> dict:
-    """Keep talking to Jarvis on the same conversation. Each message is judged
-    on its own: /ultra runs another plan-and-edit round that knows everything
-    said so far; anything else gets a plain answer. The first /ultra on a chat
-    takes the engine and mode picked on the page at that moment."""
+    """Keep talking to Jarvis on the same mission: another plan-and-edit round
+    that knows everything said so far (a question still just gets an answer)."""
     m = get_mission(mission_id)
     if m["status"] in ("planning", "working"):
-        raise IDEError("Jarvis is still working on this. Stop it first or wait.")
-    ultra, message = split_ultra(message)
+        raise IDEError("Jarvis is still working on this mission. Stop it first or wait.")
+    _, message = split_ultra(message)
     if not message:
-        raise IDEError("Say what you want Jarvis to do after /ultra." if ultra else "Say what you want next.")
-    if ultra and m.get("kind", "ultra") == "chat":
+        raise IDEError("Say what you want next.")
+    if m.get("kind") == "chat":
         _go_ultra(m, engine or "jarvis", model, mode or "review")
-    m["conversation"].append({"role": "owner", "text": message, **({"ultra": True} if ultra else {})})
+    m["conversation"].append({"role": "owner", "text": message})
     if context is not None:
         m["context"] = {k: v for k, v in context.items() if k in ("open_file", "selection") and v}
     m["error"] = ""
-    if not ultra:
-        if model:
-            m["chat_model"] = model
-        step = _chat_round
-    else:
-        step = _plan_round if m["engine"] == "jarvis" else _cli_round
+    step = _plan_round if m["engine"] == "jarvis" else _cli_round
     if background:
         _run(m, step)
     else:
