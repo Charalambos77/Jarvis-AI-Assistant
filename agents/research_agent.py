@@ -137,7 +137,7 @@ def parse_agent_json(text: str) -> dict:
     start, end = cleaned.find("{"), cleaned.rfind("}")
     if start != -1 and end > start:
         attempts.append(_repair_escapes(cleaned[start:end + 1]))
-    last_error = None
+    last_error: Exception | None = None
     for attempt in attempts:
         try:
             parsed = json.loads(attempt)
@@ -147,7 +147,9 @@ def parse_agent_json(text: str) -> dict:
         if isinstance(parsed, dict):
             return parsed
         last_error = ValueError("the agent's answer was not a JSON object")
-    raise last_error
+    if last_error is not None:
+        raise last_error
+    raise ValueError("the agent's answer was not valid JSON")
 
 
 async def run_research_agent(
