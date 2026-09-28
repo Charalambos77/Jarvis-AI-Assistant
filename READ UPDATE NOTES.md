@@ -41,7 +41,7 @@ To go back to your old version at any time: `git checkout main`.
 | 10 | The coding agent can run on the Claude CLI | `.env` settings |
 | 11 | Jarvis finds local AI (Ollama, LM Studio, ...) on his own | IDE model menu, Settings (gear) "Local model" |
 
-The branch also carries earlier work that was already waiting on other branches and is not in `main` yet: the pipeline details and clarification window, the pipeline review fixes, the website inspector, the Antigravity CLI connection, your own "Logic Changes" and "Finished sections" commits, and your 6 September install script update from `main`.
+The branch also carries earlier work that was already waiting on other branches and is not in `main` yet: the pipeline details and clarification window, the pipeline review fixes, the website inspector, the Antigravity CLI connection, your own "Logic Changes" and "Finished sections" commits, and your 6 September install script update from `main`. `PIPELINES.md` (what each pipeline stage and agent does) and the pipeline review notes in `PROBLEMS.md` are included too.
 
 ## 3. Control room and automatic tool discovery
 

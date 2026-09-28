@@ -112,3 +112,24 @@ This replaces paid tools such as BrowserStack/LambdaTest for responsiveness chec
 **Done when**
 - An agent asked to analyse a website returns real fonts, colours and screenshot-based observations for that site.
 - Nothing shows as connected unless a real handler exists behind it.
+
+---
+
+## 4. Found while finishing the review (2026-09-25)
+
+**Status:** Done. Everything else raised while watching pipelines 6 and 7 (the conflict
+rerun dropping agents and discarding findings, advisors depending on the lead, invented
+blueprint details, uncited sources, the wrong cycle on a conflict retry) was already
+fixed in the commits of 2026-09-15/16. How pipelines work is written up in `PIPELINES.md`.
+
+- **The website inspector let redirects reach the local network.** A public page could
+  load an image that 302-redirected to `127.0.0.1`, and the browser followed it without
+  the guard seeing the new address. Requests are now fetched without following
+  redirects, so every hop goes back through the guard (`_guard_route` in
+  `agents/website_inspector.py`). Caught by `scripts/test_website_inspection.py`.
+- **Research and execution agents didn't load on Python 3.10 or 3.11**, which
+  `install.bat` and the README say are supported. They had a backslash inside an
+  f-string expression, which only Python 3.12+ accepts.
+- **Off Windows**, the inspector only looked for Playwright's Windows browser builds, and
+  the command gate read `C:\...\npm.exe` as the whole program name. Both now work on
+  Linux and macOS too.

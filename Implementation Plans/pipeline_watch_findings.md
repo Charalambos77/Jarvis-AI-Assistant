@@ -1,6 +1,6 @@
 # Pipeline Watch Findings — To Fix Later
 
-### [NOT FIXED — precise root cause found, earlier fix was incomplete] Conflict-triggered cycle retries grab the wrong cycle entirely
+### [FIXED] Conflict-triggered cycle retries grab the wrong cycle entirely
 - **What happened:** Plan 13's Cycle 3 retry-1 (triggered by a synthesis
   conflict) spawned agents named `breakthrough_definition_strategist_cycle1_lead`
   / `arxiv_search_specialist_cycle1_adv_1` — the mislabeling symptom I
@@ -30,8 +30,11 @@
   line 749 — `matching_cycle = next((c for c in updated_cycles if
   c.get("cycle_id") == cycle_id), None); cycle.update(matching_cycle or
   updated_cycles[0])`.
-- **Status:** Not fixed yet — found live, mid-session, then user redirected
-  focus to a new pipeline (14) before applying it.
+- **Status:** Fixed. Both retry branches now go through `pick_cycle()` in
+  `multi_agent_coordinator.py`, which matches on `cycle_id` and only accepts
+  an unmatched cycle when the Brain returned exactly one. A conflict retry no
+  longer replaces the cycle at all: `rebrief_for_conflict()` keeps the team and
+  rewrites only the briefs of the agents the conflict names.
 
 
 ### [FIXED] Gate approval could resolve the wrong pipeline's gate when multiple plans run concurrently
